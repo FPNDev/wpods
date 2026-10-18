@@ -1,0 +1,7 @@
+bin/
+obj/
+.build/
+.vs/
+*.user
+x64/
+*.pdb

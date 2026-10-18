@@ -1,0 +1,28 @@
+Native libraries shipped with WPods (built by native\build-ffmpeg.ps1 and native\build-rnnoise.ps1)
+
+FFmpeg 7.1.5 (LGPL v2.1 or later, see COPYING.LGPLv2.1)
+  Source:  https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz
+  SHA-256: DE668509CAF9E35E3CD162473441FDB29538C6D96ED080292B3CF9E6FC5D558F
+           (signature ffmpeg-7.1.5.tar.xz.asc verified once against FFmpeg release key FCF986EA15E6E293A5644F10B4322F04D67658D8)
+  Output:  avcodec-61.dll, avutil-59.dll, swresample-5.dll (unmodified source)
+  Toolchain: MSVC 14.51 x64, NASM, MSYS2 make
+  Configure flags:
+    --toolchain=msvc --arch=x86_64 --target-os=win64
+    --enable-shared --disable-static
+    --disable-autodetect --enable-w32threads
+    --disable-programs --disable-doc --disable-debug
+    --disable-avformat --disable-avfilter --disable-avdevice --disable-swscale --disable-postproc
+    --disable-network --disable-pixelutils --disable-iamf
+    --disable-everything --enable-decoder=aac
+    --enable-small --optflags=-O2
+    --extra-cflags=-MT --extra-ldflags=-NODEFAULTLIB:libucrt.lib --extra-libs=ucrt.lib
+  No --enable-gpl, no --enable-nonfree. License reported by configure: LGPL version 2.1 or later.
+  Corresponding source: the tarball above plus build-ffmpeg.ps1 / build-ffmpeg.sh.
+
+RNNoise 0.2 (BSD-3-Clause, see COPYING.rnnoise)
+  Source:  https://github.com/xiph/rnnoise/releases/download/v0.2/rnnoise-0.2.tar.gz
+  SHA-256: 90FCE4B00B9FF24C08DBFE31B82FFD43BAE383D85C5535676D28B0A2B11C0D37
+  Model:   default model bundled in the release tarball (src/rnnoise_data.c), covered by the same hash
+  Output:  rnnoise.dll (unmodified source)
+  Toolchain: MSVC 14.51 x64, /O2 /MT (hybrid CRT: /NODEFAULTLIB:libucrt.lib ucrt.lib)
+  SIMD: SSE2 baseline + SSE4.1 / AVX2 kernels chosen at runtime by RNNoise's x86 RTCD (RNN_ENABLE_X86_RTCD)
