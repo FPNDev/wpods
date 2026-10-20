@@ -22,7 +22,8 @@ public sealed record NearbyOffer(ulong Address, string Name, AirPodsModel Model,
 /// of a paired AirPods that has proximity keys and whose link to Windows is down. An offer appears when that pair's lid
 /// opens (first advert with the lid open after closed or unseen) with at least one bud in the case; closing the lid
 /// removes it unless it is connecting. <see cref="Dismiss"/> removes it, and only the next opening shows it again.
-/// 45 s without adverts = gone (offer removed, lid state forgotten).
+/// Single-battery models (AirPods Max) have no lid or case signal: their offer appears when the pair starts advertising
+/// after being gone, and a dismissal lasts until it is gone again. 45 s without adverts = gone (offer removed, lid state forgotten).
 /// <see cref="OffersChanged"/> fires on thread-pool threads (BLE, CM notification, timer or connect continuation),
 /// only on a real change; handlers must not block and should read <see cref="Offers"/>.
 /// </summary>
@@ -288,7 +289,8 @@ public sealed class NearbyService : IDisposable
     private bool Update(Pair pair, ReadOnlySpan<byte> data)
     {
         pair.LastSeen = Environment.TickCount64;
-        if (!pair.Present)
+        bool arrived = !pair.Present;
+        if (arrived)
         {
             pair.Present = true;
             // Every other present pair expires earlier, so an armed timer is already due first.
@@ -300,34 +302,42 @@ public sealed class NearbyService : IDisposable
         }
         bool wasOpen = pair.LidOpen;
         pair.LidOpen = Proximity.IsLidOpen(data);
-        if (!pair.LidOpen && pair.Offer is { State: not OfferState.Connecting })
+        if (pair.Offer is { } offer)
         {
-            pair.Offer = null;
+            bool single = IsSingleBattery(offer.Model);
+            if (!single && !pair.LidOpen && offer.State != OfferState.Connecting)
+            {
+                pair.Offer = null;
+                return true;
+            }
+            if (pair.LinkUp)
+            {
+                return false;
+            }
+            PodBatteries batteries = Proximity.ReadBatteries(data, pair.EncCipher, single, offer.Batteries);
+            if (batteries == offer.Batteries)
+            {
+                return false;
+            }
+            pair.Offer = offer with { Batteries = batteries };
             return true;
         }
         if (pair.LinkUp)
         {
             return false;
         }
-        if (pair.Offer is not { } offer)
-        {
-            if (!pair.LidOpen || wasOpen || !Proximity.IsBudInCase(data))
-            {
-                return false;
-            }
-            AirPodsModel model = Models.FromProximityId(Proximity.ModelId(data)) ?? Models.FromModelNumber(pair.ModelNumber) ?? Models.Unknown;
-            PodBatteries initial = Proximity.ReadBatteries(data, pair.EncCipher, (model.Capabilities & ModelCapabilities.SingleBattery) != 0, default);
-            pair.Offer = new NearbyOffer(pair.Address, pair.Name, model, initial, OfferState.Offer);
-            return true;
-        }
-        PodBatteries batteries = Proximity.ReadBatteries(data, pair.EncCipher, (offer.Model.Capabilities & ModelCapabilities.SingleBattery) != 0, offer.Batteries);
-        if (batteries == offer.Batteries)
+        AirPodsModel model = Models.FromProximityId(Proximity.ModelId(data)) ?? Models.FromModelNumber(pair.ModelNumber) ?? Models.Unknown;
+        bool singleBattery = IsSingleBattery(model);
+        // AirPods Max have no lid or case signal: offered on arrival (after 45 s unseen). Others: lid opening with a bud in the case.
+        if (singleBattery ? !arrived : (!pair.LidOpen || wasOpen || !Proximity.IsBudInCase(data)))
         {
             return false;
         }
-        pair.Offer = offer with { Batteries = batteries };
+        pair.Offer = new NearbyOffer(pair.Address, pair.Name, model, Proximity.ReadBatteries(data, pair.EncCipher, singleBattery, default), OfferState.Offer);
         return true;
     }
+
+    private static bool IsSingleBattery(AirPodsModel model) => (model.Capabilities & ModelCapabilities.SingleBattery) != 0;
 
     private void OnExpiry()
     {
