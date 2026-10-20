@@ -11,7 +11,10 @@ public enum MicStatus
     Starting,
     /// <summary>Decoded audio is flowing.</summary>
     Live,
-    /// <summary>An app captures but no audio arrived for 3 s (including no AirPods attached).</summary>
+    /// <summary>
+    /// An app captures but no audio arrived for 3 s (including no AirPods attached), or the virtual mic device
+    /// cannot be opened or read.
+    /// </summary>
     Problem,
 }
 
@@ -146,15 +149,16 @@ public sealed class MicPipeline
         }
     }
 
-    private void OnCaptureChanged(bool capturing)
+    // Called by VirtualMic under its lock; this lock is never held while calling into VirtualMic.
+    private void OnCaptureChanged(CaptureState state)
     {
         lock (_lock)
         {
-            _capturing = capturing;
-            if (!capturing)
+            _capturing = state == CaptureState.Capturing;
+            if (!_capturing)
             {
                 _timer.Change(Timeout.Infinite, Timeout.Infinite);
-                SetStatusLocked(MicStatus.NotActive);
+                SetStatusLocked(state == CaptureState.Unavailable ? MicStatus.Problem : MicStatus.NotActive);
                 return;
             }
             _flush = true;

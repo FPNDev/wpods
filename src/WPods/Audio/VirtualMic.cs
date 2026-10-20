@@ -4,10 +4,18 @@ using Timer = System.Threading.Timer;
 
 namespace WPods.Audio;
 
+internal enum CaptureState
+{
+    Idle,
+    Capturing,
+    /// <summary>The device cannot be opened or its capture state cannot be read.</summary>
+    Unavailable,
+}
+
 /// <summary>
 /// \\.\NTA2DPVM: PCM writes plus one pending capture-state IOCTL. Any failure closes the device and reopens it
-/// with a capped backoff, independent of the AAP session. The capture callback runs on a thread-pool thread,
-/// one call at a time.
+/// with a capped backoff, independent of the AAP session. The state callback runs only on change, under the
+/// internal lock (callers must not call back into this class from it).
 /// </summary>
 internal sealed unsafe partial class VirtualMic
 {
@@ -21,18 +29,18 @@ internal sealed unsafe partial class VirtualMic
     private const int ErrorIoPending = 997;
     private const int MaxBackoffShift = 6; // 1 s -> 64 s
 
-    private readonly Action<bool> _captureChanged;
+    private readonly Action<CaptureState> _stateChanged;
     private readonly Lock _lock = new();
     private readonly Timer _reopen;
     private readonly ManualResetEvent _writeDone = new(false);
     private readonly NativeOverlapped* _writeOverlapped;
     private Device? _device;
-    private uint _state;
+    private CaptureState? _state;
     private int _failures;
 
-    public VirtualMic(Action<bool> captureChanged)
+    public VirtualMic(Action<CaptureState> stateChanged)
     {
-        _captureChanged = captureChanged;
+        _stateChanged = stateChanged;
         _reopen = new Timer(static s => ((VirtualMic)s!).Open(), this, Timeout.Infinite, Timeout.Infinite);
         _writeOverlapped = (NativeOverlapped*)NativeMemory.AllocZeroed((nuint)sizeof(NativeOverlapped));
         _writeOverlapped->EventHandle = _writeDone.SafeWaitHandle.DangerousGetHandle();
@@ -49,6 +57,7 @@ internal sealed unsafe partial class VirtualMic
             lock (_lock)
             {
                 ScheduleReopenLocked();
+                SetStateLocked(CaptureState.Unavailable);
             }
             return;
         }
@@ -82,6 +91,7 @@ internal sealed unsafe partial class VirtualMic
             _device = null;
             CancelIoEx(device.Handle, device.Overlapped);
             ScheduleReopenLocked();
+            SetStateLocked(CaptureState.Unavailable);
         }
     }
 
@@ -92,14 +102,21 @@ internal sealed unsafe partial class VirtualMic
         {
             if (_device == device)
             {
-                *device.Input = _state;
-                if (DeviceIoControl(device.Handle, IoctlWaitCaptureState, device.Input, sizeof(uint), device.Output, sizeof(uint), null, device.Overlapped)
-                    || Marshal.GetLastPInvokeError() == ErrorIoPending)
+                bool capturing = _state == CaptureState.Capturing;
+                *device.Input = capturing ? 1u : 0u;
+                if (DeviceIoControl(device.Handle, IoctlWaitCaptureState, device.Input, sizeof(uint), device.Output, sizeof(uint), null, device.Overlapped))
                 {
+                    return;
+                }
+                if (Marshal.GetLastPInvokeError() == ErrorIoPending)
+                {
+                    // Pending means the state equals the input (this makes an unknown state known after an open).
+                    SetStateLocked(capturing ? CaptureState.Capturing : CaptureState.Idle);
                     return;
                 }
                 _device = null;
                 ScheduleReopenLocked();
+                SetStateLocked(CaptureState.Unavailable);
             }
             // Nothing pending: no completion will signal the event.
             Close(device);
@@ -110,8 +127,6 @@ internal sealed unsafe partial class VirtualMic
     private void OnWaitCompleted(Device device)
     {
         bool ok = GetOverlappedResult(device.Handle, device.Overlapped, out _, false);
-        uint state;
-        bool changed;
         lock (_lock)
         {
             if (!ok || _device != device)
@@ -120,20 +135,25 @@ internal sealed unsafe partial class VirtualMic
                 {
                     _device = null;
                     ScheduleReopenLocked();
+                    SetStateLocked(CaptureState.Unavailable);
                 }
                 Close(device);
                 return;
             }
             _failures = 0;
-            state = *device.Output;
-            changed = state != _state;
-            _state = state;
-        }
-        if (changed)
-        {
-            _captureChanged(state != 0);
+            SetStateLocked(*device.Output != 0 ? CaptureState.Capturing : CaptureState.Idle);
         }
         WaitForCapture(device);
+    }
+
+    private void SetStateLocked(CaptureState state)
+    {
+        if (_state == state)
+        {
+            return;
+        }
+        _state = state;
+        _stateChanged(state);
     }
 
     private void ScheduleReopenLocked()

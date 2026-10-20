@@ -6,7 +6,7 @@ namespace WPods.Audio;
 /// <summary>
 /// Conversation awareness on the host: lowers the default console render endpoint's master volume while the
 /// AirPods report a conversation (level 1 -> 25 %, 2 -> 15 %, 3 -> at most 25 %, 4/6/7/8/9 -> restore) and restores
-/// it when the level ends, the feature is turned off, the session detaches or on <see cref="Dispose"/>.
+/// it (only if the volume is still the one WPods set) when the level ends, the feature is turned off, the session detaches or on <see cref="Dispose"/>.
 /// Create before <see cref="ConnectionManager.Start"/>.
 /// </summary>
 public sealed unsafe partial class ConversationDucker : IDisposable
@@ -17,6 +17,8 @@ public sealed unsafe partial class ConversationDucker : IDisposable
     private const int ConsoleRole = 0; // eConsole
     private const float FirstLevelVolume = 0.25f;
     private const float SecondLevelVolume = 0.15f;
+    // The endpoint stores volume in dB steps, so a scalar read back can differ slightly from the one set.
+    private const float SameVolumeTolerance = 0.005f;
 
     private static readonly Guid MmDeviceEnumeratorClass = new("BCDE0395-E52F-467C-8E3D-C4579291692E");
     private static readonly Guid MmDeviceEnumeratorInterface = new("A95664D2-9614-4F35-A746-DE8DB63617E6");
@@ -29,6 +31,7 @@ public sealed unsafe partial class ConversationDucker : IDisposable
     private void* _enumerator;
     private void* _volume;
     private float _original;
+    private float _set = float.NaN; // last volume WPods set in this episode
     private volatile bool _active;
 
     public ConversationDucker(ConnectionManager connections)
@@ -110,7 +113,11 @@ public sealed unsafe partial class ConversationDucker : IDisposable
                 case Request.Restore:
                     if (_active)
                     {
-                        SetVolume(_original);
+                        // A volume the user changed while ducked is kept.
+                        if (!float.IsNaN(_set) && TryGetVolume(out float current) && MathF.Abs(current - _set) <= SameVolumeTolerance)
+                        {
+                            SetVolume(_original);
+                        }
                         EndEpisode();
                     }
                     break;
@@ -139,9 +146,7 @@ public sealed unsafe partial class ConversationDucker : IDisposable
             {
                 return;
             }
-            float original;
-            // IAudioEndpointVolume::GetMasterVolumeLevelScalar
-            if (((delegate* unmanaged<void*, float*, int>)Slot(_volume, 9))(_volume, &original) < 0)
+            if (!TryGetVolume(out float original))
             {
                 EndEpisode();
                 return;
@@ -189,12 +194,27 @@ public sealed unsafe partial class ConversationDucker : IDisposable
     {
         Release(_volume);
         _volume = null;
+        _set = float.NaN;
         _active = false;
     }
 
+    // IAudioEndpointVolume::GetMasterVolumeLevelScalar
+    private bool TryGetVolume(out float level)
+    {
+        float value;
+        bool ok = ((delegate* unmanaged<void*, float*, int>)Slot(_volume, 9))(_volume, &value) >= 0;
+        level = value;
+        return ok;
+    }
+
     // IAudioEndpointVolume::SetMasterVolumeLevelScalar
-    private void SetVolume(float level) =>
-        ((delegate* unmanaged<void*, float, Guid*, int>)Slot(_volume, 7))(_volume, level, null);
+    private void SetVolume(float level)
+    {
+        if (((delegate* unmanaged<void*, float, Guid*, int>)Slot(_volume, 7))(_volume, level, null) >= 0)
+        {
+            _set = level;
+        }
+    }
 
     private static void* Slot(void* instance, int slot) => (*(void***)instance)[slot];
 
