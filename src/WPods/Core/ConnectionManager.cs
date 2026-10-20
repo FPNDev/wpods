@@ -8,7 +8,8 @@ public sealed record KnownDevice(ulong Address, string Name, string? ModelNumber
 
 /// <summary>
 /// Owns the single AAP session. Never pages: opens NTAPD only when Windows reports the ACL link up, attaches the
-/// last-used device first, detaches quietly when the link drops and waits for the next link-up event.
+/// last-used device first, detaches quietly when the link drops, then attaches another pair whose link is already
+/// up (last-used first) or waits for the next link-up event.
 /// All events fire on thread-pool (or CM notification) threads; handlers must not block.
 /// </summary>
 public sealed class ConnectionManager : IAsyncDisposable
@@ -18,8 +19,6 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     private readonly BluetoothLink _link = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly Lock _modelsLock = new();
-    private readonly Dictionary<ulong, ModelInfo> _models = [];
     private AapSession? _session;
     private AapSession? _disconnecting;
     private int _generation;
@@ -70,20 +69,16 @@ public sealed class ConnectionManager : IAsyncDisposable
         foreach (LinkDevice device in _link.Snapshot())
         {
             bool attached = session?.Address == device.Address;
-            ModelInfo model;
-            if (attached)
+            DeviceModel? stored = Settings.GetModel(device.Address);
+            string? modelNumber = stored?.Number;
+            string? modelName = stored?.Name;
+            if (attached && session!.State.ModelNumber is { } liveNumber)
             {
-                model = new ModelInfo(session!.State.ModelNumber, session.State.ModelName);
-            }
-            else
-            {
-                lock (_modelsLock)
-                {
-                    model = _models.GetValueOrDefault(device.Address);
-                }
+                modelNumber = liveNumber;
+                modelName = session.State.ModelName;
             }
             string name = attached ? session!.State.Name ?? device.Name : device.Name;
-            list.Add(new KnownDevice(device.Address, name, model.Number, model.Name, device.Up, Settings.HasKeys(device.Address), attached));
+            list.Add(new KnownDevice(device.Address, name, modelNumber, modelName, device.Up, Settings.HasKeys(device.Address), attached));
         }
         return list;
     }
@@ -156,6 +151,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             if (_session == session)
             {
                 await DetachLocked().ConfigureAwait(false);
+                AttachOtherUpLocked(session.Address);
             }
             _disconnecting = null;
         }
@@ -218,6 +214,10 @@ public sealed class ConnectionManager : IAsyncDisposable
                 {
                     await DetachLocked().ConfigureAwait(false);
                 }
+                if (_session is null)
+                {
+                    AttachOtherUpLocked(address);
+                }
                 return;
             }
             if (_session is not null)
@@ -260,6 +260,10 @@ public sealed class ConnectionManager : IAsyncDisposable
         var session = new AapSession(address, handle, Settings);
         session.Changed += change =>
         {
+            if ((change & DeviceChange.Identity) != 0)
+            {
+                SaveModel(session);
+            }
             if ((change & (DeviceChange.Identity | DeviceChange.Keys)) != 0)
             {
                 DevicesChanged?.Invoke();
@@ -279,13 +283,6 @@ public sealed class ConnectionManager : IAsyncDisposable
     {
         AapSession session = _session!;
         Volatile.Write(ref _session, null);
-        if (session.State.ModelNumber is { } number)
-        {
-            lock (_modelsLock)
-            {
-                _models[session.Address] = new ModelInfo(number, session.State.ModelName);
-            }
-        }
         await session.DisposeAsync().ConfigureAwait(false);
         Detached?.Invoke(session);
         DevicesChanged?.Invoke();
@@ -310,8 +307,13 @@ public sealed class ConnectionManager : IAsyncDisposable
                 return;
             }
             await DetachLocked().ConfigureAwait(false);
-            if (end == SessionEnd.LinkLost || session == _disconnecting)
+            if (session == _disconnecting)
             {
+                return;
+            }
+            if (end == SessionEnd.LinkLost || !_link.IsUp(address))
+            {
+                AttachOtherUpLocked(address);
                 return;
             }
             if (session.State.Status == SessionStatus.Ready)
@@ -356,6 +358,40 @@ public sealed class ConnectionManager : IAsyncDisposable
         }
     }
 
+    // Rule 2 again after a detach: attach another pair whose link is already up (last-used first). Never pages.
+    private void AttachOtherUpLocked(ulong excluded)
+    {
+        ulong last = Settings.LastUsed;
+        if (last != excluded && last != 0 && _link.IsUp(last) && TryAttachLocked(last))
+        {
+            return;
+        }
+        foreach (LinkDevice device in _link.Snapshot())
+        {
+            if (device.Up && device.Address != excluded && device.Address != last && TryAttachLocked(device.Address))
+            {
+                return;
+            }
+        }
+    }
+
+    // Persists the 0x1D model so the device list shows it while the pair is not attached.
+    private void SaveModel(AapSession session)
+    {
+        if (session.State.ModelNumber is not { } number || session.State.ModelName is not { } name)
+        {
+            return;
+        }
+        try
+        {
+            Settings.SetModel(session.Address, new DeviceModel(number, name));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Cosmetic data only; retried on the next attach.
+        }
+    }
+
     private async Task ApplyHandsFreeOnAttachAsync(ulong address)
     {
         try
@@ -381,6 +417,4 @@ public sealed class ConnectionManager : IAsyncDisposable
             await Task.Run(() => HandsFree.SetEnabled(address, !disable)).ConfigureAwait(false);
         }
     }
-
-    private readonly record struct ModelInfo(string? Number, string? Name);
 }

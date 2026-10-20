@@ -21,8 +21,11 @@ public sealed record HostSettings
     public MicMode MicMode { get; init; }
 }
 
+/// <summary>Model reported over AAP 0x1D, remembered for pairs that are not attached.</summary>
+public sealed record DeviceModel(string Number, string Name);
+
 /// <summary>
-/// %LOCALAPPDATA%\WPods\settings.json (host settings per MAC + last-used MAC) and keys.bin (proximity keys,
+/// %LOCALAPPDATA%\WPods\settings.json (host settings and model per MAC + last-used MAC) and keys.bin (proximity keys,
 /// DPAPI CurrentUser). Loaded once; every change is written atomically. Thread-safe.
 /// </summary>
 public sealed class SettingsStore
@@ -35,6 +38,7 @@ public sealed class SettingsStore
     private readonly string _keysPath;
     private readonly Dictionary<ulong, HostSettings> _devices = [];
     private readonly Dictionary<ulong, ProximityKeys> _keys = [];
+    private readonly Dictionary<ulong, DeviceModel> _models = [];
     private ulong _lastUsed;
 
     public SettingsStore()
@@ -100,6 +104,15 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>Last model seen for this pair; null if it was never attached.</summary>
+    public DeviceModel? GetModel(ulong address)
+    {
+        lock (_lock)
+        {
+            return _models.GetValueOrDefault(address);
+        }
+    }
+
     public bool HasKeys(ulong address)
     {
         lock (_lock)
@@ -128,6 +141,19 @@ public sealed class SettingsStore
             SaveSettings();
         }
         HostSettingsChanged?.Invoke(address, settings);
+    }
+
+    internal void SetModel(ulong address, DeviceModel model)
+    {
+        lock (_lock)
+        {
+            if (_models.TryGetValue(address, out DeviceModel? current) && current == model)
+            {
+                return;
+            }
+            _models[address] = model;
+            SaveSettings();
+        }
     }
 
     /// <summary>Stores keys; false when identical to the stored ones (nothing written).</summary>
@@ -166,6 +192,13 @@ public sealed class SettingsStore
                 if (Mac.TryParse(mac, out ulong address))
                 {
                     _devices[address] = settings;
+                }
+            }
+            foreach ((string mac, DeviceModel model) in file.Models)
+            {
+                if (Mac.TryParse(mac, out ulong address))
+                {
+                    _models[address] = model;
                 }
             }
         }
@@ -215,6 +248,10 @@ public sealed class SettingsStore
         foreach ((ulong address, HostSettings settings) in _devices)
         {
             file.Devices[Mac.Format(address)] = settings;
+        }
+        foreach ((ulong address, DeviceModel model) in _models)
+        {
+            file.Models[Mac.Format(address)] = model;
         }
         WriteAtomic(_settingsPath, JsonSerializer.SerializeToUtf8Bytes(file, SettingsJson.Default.SettingsFile));
     }
@@ -275,6 +312,7 @@ internal sealed class SettingsFile
 {
     public string? LastUsed { get; set; }
     public Dictionary<string, HostSettings> Devices { get; set; } = [];
+    public Dictionary<string, DeviceModel> Models { get; set; } = [];
 }
 
 internal sealed class LegacyRecord
