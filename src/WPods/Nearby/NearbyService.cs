@@ -329,7 +329,7 @@ public sealed class NearbyService : IDisposable
         pair.LidOpen = Proximity.IsLidOpen(data);
         if (pair.Offer is { } offer)
         {
-            bool single = IsSingleBattery(offer.Model);
+            bool single = offer.Model.SingleBattery;
             if (!single && !pair.LidOpen && offer.State != OfferState.Connecting)
             {
                 pair.Offer = null;
@@ -352,7 +352,7 @@ public sealed class NearbyService : IDisposable
             return false;
         }
         AirPodsModel model = Models.FromProximityId(Proximity.ModelId(data)) ?? Models.FromModelNumber(pair.ModelNumber) ?? Models.Unknown;
-        bool singleBattery = IsSingleBattery(model);
+        bool singleBattery = model.SingleBattery;
         // AirPods Max have no lid or case signal: offered on arrival (after 45 s unseen). Others: lid opening with a bud in the case.
         if (singleBattery ? !arrived : (!pair.LidOpen || wasOpen || !Proximity.IsBudInCase(data)))
         {
@@ -361,8 +361,6 @@ public sealed class NearbyService : IDisposable
         pair.Offer = new NearbyOffer(pair.Address, pair.Name, model, Proximity.ReadBatteries(data, pair.EncCipher, singleBattery, default), OfferState.Offer);
         return true;
     }
-
-    private static bool IsSingleBattery(AirPodsModel model) => (model.Capabilities & ModelCapabilities.SingleBattery) != 0;
 
     private void OnExpiry()
     {

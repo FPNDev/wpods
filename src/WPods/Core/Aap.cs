@@ -240,8 +240,9 @@ internal static class Aap
         }
         state.Name = name;
         state.ModelNumber = modelNumber;
-        state.ModelName = (Models.FromModelNumber(modelNumber) ?? Models.Unknown).Name;
-        return DeviceChange.Identity;
+        AirPodsModel model = Models.FromModelNumber(modelNumber) ?? Models.Unknown;
+        state.ModelName = model.Name;
+        return DeviceChange.Identity | state.SetBaseline(model.Capabilities);
     }
 
     private static string NextString(ref ReadOnlySpan<byte> rest)

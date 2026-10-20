@@ -5,7 +5,8 @@ namespace WPods.Core;
 
 /// <summary>
 /// A paired AirPods device for the device list. <see cref="ModelName"/> comes from <see cref="Models"/>;
-/// <see cref="Capabilities"/> is the live set while attached, else the set remembered from the last attach.
+/// <see cref="Capabilities"/> is the live set while attached, else the set reported on the last attach plus the
+/// model baseline.
 /// </summary>
 public sealed record KnownDevice(
     ulong Address, string Name, string? ModelNumber, string? ModelName, bool LinkUp, bool HasKeys, bool Attached, DeviceCapabilities Capabilities);
@@ -76,10 +77,12 @@ public sealed class ConnectionManager : IAsyncDisposable
         {
             bool attached = session?.Address == device.Address;
             string? modelNumber = (attached ? session!.State.ModelNumber : null) ?? Settings.GetModel(device.Address)?.Number;
-            string? modelName = modelNumber is null ? null : (Models.FromModelNumber(modelNumber) ?? Models.Unknown).Name;
+            AirPodsModel? model = modelNumber is null ? null : Models.FromModelNumber(modelNumber) ?? Models.Unknown;
             string name = attached ? session!.State.Name ?? device.Name : device.Name;
-            DeviceCapabilities capabilities = attached ? session!.State.Capabilities : Settings.GetCapabilities(device.Address);
-            list.Add(new KnownDevice(device.Address, name, modelNumber, modelName, device.Up, Settings.HasKeys(device.Address), attached, capabilities));
+            DeviceCapabilities capabilities = attached
+                ? session!.State.Capabilities
+                : Settings.GetCapabilities(device.Address) | (model?.Capabilities ?? DeviceCapabilities.None);
+            list.Add(new KnownDevice(device.Address, name, modelNumber, model?.Name, device.Up, Settings.HasKeys(device.Address), attached, capabilities));
         }
         return list;
     }

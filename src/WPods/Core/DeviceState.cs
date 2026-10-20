@@ -23,8 +23,8 @@ public enum DeviceChange
 }
 
 /// <summary>
-/// Features the AirPods report over AAP (setting ids in 0x09 packets, heart-rate readings). Features not reported
-/// are not shown.
+/// Features of an AirPods pair: reported over AAP (setting ids in 0x09 packets, heart-rate readings) or in the
+/// baseline of its model (<see cref="AirPodsModel.Capabilities"/>). Features in neither are not shown.
 /// </summary>
 [Flags]
 public enum DeviceCapabilities
@@ -136,19 +136,27 @@ public sealed class DeviceState
     private readonly Battery[] _batteries = new Battery[4];
     private byte _hearingAidEnabled = NotReported;
     private DeviceCapabilities _observed;
+    private DeviceCapabilities _baseline;
 
-    internal DeviceState(DeviceCapabilities remembered)
+    /// <param name="remembered">Reported on the last attach.</param>
+    /// <param name="baseline">Baseline of the last known model.</param>
+    internal DeviceState(DeviceCapabilities remembered, DeviceCapabilities baseline)
     {
-        Capabilities = remembered;
+        Reported = remembered;
+        _baseline = baseline;
+        Capabilities = remembered | baseline;
     }
 
     public SessionStatus Status { get; internal set; }
 
+    /// <summary><see cref="Reported"/> plus the baseline of the model.</summary>
+    public DeviceCapabilities Capabilities { get; private set; }
+
     /// <summary>
     /// Until the initial report ends: the set remembered from the last attach plus what this attach reported so far.
-    /// Afterwards: exactly what this attach reported (growing if the device reports more later).
+    /// Afterwards: exactly what this attach reported (growing if the device reports more later). This part is persisted.
     /// </summary>
-    public DeviceCapabilities Capabilities { get; private set; }
+    internal DeviceCapabilities Reported { get; private set; }
 
     internal bool InitialReportDone { get; private set; }
 
@@ -188,20 +196,28 @@ public sealed class DeviceState
     /// <summary>A heart-rate reading arrived at least once in this session.</summary>
     public bool HeartRateAvailable { get; internal set; }
 
-    /// <summary>Heart rate may be started: the device reports heart-rate capability.</summary>
+    /// <summary>Heart rate may be started: reported by the device or in its model baseline.</summary>
     public bool HeartRateSupported => (Capabilities & DeviceCapabilities.HeartRate) != 0;
 
     internal DeviceChange Observe(DeviceCapabilities capabilities)
     {
         _observed |= capabilities;
-        return SetCapabilities(InitialReportDone ? _observed : Capabilities | capabilities);
+        Reported = InitialReportDone ? _observed : Reported | capabilities;
+        return UpdateCapabilities();
     }
 
     /// <summary>Drops remembered capabilities this attach did not report.</summary>
     internal DeviceChange FinishInitialReport()
     {
         InitialReportDone = true;
-        return SetCapabilities(_observed);
+        Reported = _observed;
+        return UpdateCapabilities();
+    }
+
+    internal DeviceChange SetBaseline(DeviceCapabilities baseline)
+    {
+        _baseline = baseline;
+        return UpdateCapabilities();
     }
 
     internal bool SetSetting(byte id, byte value)
@@ -243,8 +259,9 @@ public sealed class DeviceState
         return true;
     }
 
-    private DeviceChange SetCapabilities(DeviceCapabilities capabilities)
+    private DeviceChange UpdateCapabilities()
     {
+        DeviceCapabilities capabilities = Reported | _baseline;
         if (Capabilities == capabilities)
         {
             return DeviceChange.None;

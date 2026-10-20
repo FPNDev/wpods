@@ -30,12 +30,7 @@ internal sealed partial class PageJson : JsonSerializerContext;
 /// <summary>Writes host -> page messages (one JSON object with "type") with a reused UTF-8 writer. UI thread only.</summary>
 internal sealed class MessageWriter
 {
-    private static readonly ModelCapabilities[] Capabilities =
-    [
-        ModelCapabilities.NoiseControl, ModelCapabilities.Adaptive, ModelCapabilities.ConversationAwareness, ModelCapabilities.OneBudAnc,
-        ModelCapabilities.PersonalizedVolume, ModelCapabilities.AllowOff, ModelCapabilities.HeartRate, ModelCapabilities.HearingAid,
-        ModelCapabilities.SingleBattery,
-    ];
+    private static readonly DeviceCapabilities[] Capabilities = Enum.GetValues<DeviceCapabilities>();
 
     private readonly ArrayBufferWriter<byte> _buffer = new(4096);
     private readonly Utf8JsonWriter _json;
@@ -165,12 +160,16 @@ internal sealed class MessageWriter
         w.WriteString("model", model.Name);
         w.WriteString("art", model.Art);
         w.WriteStartArray("caps");
-        foreach (ModelCapabilities capability in Capabilities)
+        foreach (DeviceCapabilities capability in Capabilities)
         {
-            if ((model.Capabilities & capability) != 0)
+            if (capability != DeviceCapabilities.None && (d.Capabilities & capability) != 0)
             {
                 w.WriteStringValue(Camel(capability));
             }
+        }
+        if (model.SingleBattery)
+        {
+            w.WriteStringValue("singleBattery");
         }
         w.WriteEndArray();
         w.WriteString("conn", conn);

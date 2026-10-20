@@ -622,7 +622,7 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             if (device.Address == address)
             {
-                return ((Models.FromModelNumber(device.ModelNumber) ?? Models.Unknown).Capabilities & ModelCapabilities.SingleBattery) != 0;
+                return (Models.FromModelNumber(device.ModelNumber) ?? Models.Unknown).SingleBattery;
             }
         }
         return false;

@@ -50,13 +50,17 @@ public sealed class AapSession : IAsyncDisposable
     private Task _heartRateTask = Task.CompletedTask;
     private Task<SessionEnd> _readLoop = Task.FromResult(SessionEnd.Closed);
     private byte _streamSequence;
+    // Reported capability set last written to settings (read loop and initialization).
+    private DeviceCapabilities _savedReported;
 
     internal AapSession(ulong address, SafeFileHandle handle, SettingsStore settings)
     {
         Address = address;
         _stream = new FileStream(handle, FileAccess.ReadWrite, bufferSize: 0, isAsync: true);
         _settings = settings;
-        State = new DeviceState(settings.GetCapabilities(address));
+        DeviceCapabilities baseline = Models.FromModelNumber(settings.GetModel(address)?.Number)?.Capabilities ?? DeviceCapabilities.None;
+        State = new DeviceState(settings.GetCapabilities(address), baseline);
+        _savedReported = State.Reported;
     }
 
     public ulong Address { get; }
@@ -280,7 +284,7 @@ public sealed class AapSession : IAsyncDisposable
         {
             _heartRateReading?.TrySetResult();
         }
-        if ((change & DeviceChange.Capabilities) != 0 && State.InitialReportDone)
+        if (State.InitialReportDone && State.Reported != _savedReported)
         {
             SaveCapabilities();
         }
@@ -413,12 +417,14 @@ public sealed class AapSession : IAsyncDisposable
         return true;
     }
 
-    // Refreshes the pair's remembered capabilities (no write when unchanged).
+    // Refreshes the pair's remembered (reported) capabilities; SettingsStore skips the write when unchanged.
     private void SaveCapabilities()
     {
+        DeviceCapabilities reported = State.Reported;
         try
         {
-            _settings.SetCapabilities(Address, State.Capabilities);
+            _settings.SetCapabilities(Address, reported);
+            _savedReported = reported;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
