@@ -1,0 +1,6 @@
+LIBRARY wpods_native
+EXPORTS
+    wpn_ble_start
+    wpn_ble_stop
+    wpn_bt_connect_audio
+    wpn_bt_disconnect_audio
