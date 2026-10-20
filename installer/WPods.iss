@@ -128,15 +128,21 @@ begin
     ((Info.Options and CodeIntegrityOptionTestSign) <> 0);
 end;
 
+{ Mirrors the .NET host lookup: registered x64 install location (32-bit registry view), else Program Files\dotnet.
+  Preview runtimes (folder names with '-') cannot run a release build, so they don't count. }
 function DotNetInstalled: Boolean;
 var
+  Root: String;
   FindRec: TFindRec;
 begin
   Result := False;
-  if FindFirst(ExpandConstant('{autopf}\dotnet\shared\Microsoft.WindowsDesktop.App\10.*'), FindRec) then begin
+  if not RegQueryStringValue(HKLM32, 'SOFTWARE\dotnet\Setup\InstalledVersions\x64', 'InstallLocation', Root) or (Root = '') then begin
+    Root := ExpandConstant('{commonpf64}\dotnet');
+  end;
+  if FindFirst(AddBackslash(Root) + 'shared\Microsoft.WindowsDesktop.App\10.*', FindRec) then begin
     try
       repeat
-        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then begin
+        if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and (Pos('-', FindRec.Name) = 0) then begin
           Result := True;
           Exit;
         end;
