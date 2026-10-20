@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en-US" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width">
+<title>WPods</title>
+<link rel="stylesheet" href="ds/tokens.css">
+<link rel="stylesheet" href="ds/bundle.css">
+<link rel="stylesheet" href="app.css">
+<script src="ds/bundle.js" defer></script>
+<script src="shared.js" defer></script>
+<script src="popup.js" defer></script>
+</head>
+<body>
+<div class="wp-popup wp-popup--window" role="dialog" data-ref="card" hidden>
+  <div class="wp-popup__view" data-ref="device">
+    <span data-art="pro" data-class="wp-popup__art"></span>
+    <div class="wp-popup__id"><p class="wp-popup__name" data-ref="name"></p><p class="wp-popup__sub" data-l="status.elsewhere"></p></div>
+    <div class="wp-batteries wp-batteries--compact" data-ref="batteries"></div>
+    <div class="wp-popup__actions">
+      <button type="button" class="wp-btn wp-btn--primary wp-btn--lg wp-btn--block" data-ref="connect"><span data-spinner data-class="wp-spinner--sm"></span><span data-ref="connectLabel"></span></button>
+      <button type="button" class="wp-btn wp-btn--subtle wp-btn--block" data-ref="secondary"></button>
+    </div>
+  </div>
+
+  <div class="wp-popup__view" data-ref="multi" hidden>
+    <div class="wp-popup__head"><p class="wp-popup__name" data-l="popup.multiTitle"></p><p class="wp-popup__sub" data-ref="multiSub"></p></div>
+    <div class="wp-popup__list" data-ref="picks"></div>
+    <div class="wp-popup__actions"><button type="button" class="wp-btn wp-btn--subtle wp-btn--block" data-ref="multiNotNow" data-l="popup.notNow"></button></div>
+  </div>
+
+  <div class="wp-popup__view" data-ref="done" hidden>
+    <span class="wp-popup__done wp-popup__mark"><span data-icon="check"></span></span>
+    <div role="status"><p class="wp-popup__name" data-l="popup.connected"></p><p class="wp-popup__sub" data-ref="doneName"></p></div>
+    <div class="wp-popup__spacer"></div>
+  </div>
+
+  <div class="wp-popup__view" data-ref="failed" hidden>
+    <span class="wp-popup__fail wp-popup__mark"><span data-icon="warning" data-class="wp-icon--lg"></span></span>
+    <div role="alert"><p class="wp-popup__name" data-l="popup.failedTitle"></p><p class="wp-popup__sub" data-l="popup.failedBody"></p></div>
+    <div class="wp-popup__actions">
+      <button type="button" class="wp-btn wp-btn--primary wp-btn--lg wp-btn--block" data-ref="retry" data-l="popup.tryAgain"></button>
+      <button type="button" class="wp-btn wp-btn--subtle wp-btn--block" data-ref="failedNotNow" data-l="popup.notNow"></button>
+    </div>
+  </div>
+
+  <button type="button" class="wp-iconbtn wp-popup__close" data-l-aria="popup.close" data-ref="close"><span data-icon="close"></span></button>
+  <div class="wp-sr" role="status" data-ref="announce"></div>
+</div>
+</body>
+</html>

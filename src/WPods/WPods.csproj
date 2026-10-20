@@ -26,6 +26,7 @@
     <Content Include="..\..\native\licenses\**" LinkBase="licenses\" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="web\**" CopyToOutputDirectory="PreserveNewest" />
     <None Remove="web\**" />
+    <Content Include="locales\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- The WebView2 package also references its WPF control; WPods only uses WinForms. -->
