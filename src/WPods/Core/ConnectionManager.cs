@@ -59,6 +59,8 @@ public sealed class ConnectionManager : IAsyncDisposable
         _link.LinkChanged += OnLinkChanged;
         _link.DevicesChanged += () => DevicesChanged?.Invoke();
         _link.Start();
+        // The initial enumeration raises no events; subscribers created before Start need the first list.
+        DevicesChanged?.Invoke();
         _ = Task.Run(() => OnLinkAsync(0));
     }
 
