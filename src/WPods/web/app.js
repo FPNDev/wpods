@@ -25,6 +25,8 @@ const TOASTS = {
   micFailed: { kind: 'error', action: null },
   stillRunning: { kind: 'info', action: null },
   connected: { kind: 'success', action: null },
+  lowLatencyFailed: { kind: 'error', action: null },
+  handsFreeFailed: { kind: 'error', action: null },
 };
 const FEATURES = [
   { key: 'earDetection', cap: null, title: 'features.ear', desc: 'features.earDesc', descMax: 'features.earDescMax' },

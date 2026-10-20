@@ -94,7 +94,10 @@ internal sealed partial class TrayApp
                 SendPrefsToPopup();
                 break;
             case "setStartup" when m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
-                SetStartup(m.Value.GetBoolean());
+                if (!SetStartup(m.Value.GetBoolean()))
+                {
+                    SendStartupPref();
+                }
                 break;
             case "setLanguage" when m.Code is not null:
                 SetLanguage(m.Code);
@@ -381,18 +384,32 @@ internal sealed partial class TrayApp
         }
     }
 
-    private void SetStartup(bool enabled)
+    /// <summary>False when Windows refused the change.</summary>
+    private static bool SetStartup(bool enabled)
     {
         try
         {
             StartupRegistration.SetEnabled(enabled);
+            return true;
         }
         catch (Exception e) when (e is UnauthorizedAccessException or IOException or SecurityException)
         {
-            Utf8JsonWriter w = _writer.Begin("prefs");
-            w.WriteBoolean("startup", StartupRegistration.IsEnabled());
-            PostMain(_writer.End());
+            return false;
         }
+    }
+
+    private void SendStartupPref()
+    {
+        Utf8JsonWriter w = _writer.Begin("prefs");
+        w.WriteBoolean("startup", StartupRegistration.IsEnabled());
+        PostMain(_writer.End());
+    }
+
+    // Tray "Start with Windows": the window's switch didn't change it, so it gets the new value.
+    private void ToggleStartupFromTray()
+    {
+        SetStartup(!StartupRegistration.IsEnabled());
+        SendStartupPref();
     }
 
     // "" = Same as Windows. The main window restarts (after this message handler returns) with the new labels.
@@ -405,8 +422,9 @@ internal sealed partial class TrayApp
         }
         SavePrefs(_prefs with { Language = choice });
         _locale = _locales.Resolve(choice);
-        _openItem.Text = Text("app.name");
-        _exitItem.Text = ExitText();
+        _openItem.Text = Text("tray.open");
+        _startupItem.Text = Text("tray.startup");
+        _quitItem.Text = Text("tray.quit");
         UpdateTray();
         _ui.Post(static s =>
         {

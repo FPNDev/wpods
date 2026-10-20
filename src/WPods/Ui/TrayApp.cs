@@ -60,7 +60,8 @@ internal sealed partial class TrayApp : ApplicationContext
     private readonly HostWindow _host;
     private readonly NotifyIcon _tray;
     private readonly ToolStripMenuItem _openItem;
-    private readonly ToolStripMenuItem _exitItem;
+    private readonly ToolStripMenuItem _startupItem;
+    private readonly ToolStripMenuItem _quitItem;
     private readonly MessageWriter _writer = new();
     private readonly string?[] _lastSent = new string?[(int)Sent.Count];
     private readonly Lock _hostSettingsLock = new();
@@ -116,13 +117,17 @@ internal sealed partial class TrayApp : ApplicationContext
         _host = new HostWindow(OnColorsChanged, OnDisplayChanged, OnHotKey);
         _hideTimer.Tick += OnHideTimer;
 
-        _openItem = new ToolStripMenuItem(Text("app.name"), null, (_, _) => ShowMain());
+        _openItem = new ToolStripMenuItem(Text("tray.open"), null, (_, _) => ShowMain());
         _openItem.Font = new Font(_openItem.Font, FontStyle.Bold);
-        _exitItem = new ToolStripMenuItem(ExitText(), null, (_, _) => Exit());
+        _startupItem = new ToolStripMenuItem(Text("tray.startup"), null, (_, _) => ToggleStartupFromTray());
+        _quitItem = new ToolStripMenuItem(Text("tray.quit"), null, (_, _) => Exit());
         var menu = new ContextMenuStrip();
         menu.Items.Add(_openItem);
+        menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_exitItem);
+        menu.Items.Add(_quitItem);
+        // The Run value can change elsewhere (the window's switch, Settings > Startup apps): re-read on every open.
+        menu.Opening += (_, _) => _startupItem.Checked = StartupRegistration.IsEnabled();
         _tray = new NotifyIcon { ContextMenuStrip = menu };
         _tray.MouseClick += OnTrayClick;
 
@@ -501,9 +506,6 @@ internal sealed partial class TrayApp : ApplicationContext
     }
 
     private string Text(string key) => _locale.Text(key);
-
-    // Not in the locale files yet (reported); English until a "tray.exit" label exists.
-    private string ExitText() => _locale.Labels.GetValueOrDefault("tray.exit", "Exit");
 
     // ---- Tray icon, tooltip, low-battery notification ----
 
