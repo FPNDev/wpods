@@ -65,7 +65,6 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 const
   DotNetUrl = 'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe';
   DotNetFile = 'windowsdesktop-runtime-win-x64.exe';
-  DotNetKey = 'SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App';
   WebView2Url = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
   WebView2File = 'MicrosoftEdgeWebview2Setup.exe';
   WebView2Key = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
@@ -131,16 +130,19 @@ end;
 
 function DotNetInstalled: Boolean;
 var
-  Versions: TArrayOfString;
-  I: Integer;
+  FindRec: TFindRec;
 begin
   Result := False;
-  if RegGetValueNames(HKLM64, DotNetKey, Versions) then begin
-    for I := 0 to GetArrayLength(Versions) - 1 do begin
-      if Copy(Versions[I], 1, 3) = '10.' then begin
-        Result := True;
-        Exit;
-      end;
+  if FindFirst(ExpandConstant('{autopf}\dotnet\shared\Microsoft.WindowsDesktop.App\10.*'), FindRec) then begin
+    try
+      repeat
+        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then begin
+          Result := True;
+          Exit;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
     end;
   end;
 end;
