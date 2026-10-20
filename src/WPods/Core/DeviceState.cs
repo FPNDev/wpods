@@ -18,6 +18,35 @@ public enum DeviceChange
     HeartRate = 1 << 7,
     /// <summary>Proximity keys were received and differed from the stored ones.</summary>
     Keys = 1 << 8,
+    /// <summary><see cref="DeviceState.Capabilities"/> changed.</summary>
+    Capabilities = 1 << 9,
+}
+
+/// <summary>
+/// Features the AirPods report over AAP (setting ids in 0x09 packets, heart-rate readings). Features not reported
+/// are not shown.
+/// </summary>
+[Flags]
+public enum DeviceCapabilities
+{
+    None = 0,
+    /// <summary>Listening mode 0x0D: Off, Noise Cancellation, Transparency.</summary>
+    ListeningMode = 1 << 0,
+    /// <summary>Adaptive listening mode: adaptive strength 0x2E reported, or listening mode 4 seen.</summary>
+    Adaptive = 1 << 1,
+    EarDetection = 1 << 2,
+    ConversationAwareness = 1 << 3,
+    OneBudAnc = 1 << 4,
+    PersonalizedVolume = 1 << 5,
+    AllowOff = 1 << 6,
+    MicSide = 1 << 7,
+    PressSpeed = 1 << 8,
+    HoldDuration = 1 << 9,
+    ToneVolume = 1 << 10,
+    /// <summary>Hearing aid 0x2C reported (enrollment is <see cref="DeviceState.HearingAidEnrolled"/>).</summary>
+    HearingAid = 1 << 11,
+    /// <summary>Heart-rate state 0x30 reported, or a heart-rate reading arrived.</summary>
+    HeartRate = 1 << 12,
 }
 
 public enum SessionStatus
@@ -106,8 +135,22 @@ public sealed class DeviceState
     private readonly byte[] _settings = CreateSettings();
     private readonly Battery[] _batteries = new Battery[4];
     private byte _hearingAidEnabled = NotReported;
+    private DeviceCapabilities _observed;
+
+    internal DeviceState(DeviceCapabilities remembered)
+    {
+        Capabilities = remembered;
+    }
 
     public SessionStatus Status { get; internal set; }
+
+    /// <summary>
+    /// Until the initial report ends: the set remembered from the last attach plus what this attach reported so far.
+    /// Afterwards: exactly what this attach reported (growing if the device reports more later).
+    /// </summary>
+    public DeviceCapabilities Capabilities { get; private set; }
+
+    internal bool InitialReportDone { get; private set; }
 
     public string? Name { get; internal set; }
     public string? ModelNumber { get; internal set; }
@@ -145,13 +188,21 @@ public sealed class DeviceState
     /// <summary>A heart-rate reading arrived at least once in this session.</summary>
     public bool HeartRateAvailable { get; internal set; }
 
-    /// <summary>Heart rate may be started: an AirPods Pro 3 model number, or a reading already seen.</summary>
-    public bool HeartRateSupported =>
-        HeartRateAvailable
-        || (ModelNumber is { } model
-            && (model.Contains("A3063", StringComparison.OrdinalIgnoreCase)
-                || model.Contains("A3064", StringComparison.OrdinalIgnoreCase)
-                || model.Contains("A3065", StringComparison.OrdinalIgnoreCase)));
+    /// <summary>Heart rate may be started: the device reports heart-rate capability.</summary>
+    public bool HeartRateSupported => (Capabilities & DeviceCapabilities.HeartRate) != 0;
+
+    internal DeviceChange Observe(DeviceCapabilities capabilities)
+    {
+        _observed |= capabilities;
+        return SetCapabilities(InitialReportDone ? _observed : Capabilities | capabilities);
+    }
+
+    /// <summary>Drops remembered capabilities this attach did not report.</summary>
+    internal DeviceChange FinishInitialReport()
+    {
+        InitialReportDone = true;
+        return SetCapabilities(_observed);
+    }
 
     internal bool SetSetting(byte id, byte value)
     {
@@ -190,6 +241,16 @@ public sealed class DeviceState
         }
         _batteries[slot] = battery;
         return true;
+    }
+
+    private DeviceChange SetCapabilities(DeviceCapabilities capabilities)
+    {
+        if (Capabilities == capabilities)
+        {
+            return DeviceChange.None;
+        }
+        Capabilities = capabilities;
+        return DeviceChange.Capabilities;
     }
 
     private bool? Flag(byte id) => _settings[id] switch

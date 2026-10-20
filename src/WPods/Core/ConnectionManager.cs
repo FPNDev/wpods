@@ -3,8 +3,12 @@ using Microsoft.Win32.SafeHandles;
 
 namespace WPods.Core;
 
-/// <summary>A paired AirPods device for the device list.</summary>
-public sealed record KnownDevice(ulong Address, string Name, string? ModelNumber, string? ModelName, bool LinkUp, bool HasKeys, bool Attached);
+/// <summary>
+/// A paired AirPods device for the device list. <see cref="ModelName"/> comes from <see cref="Models"/>;
+/// <see cref="Capabilities"/> is the live set while attached, else the set remembered from the last attach.
+/// </summary>
+public sealed record KnownDevice(
+    ulong Address, string Name, string? ModelNumber, string? ModelName, bool LinkUp, bool HasKeys, bool Attached, DeviceCapabilities Capabilities);
 
 /// <summary>
 /// Owns the single AAP session. Never pages: opens NTAPD only when Windows reports the ACL link up, attaches the
@@ -71,16 +75,11 @@ public sealed class ConnectionManager : IAsyncDisposable
         foreach (LinkDevice device in _link.Snapshot())
         {
             bool attached = session?.Address == device.Address;
-            DeviceModel? stored = Settings.GetModel(device.Address);
-            string? modelNumber = stored?.Number;
-            string? modelName = stored?.Name;
-            if (attached && session!.State.ModelNumber is { } liveNumber)
-            {
-                modelNumber = liveNumber;
-                modelName = session.State.ModelName;
-            }
+            string? modelNumber = (attached ? session!.State.ModelNumber : null) ?? Settings.GetModel(device.Address)?.Number;
+            string? modelName = modelNumber is null ? null : (Models.FromModelNumber(modelNumber) ?? Models.Unknown).Name;
             string name = attached ? session!.State.Name ?? device.Name : device.Name;
-            list.Add(new KnownDevice(device.Address, name, modelNumber, modelName, device.Up, Settings.HasKeys(device.Address), attached));
+            DeviceCapabilities capabilities = attached ? session!.State.Capabilities : Settings.GetCapabilities(device.Address);
+            list.Add(new KnownDevice(device.Address, name, modelNumber, modelName, device.Up, Settings.HasKeys(device.Address), attached, capabilities));
         }
         return list;
     }
@@ -266,7 +265,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             {
                 SaveModel(session);
             }
-            if ((change & (DeviceChange.Identity | DeviceChange.Keys)) != 0)
+            if ((change & (DeviceChange.Identity | DeviceChange.Keys | DeviceChange.Capabilities)) != 0)
             {
                 DevicesChanged?.Invoke();
             }

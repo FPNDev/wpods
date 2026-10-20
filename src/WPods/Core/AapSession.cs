@@ -28,11 +28,15 @@ public sealed class AapSession : IAsyncDisposable
     private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan KeysTimeout = TimeSpan.FromSeconds(3);
+    // Live (AirPods Pro 2): the full 0x09 settings report arrives within ~90 ms of the handshake reply and the
+    // re-report after the notification request within ~25 ms; no end marker exists. 1 s after the request covers both.
+    private static readonly TimeSpan InitialReportWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan HeartRateFirstReadingTimeout = TimeSpan.FromSeconds(12);
     private const int HeartRateAttempts = 3;
     private const uint HeartRatePeriodUs = 1_000_000;
 
-    private readonly SafeFileHandle _handle;
+    // FileStream, not RandomAccess: RandomAccess rejects the NTAPD handle (not seekable) with NotSupportedException.
+    private readonly FileStream _stream;
     private readonly SettingsStore _settings;
     private readonly byte[] _readBuffer = new byte[ReadBufferSize];
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -50,13 +54,14 @@ public sealed class AapSession : IAsyncDisposable
     internal AapSession(ulong address, SafeFileHandle handle, SettingsStore settings)
     {
         Address = address;
-        _handle = handle;
+        _stream = new FileStream(handle, FileAccess.ReadWrite, bufferSize: 0, isAsync: true);
         _settings = settings;
+        State = new DeviceState(settings.GetCapabilities(address));
     }
 
     public ulong Address { get; }
 
-    public DeviceState State { get; } = new();
+    public DeviceState State { get; }
 
     /// <summary>Every inbound packet (including 0x58 mic audio), before it is parsed.</summary>
     public event PacketHandler? PacketReceived;
@@ -93,7 +98,7 @@ public sealed class AapSession : IAsyncDisposable
             _writeTimeout.CancelAfter(WriteTimeout);
             using CancellationTokenRegistration caller = ct.UnsafeRegister(static s => ((CancellationTokenSource)s!).Cancel(), _writeTimeout);
             using CancellationTokenRegistration life = _life.Token.UnsafeRegister(static s => ((CancellationTokenSource)s!).Cancel(), _writeTimeout);
-            await RandomAccess.WriteAsync(_handle, packet, 0, _writeTimeout.Token).ConfigureAwait(false);
+            await _stream.WriteAsync(packet, _writeTimeout.Token).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -166,7 +171,7 @@ public sealed class AapSession : IAsyncDisposable
     public ValueTask<bool> SetToneVolumeAsync(byte volume, CancellationToken ct = default)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThan(volume, (byte)100);
-        return SendSettingAsync(Aap.Setting(Aap.ToneVolumeId, volume), ct);
+        return SendSettingAsync(Aap.ToneVolume(volume), ct);
     }
 
     /// <summary>On: 0x2C on, 300 ms, 0x33 on. Off: 0x33 off, 300 ms, 0x2C off. Requires enrollment.</summary>
@@ -222,7 +227,7 @@ public sealed class AapSession : IAsyncDisposable
         await _readLoop.ConfigureAwait(false);
         await _heartRateTask.ConfigureAwait(false);
         _heartRateCts?.Dispose();
-        _handle.Dispose();
+        await _stream.DisposeAsync().ConfigureAwait(false);
     }
 
     private async Task<SessionEnd> ReadLoopAsync()
@@ -232,7 +237,7 @@ public sealed class AapSession : IAsyncDisposable
         {
             while (true)
             {
-                int count = await RandomAccess.ReadAsync(_handle, _readBuffer, 0, ct).ConfigureAwait(false);
+                int count = await _stream.ReadAsync(_readBuffer, ct).ConfigureAwait(false);
                 if (count == 0)
                 {
                     return SessionEnd.Failed;
@@ -275,6 +280,10 @@ public sealed class AapSession : IAsyncDisposable
         {
             _heartRateReading?.TrySetResult();
         }
+        if ((change & DeviceChange.Capabilities) != 0 && State.InitialReportDone)
+        {
+            SaveCapabilities();
+        }
     }
 
     private DeviceChange OnKeys(ProximityKeys? keys)
@@ -290,7 +299,7 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // Handshake -> (any reply) -> 100 ms -> feature flags -> notifications -> proximity keys (one retry).
+    // Handshake -> (any reply) -> 100 ms -> feature flags -> notifications -> 1 s -> capabilities final -> proximity keys (one retry).
     private async Task InitializeAsync()
     {
         CancellationToken ct = _life.Token;
@@ -311,6 +320,16 @@ public sealed class AapSession : IAsyncDisposable
                 return;
             }
             SetStatus(SessionStatus.Ready);
+            await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
+            lock (_stateLock)
+            {
+                DeviceChange change = State.FinishInitialReport();
+                if (change != DeviceChange.None)
+                {
+                    Changed?.Invoke(change);
+                }
+            }
+            SaveCapabilities();
             for (int attempt = 0; attempt < 2; attempt++)
             {
                 TaskCompletionSource reply = NewSignal();
@@ -385,13 +404,26 @@ public sealed class AapSession : IAsyncDisposable
         }
         lock (_stateLock)
         {
-            DeviceChange change = Aap.Apply(packet, State);
+            DeviceChange change = Aap.ApplySetting(packet, State);
             if (change != DeviceChange.None)
             {
                 Changed?.Invoke(change);
             }
         }
         return true;
+    }
+
+    // Refreshes the pair's remembered capabilities (no write when unchanged).
+    private void SaveCapabilities()
+    {
+        try
+        {
+            _settings.SetCapabilities(Address, State.Capabilities);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Retried on the next change or attach.
+        }
     }
 
     private void SetStatus(SessionStatus status)

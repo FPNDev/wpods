@@ -20,6 +20,8 @@ internal static class Aap
     public const byte PersonalizedVolumeId = 0x26;
     public const byte ConversationAwarenessId = 0x28;
     public const byte HearingAidId = 0x2C;
+    public const byte AdaptiveStrengthId = 0x2E;
+    public const byte HeartRateStateId = 0x30;
     public const byte HearingAssistId = 0x33;
     public const byte AllowOffId = 0x34;
 
@@ -45,6 +47,9 @@ internal static class Aap
 
     public static byte[] Setting(byte id, byte value) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, id, value, 0x00, 0x00, 0x00];
 
+    /// <summary>0x1F: byte 8 = 0x50, as AirPods Pro 2 report it (live: 09 00 1F 50 50 00 00).</summary>
+    public static byte[] ToneVolume(byte volume) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, ToneVolumeId, volume, 0x50, 0x00, 0x00];
+
     /// <summary>0x2C: byte 7 = enrolled (always 01 when sent), byte 8 = enabled.</summary>
     public static byte[] HearingAid(bool on) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, HearingAidId, 0x01, Bool(on), 0x00, 0x00];
 
@@ -69,7 +74,7 @@ internal static class Aap
             case 0x06:
                 return p.Length >= 8 ? ApplyEar(p, state) : DeviceChange.None;
             case 0x09:
-                return p.Length >= 8 ? ApplySetting(p, state) : DeviceChange.None;
+                return p.Length >= 8 ? ApplySetting(p, state) | state.Observe(CapabilityOf(p[6], p[7])) : DeviceChange.None;
             case 0x17:
                 return ApplyHeartRate(p, state);
             case 0x1D:
@@ -180,7 +185,8 @@ internal static class Aap
         _ => EarStatus.Unknown,
     };
 
-    private static DeviceChange ApplySetting(ReadOnlySpan<byte> p, DeviceState state)
+    /// <summary>Applies a 0x09 setting packet (inbound, or one WPods wrote) without recording capabilities.</summary>
+    public static DeviceChange ApplySetting(ReadOnlySpan<byte> p, DeviceState state)
     {
         byte id = p[6];
         byte value = p[7];
@@ -202,20 +208,39 @@ internal static class Aap
         }
     }
 
+    // Setting ids per LibrePods AACPManager.ControlCommandIdentifiers (0x2E AUTO_ANC_STRENGTH, 0x30 HRM_STATE).
+    private static DeviceCapabilities CapabilityOf(byte id, byte value) => id switch
+    {
+        ListeningModeId when value == (byte)ListeningMode.Adaptive => DeviceCapabilities.ListeningMode | DeviceCapabilities.Adaptive,
+        ListeningModeId => DeviceCapabilities.ListeningMode,
+        AdaptiveStrengthId => DeviceCapabilities.Adaptive,
+        EarDetectionId => DeviceCapabilities.EarDetection,
+        ConversationAwarenessId => DeviceCapabilities.ConversationAwareness,
+        OneBudAncId => DeviceCapabilities.OneBudAnc,
+        PersonalizedVolumeId => DeviceCapabilities.PersonalizedVolume,
+        AllowOffId => DeviceCapabilities.AllowOff,
+        MicSideId => DeviceCapabilities.MicSide,
+        PressSpeedId => DeviceCapabilities.PressSpeed,
+        HoldDurationId => DeviceCapabilities.HoldDuration,
+        ToneVolumeId => DeviceCapabilities.ToneVolume,
+        HearingAidId => DeviceCapabilities.HearingAid,
+        HeartRateStateId => DeviceCapabilities.HeartRate,
+        _ => DeviceCapabilities.None,
+    };
+
     private static DeviceChange ApplyDeviceInfo(ReadOnlySpan<byte> p, DeviceState state)
     {
-        // Strings start at offset 11 (bytes 6..10 undecoded): name, model number, manufacturer.
+        // Strings start at offset 11 (bytes 6..10 undecoded): name, model number, manufacturer, serial, ...
         ReadOnlySpan<byte> rest = p[11..];
         string name = NextString(ref rest);
         string modelNumber = NextString(ref rest);
-        string manufacturer = NextString(ref rest);
         if (name == state.Name && modelNumber == state.ModelNumber)
         {
             return DeviceChange.None;
         }
         state.Name = name;
         state.ModelNumber = modelNumber;
-        state.ModelName = ResolveModel(modelNumber, name, manufacturer);
+        state.ModelName = (Models.FromModelNumber(modelNumber) ?? Models.Unknown).Name;
         return DeviceChange.Identity;
     }
 
@@ -230,61 +255,6 @@ internal static class Aap
         rest = end < rest.Length ? rest[(end + 1)..] : default;
         return value;
     }
-
-    public static string ResolveModel(string modelNumber, string deviceName, string manufacturer)
-    {
-        if (FindModelCode(modelNumber) is { } code && Catalog(code) is { } model)
-        {
-            return model;
-        }
-        if (deviceName.Contains("AirPods", StringComparison.OrdinalIgnoreCase))
-        {
-            return deviceName;
-        }
-        if (manufacturer.Contains("Apple", StringComparison.OrdinalIgnoreCase))
-        {
-            return modelNumber.Length > 0 ? $"Apple accessory · {modelNumber}" : "Apple audio accessory";
-        }
-        return "Model not recognized";
-    }
-
-    // First whole-word "A" + 4 digits (case-insensitive), uppercased.
-    private static string? FindModelCode(string text)
-    {
-        for (int i = 0; i + 5 <= text.Length; i++)
-        {
-            if ((text[i] | 0x20) == 'a'
-                && (i == 0 || !IsWordChar(text[i - 1]))
-                && char.IsAsciiDigit(text[i + 1]) && char.IsAsciiDigit(text[i + 2])
-                && char.IsAsciiDigit(text[i + 3]) && char.IsAsciiDigit(text[i + 4])
-                && (i + 5 == text.Length || !IsWordChar(text[i + 5])))
-            {
-                return string.Concat("A", text.AsSpan(i + 1, 4));
-            }
-        }
-        return null;
-    }
-
-    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
-
-    private static string? Catalog(string code) => code switch
-    {
-        "A1523" or "A1722" => "AirPods (1st generation)",
-        "A2031" or "A2032" => "AirPods (2nd generation)",
-        "A2083" or "A2084" => "AirPods Pro (1st generation)",
-        "A2096" => "AirPods Max (1st generation)",
-        "A2564" or "A2565" => "AirPods (3rd generation)",
-        "A2698" or "A2699" or "A2931" => "AirPods Pro (2nd generation · Lightning)",
-        "A3047" or "A3048" or "A3049" => "AirPods Pro (2nd generation · USB-C)",
-        "A3050" or "A3053" or "A3054" => "AirPods (4th generation)",
-        "A3055" or "A3056" or "A3057" => "AirPods 4 (ANC)",
-        "A3063" or "A3064" or "A3065" => "AirPods Pro (3rd generation)",
-        "A3184" => "AirPods Max (USB-C)",
-        "A3454" => "AirPods Max (2nd generation)",
-        "A3439" or "A3440" or "A3441" => "AirPods (5th generation · wireless case)",
-        "A3531" or "A3532" or "A3533" => "AirPods (5th generation)",
-        _ => null,
-    };
 
     // ---- Heart rate (0x17 RTBuddy frame with a protobuf payload) ----
 
@@ -306,7 +276,7 @@ internal static class Aap
         {
             state.HeartRate = HeartRateStatus.Streaming;
         }
-        return DeviceChange.HeartRate;
+        return DeviceChange.HeartRate | state.Observe(DeviceCapabilities.HeartRate);
     }
 
     private static bool TryParseHeartRate(ReadOnlySpan<byte> p, out byte bpm, out byte confidence)

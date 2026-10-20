@@ -60,6 +60,24 @@ public sealed class NearbyService : IDisposable
 
     public event Action? OffersChanged;
 
+    /// <summary>
+    /// <see cref="IsNearby"/> changed for some pair. Same threading as <see cref="OffersChanged"/>; handlers must not
+    /// block and should call <see cref="IsNearby"/>.
+    /// </summary>
+    public event Action? NearbyChanged;
+
+    /// <summary>
+    /// "Connected to another device": the pair's proximity adverts are seen (resolved with its keys, last one less
+    /// than 45 s ago) while its link to Windows is down.
+    /// </summary>
+    public bool IsNearby(ulong address)
+    {
+        lock (_lock)
+        {
+            return _pairs.TryGetValue(address, out Pair? pair) && pair.Nearby;
+        }
+    }
+
     public unsafe void Start()
     {
         _self = GCHandle.Alloc(this);
@@ -246,6 +264,7 @@ public sealed class NearbyService : IDisposable
             return;
         }
         bool changed;
+        bool nearbyChanged;
         lock (_lock)
         {
             if (!_resolved.TryGetValue(address, out Pair? pair))
@@ -261,7 +280,9 @@ public sealed class NearbyService : IDisposable
             {
                 return;
             }
+            bool wasNearby = pair.Nearby;
             changed = Update(pair, data);
+            nearbyChanged = pair.Nearby != wasNearby;
             if (changed)
             {
                 Publish();
@@ -270,6 +291,10 @@ public sealed class NearbyService : IDisposable
         if (changed)
         {
             OffersChanged?.Invoke();
+        }
+        if (nearbyChanged)
+        {
+            NearbyChanged?.Invoke();
         }
     }
 
@@ -342,6 +367,7 @@ public sealed class NearbyService : IDisposable
     private void OnExpiry()
     {
         bool changed = false;
+        bool nearbyChanged = false;
         lock (_lock)
         {
             long now = Environment.TickCount64;
@@ -358,6 +384,7 @@ public sealed class NearbyService : IDisposable
                     next = Math.Min(next, due);
                     continue;
                 }
+                nearbyChanged |= pair.Nearby;
                 pair.Present = false;
                 pair.LidOpen = false;
                 if (pair.Offer is { State: OfferState.Offer or OfferState.Failed })
@@ -380,15 +407,25 @@ public sealed class NearbyService : IDisposable
         {
             OffersChanged?.Invoke();
         }
+        if (nearbyChanged)
+        {
+            NearbyChanged?.Invoke();
+        }
     }
 
     // CM notification thread.
     private void OnLinkChanged(ulong address, bool up)
     {
-        bool changed;
+        bool changed = false;
+        bool nearbyChanged = false;
         lock (_lock)
         {
-            changed = _pairs.TryGetValue(address, out Pair? pair) && SetLinkUp(pair, up);
+            if (_pairs.TryGetValue(address, out Pair? pair))
+            {
+                bool wasNearby = pair.Nearby;
+                changed = SetLinkUp(pair, up);
+                nearbyChanged = pair.Nearby != wasNearby;
+            }
             if (changed)
             {
                 Publish();
@@ -397,6 +434,10 @@ public sealed class NearbyService : IDisposable
         if (changed)
         {
             OffersChanged?.Invoke();
+        }
+        if (nearbyChanged)
+        {
+            NearbyChanged?.Invoke();
         }
         // No radio-state event exists in Core; a link coming up also means the radio is on.
         if (up)
@@ -426,6 +467,7 @@ public sealed class NearbyService : IDisposable
     private void Refresh()
     {
         bool changed = false;
+        bool nearbyChanged = false;
         lock (_refreshLock)
         {
             List<KnownDevice> devices = _connections.GetDevices();
@@ -459,7 +501,9 @@ public sealed class NearbyService : IDisposable
                             changed = true;
                         }
                     }
+                    bool wasNearby = pair.Nearby;
                     changed |= SetLinkUp(pair, device.LinkUp);
+                    nearbyChanged |= pair.Nearby != wasNearby;
                 }
                 foreach (Pair pair in _pairs.Values)
                 {
@@ -469,6 +513,7 @@ public sealed class NearbyService : IDisposable
                         pair.CancelConnect();
                         pair.Dispose();
                         changed |= pair.Offer is not null;
+                        nearbyChanged |= pair.Nearby;
                         keysChanged = true;
                     }
                 }
@@ -485,6 +530,10 @@ public sealed class NearbyService : IDisposable
         if (changed)
         {
             OffersChanged?.Invoke();
+        }
+        if (nearbyChanged)
+        {
+            NearbyChanged?.Invoke();
         }
     }
 
@@ -527,6 +576,7 @@ public sealed class NearbyService : IDisposable
         public long LastSeen { get; set; }
         public int Generation { get; set; }
         public NearbyOffer? Offer { get; set; }
+        public bool Nearby => Present && !LinkUp;
         /// <summary>Completed when the link comes up during a connect; cancelled to abandon the connect.</summary>
         public TaskCompletionSource? Link { get; set; }
 

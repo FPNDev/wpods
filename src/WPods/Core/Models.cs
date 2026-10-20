@@ -26,8 +26,10 @@ public enum ModelCapabilities
 public sealed record AirPodsModel(string Name, string Art, ModelCapabilities Capabilities);
 
 /// <summary>
-/// Model lookup by proximity-advert model ID and by AAP model number (A-number, Apple support 109525).
-/// The proximity ID is advert bytes 3-4 read little-endian (= Apple's Bluetooth product ID, e.g. 0x2014).
+/// The single model table: display name + illustration by AAP 0x1D model number (A-number, names and numbers per
+/// Apple support 109525 "Identify your AirPods") and by proximity-advert model ID (advert bytes 3-4 read
+/// little-endian = Apple's Bluetooth product ID, e.g. 0x2024; per LibrePods and AirPodsDesktop). Which features to
+/// show comes from <see cref="DeviceState.Capabilities"/> (reported by the device), not from this table.
 /// </summary>
 public static class Models
 {
@@ -43,18 +45,18 @@ public static class Models
 
     static Models()
     {
-        var airPods1 = new AirPodsModel("AirPods (1st generation)", "airpods", ModelCapabilities.None);
-        var airPods2 = new AirPodsModel("AirPods (2nd generation)", "airpods", ModelCapabilities.None);
-        var airPods3 = new AirPodsModel("AirPods (3rd generation)", "airpods", ModelCapabilities.None);
+        var airPods1 = new AirPodsModel("AirPods 1", "airpods", ModelCapabilities.None);
+        var airPods2 = new AirPodsModel("AirPods 2", "airpods", ModelCapabilities.None);
+        var airPods3 = new AirPodsModel("AirPods 3", "airpods", ModelCapabilities.None);
         var airPods4 = new AirPodsModel("AirPods 4", "airpods4", ModelCapabilities.None);
         var airPods4Anc = new AirPodsModel("AirPods 4 (ANC)", "airpods4", ModelCapabilities.NoiseControl | ModelCapabilities.ConversationAwareness
             | ModelCapabilities.OneBudAnc | ModelCapabilities.PersonalizedVolume | ModelCapabilities.AllowOff);
         var airPods5 = new AirPodsModel("AirPods 5", "airpods4", ModelCapabilities.NoiseControl | ModelCapabilities.Adaptive
             | ModelCapabilities.ConversationAwareness | ModelCapabilities.OneBudAnc | ModelCapabilities.PersonalizedVolume | ModelCapabilities.AllowOff);
-        var pro1 = new AirPodsModel("AirPods Pro", "pro", ModelCapabilities.NoiseControl | ModelCapabilities.AllowOff | ModelCapabilities.OneBudAnc);
+        var pro1 = new AirPodsModel("AirPods Pro 1", "pro", ModelCapabilities.NoiseControl | ModelCapabilities.AllowOff | ModelCapabilities.OneBudAnc);
         var pro2 = new AirPodsModel("AirPods Pro 2", "pro", ProCapabilities);
         var pro3 = new AirPodsModel("AirPods Pro 3", "pro", ProCapabilities | ModelCapabilities.HeartRate);
-        var max = new AirPodsModel("AirPods Max", "max", ModelCapabilities.NoiseControl | ModelCapabilities.ConversationAwareness
+        var max = new AirPodsModel("AirPods Max 1", "max", ModelCapabilities.NoiseControl | ModelCapabilities.ConversationAwareness
             | ModelCapabilities.PersonalizedVolume | ModelCapabilities.AllowOff | ModelCapabilities.SingleBattery);
         var max2 = new AirPodsModel("AirPods Max 2", "max", ModelCapabilities.NoiseControl | ModelCapabilities.Adaptive
             | ModelCapabilities.ConversationAwareness | ModelCapabilities.PersonalizedVolume | ModelCapabilities.AllowOff
