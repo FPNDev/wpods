@@ -21,6 +21,22 @@ public sealed record HostSettings
     public MicMode MicMode { get; init; }
 }
 
+/// <summary>App UI preferences (settings.json "ui"; every field optional so older files load).</summary>
+public sealed record UiPrefs
+{
+    public static readonly UiPrefs Default = new();
+
+    /// <summary>"light", "dark" or "auto".</summary>
+    public string Theme { get; init; } = "auto";
+    public bool UseAccent { get; init; }
+    /// <summary>"system" (Windows UI language) or a locale file's ISO code.</summary>
+    public string Language { get; init; } = "system";
+    /// <summary>Main window height in DIPs.</summary>
+    public double WindowHeight { get; init; } = 640;
+    public bool FirstRunDone { get; init; }
+    public bool FirstHideToastShown { get; init; }
+}
+
 /// <summary>Model reported over AAP 0x1D, remembered for pairs that are not attached.</summary>
 public sealed record DeviceModel(string Number, string Name);
 
@@ -40,6 +56,7 @@ public sealed class SettingsStore
     private readonly Dictionary<ulong, ProximityKeys> _keys = [];
     private readonly Dictionary<ulong, DeviceModel> _models = [];
     private ulong _lastUsed;
+    private UiPrefs _ui = UiPrefs.Default;
 
     public SettingsStore()
         : this(
@@ -92,6 +109,30 @@ public sealed class SettingsStore
                 _lastUsed = value;
                 SaveSettings();
             }
+        }
+    }
+
+    public UiPrefs Ui
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _ui;
+            }
+        }
+    }
+
+    public void SetUi(UiPrefs prefs)
+    {
+        lock (_lock)
+        {
+            if (_ui == prefs)
+            {
+                return;
+            }
+            _ui = prefs;
+            SaveSettings();
         }
     }
 
@@ -183,6 +224,7 @@ public sealed class SettingsStore
             {
                 return;
             }
+            _ui = file.Ui ?? UiPrefs.Default;
             if (file.LastUsed is { } last && Mac.TryParse(last, out ulong lastUsed))
             {
                 _lastUsed = lastUsed;
@@ -244,7 +286,7 @@ public sealed class SettingsStore
 
     private void SaveSettings()
     {
-        var file = new SettingsFile { LastUsed = _lastUsed == 0 ? null : Mac.Format(_lastUsed) };
+        var file = new SettingsFile { LastUsed = _lastUsed == 0 ? null : Mac.Format(_lastUsed), Ui = _ui };
         foreach ((ulong address, HostSettings settings) in _devices)
         {
             file.Devices[Mac.Format(address)] = settings;
@@ -311,6 +353,7 @@ public sealed class SettingsStore
 internal sealed class SettingsFile
 {
     public string? LastUsed { get; set; }
+    public UiPrefs? Ui { get; set; }
     public Dictionary<string, HostSettings> Devices { get; set; } = [];
     public Dictionary<string, DeviceModel> Models { get; set; } = [];
 }
