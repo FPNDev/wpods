@@ -167,7 +167,7 @@ public sealed partial class EarPause
             Log.Info("earpause", $"{what}: skipped, ear detection is {(session.State.EarDetection is null ? "unknown" : "off")}");
             return false;
         }
-        int output = wpn_audio_is_default_output(session.Address);
+        int output = DefaultOutputWatcher.wpn_audio_is_default_output(session.Address);
         if (output != 1)
         {
             Log.Info("earpause", $"{what}: skipped, AirPods are not the default output{(output < 0 ? $" (error 0x{output:X8})" : "")}");
@@ -188,7 +188,4 @@ public sealed partial class EarPause
 
     [LibraryImport("wpods_native.dll")]
     private static partial int wpn_media_play();
-
-    [LibraryImport("wpods_native.dll")]
-    private static partial int wpn_audio_is_default_output(ulong btAddress);
 }

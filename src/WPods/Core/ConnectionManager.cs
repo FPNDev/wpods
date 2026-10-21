@@ -171,6 +171,27 @@ public sealed class ConnectionManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Default-output follow (<see cref="DefaultOutputWatcher"/>): switches the session to <paramref name="address"/>
+    /// when its link is up, it is not attached and the user did not disconnect it
+    /// (<see cref="IdleReason.UserDisconnected"/>, checked under the gate). Never pages.
+    /// </summary>
+    public async Task FollowDefaultOutputAsync(ulong address)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (!_disposed)
+            {
+                await FollowLocked(address, "default output changed").ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
     /// Mac-like full disconnect, optimistic: marks the pair <see cref="IdleReason.UserDisconnected"/> and detaches at
     /// once (<see cref="DevicesChanged"/>, <see cref="Detached"/>), then asks Windows to drop the Bluetooth audio
     /// connection; when the request fails or the link is still up 3 s later it asks once more. Completes when the
@@ -345,8 +366,18 @@ public sealed class ConnectionManager : IAsyncDisposable
                     SetIdle(address, IdleReason.None, "link up again");
                 }
             }
-            if (_session is not null)
+            if (_session is { } current)
             {
+                if (address != 0 && current.Address != address)
+                {
+                    int output = DefaultOutputWatcher.wpn_audio_is_default_output(address);
+                    if (output == 1)
+                    {
+                        await FollowLocked(address, "link up as the default output").ConfigureAwait(false);
+                        return;
+                    }
+                    Log.Info("follow", $"link up {Mac.Format(address)}: not the default output (result {output}), keeping session={Describe(current)}");
+                }
                 Log.Info("conn", "link decision: a session is attached, nothing to do");
                 return;
             }
@@ -369,6 +400,33 @@ public sealed class ConnectionManager : IAsyncDisposable
         {
             _gate.Release();
         }
+    }
+
+    // Switches the session to the default-output pair (detaching the current one first) unless it is already attached,
+    // its link is down or the user disconnected it. Never pages.
+    private async Task FollowLocked(ulong address, string why)
+    {
+        if (_session?.Address == address)
+        {
+            Log.Info("follow", $"{Mac.Format(address)} ({why}): already attached");
+            return;
+        }
+        if (!_link.IsUp(address))
+        {
+            Log.Info("follow", $"{Mac.Format(address)} ({why}): link not up, keeping session={Describe(_session)}");
+            return;
+        }
+        if (GetIdle(address) == IdleReason.UserDisconnected)
+        {
+            Log.Info("follow", $"{Mac.Format(address)} ({why}): user disconnected, keeping session={Describe(_session)}");
+            return;
+        }
+        Log.Info("follow", $"{Mac.Format(address)} ({why}): switching from session={Describe(_session)}");
+        if (_session is not null)
+        {
+            await DetachLocked("follow default output").ConfigureAwait(false);
+        }
+        AttachLocked(address, "follow default output", newSeries: true);
     }
 
     // Link up and nothing (user disconnect, gave up) holds the pair back.

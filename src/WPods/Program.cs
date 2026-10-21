@@ -69,6 +69,7 @@ internal static class Program
         // Opening the case releases a pair the user disconnected while Windows still has its link up.
         nearby.CaseOpened += connections.OnCaseOpened;
         var app = new TrayApp(settings, connections, nearby, mic, keepAlive, ducker, locales, startHidden: startup);
+        using var defaultOutput = new DefaultOutputWatcher(connections);
         connections.Start();
         nearby.Start();
         Application.Run(app);
