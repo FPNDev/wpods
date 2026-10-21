@@ -4,3 +4,6 @@ EXPORTS
     wpn_ble_stop
     wpn_bt_connect_audio
     wpn_bt_disconnect_audio
+    wpn_media_pause_if_playing
+    wpn_media_play
+    wpn_audio_is_default_output

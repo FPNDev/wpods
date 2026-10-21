@@ -1,4 +1,5 @@
-// wpods_native.dll: passive BLE Proximity Pairing watcher + BT audio KS one-shot connect/disconnect.
+// wpods_native.dll: passive BLE Proximity Pairing watcher + BT audio KS one-shot connect/disconnect +
+// media session pause/play (GSMTC) + default-output check.
 //
 // Apartments: the DLL never initializes COM on the caller's thread. On first use it calls
 // CoIncrementMTAUsage once (never released), which keeps the process MTA alive so that WinRT/COM
@@ -15,17 +16,20 @@
 #include <functiondiscoverykeys_devpkey.h>
 
 #include <algorithm>
+#include <chrono>
 #include <string>
 #include <vector>
 
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Devices.Bluetooth.Advertisement.h>
+#include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
 
 #include "wpods_native.h"
 
 using namespace winrt::Windows::Devices::Bluetooth;
 using namespace winrt::Windows::Devices::Bluetooth::Advertisement;
+using namespace winrt::Windows::Media::Control;
 
 namespace {
 
@@ -39,6 +43,10 @@ void* g_context;
 // Raw ABI pointer instead of a winrt object: no static destructor releasing COM under the loader lock.
 void* g_watcher;
 winrt::event_token g_receivedToken;
+
+constexpr std::chrono::seconds kMediaTimeout{ 3 };
+SRWLOCK g_mediaLock = SRWLOCK_INIT; // serializes the media functions and guards g_pausedApp
+std::wstring g_pausedApp;           // SourceAppUserModelId of the session wpn_media_pause_if_playing paused
 
 HRESULT ensure_mta()
 {
@@ -201,6 +209,23 @@ int32_t send_oneshot(uint64_t address, ULONG propertyId) noexcept
     }
 }
 
+// Waits for a WinRT async operation for at most kMediaTimeout; throws on timeout or failure.
+template <typename Operation>
+auto wait_result(Operation const& operation)
+{
+    if (operation.wait_for(kMediaTimeout) == winrt::Windows::Foundation::AsyncStatus::Started) {
+        operation.Cancel();
+        winrt::throw_hresult(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
+    }
+    return operation.GetResults();
+}
+
+GlobalSystemMediaTransportControlsSessionManager media_manager()
+{
+    winrt::check_hresult(ensure_mta());
+    return wait_result(GlobalSystemMediaTransportControlsSessionManager::RequestAsync());
+}
+
 } // namespace
 
 int32_t __stdcall wpn_ble_start(wpn_adv_cb callback, void* ctx)
@@ -260,4 +285,74 @@ int32_t __stdcall wpn_bt_connect_audio(uint64_t btAddress)
 int32_t __stdcall wpn_bt_disconnect_audio(uint64_t btAddress)
 {
     return send_oneshot(btAddress, KSPROPERTY_ONESHOT_DISCONNECT);
+}
+
+int32_t __stdcall wpn_media_pause_if_playing(void)
+{
+    AcquireSRWLockExclusive(&g_mediaLock);
+    int32_t result;
+    try {
+        auto const session = media_manager().GetCurrentSession();
+        if (!session || session.GetPlaybackInfo().PlaybackStatus() !=
+                GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing) {
+            result = 0;
+        } else if (wait_result(session.TryPauseAsync())) {
+            g_pausedApp = session.SourceAppUserModelId();
+            result = 1;
+        } else {
+            result = E_FAIL;
+        }
+    } catch (...) {
+        result = winrt::to_hresult();
+    }
+    ReleaseSRWLockExclusive(&g_mediaLock);
+    return result;
+}
+
+int32_t __stdcall wpn_media_play(void)
+{
+    AcquireSRWLockExclusive(&g_mediaLock);
+    int32_t result = 0;
+    try {
+        if (!g_pausedApp.empty()) {
+            std::wstring const app = std::move(g_pausedApp);
+            g_pausedApp.clear();
+            for (auto const& session : media_manager().GetSessions()) {
+                if (session.SourceAppUserModelId() == app) {
+                    result = wait_result(session.TryPlayAsync()) ? 1 : E_FAIL;
+                    break;
+                }
+            }
+        }
+    } catch (...) {
+        result = winrt::to_hresult();
+    }
+    ReleaseSRWLockExclusive(&g_mediaLock);
+    return result;
+}
+
+int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress)
+{
+    try {
+        winrt::check_hresult(ensure_mta());
+        auto const enumerator = winrt::create_instance<IMMDeviceEnumerator>(__uuidof(MMDeviceEnumerator));
+        winrt::com_ptr<IMMDevice> endpoint;
+        HRESULT const hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, endpoint.put());
+        if (hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) {
+            return 0;
+        }
+        winrt::check_hresult(hr);
+        winrt::com_ptr<IPropertyStore> properties;
+        winrt::check_hresult(endpoint->OpenPropertyStore(STGM_READ, properties.put()));
+        PROPVARIANT value;
+        PropVariantInit(&value);
+        winrt::check_hresult(properties->GetValue(PKEY_Device_ContainerId, &value));
+        bool const hasContainer = value.vt == VT_CLSID;
+        GUID const endpointContainer = hasContainer ? *value.puuid : GUID{};
+        PropVariantClear(&value);
+        GUID deviceContainer;
+        return hasContainer && find_container_id(btAddress, deviceContainer) && endpointContainer == deviceContainer ? 1 : 0;
+    } catch (...) {
+        return winrt::to_hresult();
+    }
 }

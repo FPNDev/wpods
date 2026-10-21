@@ -18,8 +18,11 @@ internal sealed unsafe partial class Denoiser : IDisposable
         }
     }
 
-    /// <summary>Denoises one frame. The output lags the input by one frame (RNNoise's analysis window).</summary>
-    public void Process(float* output, float* input) => rnnoise_process_frame(_state, output, input);
+    /// <summary>
+    /// Denoises one frame and returns RNNoise's voice probability (0..1) for this input frame. The output lags the
+    /// input by one frame (RNNoise's analysis window).
+    /// </summary>
+    public float Process(float* output, float* input) => rnnoise_process_frame(_state, output, input);
 
     public void Dispose()
     {

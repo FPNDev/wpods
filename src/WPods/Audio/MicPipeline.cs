@@ -34,8 +34,6 @@ public sealed class MicPipeline
     private const int MaxConsecutiveErrors = 8;
     private const int LevelIntervalMs = 100;
     private const float LevelDecay = 0.6f;
-    // Standard mode keeps this share of what RNNoise removed (~ -12 dB residual noise).
-    private const float StandardResidual = 0.25f;
 
     private static readonly byte[] StartMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x01, 0x82, 0x00, 0x00, 0x00, 0x04, 0x96, 0x00];
 
@@ -46,10 +44,8 @@ public sealed class MicPipeline
 
     // Read-loop state (one session at a time; reset on detach after its read loop ended).
     private readonly short[] _pcm = GC.AllocateArray<short>(PcmCapacity, pinned: true);
-    private float[] _input = GC.AllocateArray<float>(Denoiser.FrameSize, pinned: true);
-    private float[] _previousInput = GC.AllocateArray<float>(Denoiser.FrameSize, pinned: true);
     private AacDecoder? _decoder;
-    private Denoiser? _denoiser;
+    private VoiceProcessor? _voice;
     private bool _nativeFailed;
     private int _fill;
     private int _errors;
@@ -118,8 +114,8 @@ public sealed class MicPipeline
         Log.Info("mic", $"session {Mac.Format(session.Address)} detached");
         _decoder?.Dispose();
         _decoder = null;
-        _denoiser?.Dispose();
-        _denoiser = null;
+        _voice?.Dispose();
+        _voice = null;
         _nativeFailed = false;
         _fill = 0;
     }
@@ -270,8 +266,8 @@ public sealed class MicPipeline
         try
         {
             _decoder = new AacDecoder();
-            _denoiser = new Denoiser();
-            Log.Info("mic", "decoder and denoiser created");
+            _voice = new VoiceProcessor();
+            Log.Info("mic", "decoder and voice processor created");
             return true;
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
@@ -313,7 +309,7 @@ public sealed class MicPipeline
         return true;
     }
 
-    // Wide Spectrum writes everything at once; the RNNoise modes write whole 480-sample frames.
+    // Wide Spectrum writes everything at once; the other modes write whole 480-sample frames.
     private void Emit(long now)
     {
         MicMode mode = _mode;
@@ -326,7 +322,7 @@ public sealed class MicPipeline
         {
             for (; _fill - ready >= Denoiser.FrameSize; ready += Denoiser.FrameSize)
             {
-                Denoise(_pcm.AsSpan(ready, Denoiser.FrameSize), mode == MicMode.Standard);
+                _voice!.Process(_pcm.AsSpan(ready, Denoiser.FrameSize), mode);
             }
             if (ready == 0)
             {
@@ -338,28 +334,6 @@ public sealed class MicPipeline
         _mic.Write(output);
         _fill -= ready;
         _pcm.AsSpan(ready, _fill).CopyTo(_pcm);
-    }
-
-    private unsafe void Denoise(Span<short> frame, bool standard)
-    {
-        float* denoised = stackalloc float[Denoiser.FrameSize];
-        fixed (float* input = _input)
-        fixed (float* previous = _previousInput)
-        {
-            for (int i = 0; i < Denoiser.FrameSize; i++)
-            {
-                input[i] = frame[i];
-            }
-            _denoiser!.Process(denoised, input);
-            for (int i = 0; i < Denoiser.FrameSize; i++)
-            {
-                float wet = denoised[i];
-                // RNNoise output lags one frame, so the dry signal mixed back is the previous input frame.
-                float value = standard ? wet + StandardResidual * (previous[i] - wet) : wet;
-                frame[i] = (short)Math.Clamp(MathF.Round(value), short.MinValue, short.MaxValue);
-            }
-        }
-        (_input, _previousInput) = (_previousInput, _input);
     }
 
     private void UpdateLevel(ReadOnlySpan<short> output, long now)

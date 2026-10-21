@@ -29,6 +29,25 @@ int32_t __stdcall wpn_bt_connect_audio(uint64_t btAddress);
 // connection (Mac-like Disconnect). Same return semantics; confirm via ACL link event.
 int32_t __stdcall wpn_bt_disconnect_audio(uint64_t btAddress);
 
+// Media functions below: synchronous (each WinRT call waits at most 3 s), call off the UI thread;
+// they never initialize COM on the caller's thread (implicit MTA, see wpods_native.cpp).
+// Pauses the current Windows media session (GlobalSystemMediaTransportControlsSessionManager::
+// GetCurrentSession, the one the Windows media flyout shows) if it is playing, and remembers its
+// SourceAppUserModelId for wpn_media_play. Returns 1 = paused, 0 = no current session or it is not
+// playing, negative HRESULT on error (E_FAIL = the app refused the pause, HRESULT_FROM_WIN32(
+// ERROR_TIMEOUT) = no answer within 3 s).
+int32_t __stdcall wpn_media_pause_if_playing(void);
+// Resumes the session remembered by the last successful wpn_media_pause_if_playing (looked up by
+// SourceAppUserModelId among the current sessions) and forgets it. Returns 1 = play requested and
+// accepted, 0 = nothing remembered or that app has no session any more, negative HRESULT on error
+// (same codes as above).
+int32_t __stdcall wpn_media_play(void);
+// Returns 1 if the default eConsole render endpoint (the endpoint Windows plays to) belongs to the
+// paired Classic BT device with this address (its PKEY_Device_ContainerId equals the container ID of
+// the present BTHENUM\DEV_<address> devnode; A2DP and Hands-Free endpoints share it), 0 if not or
+// if there is no default render endpoint, negative HRESULT on error.
+int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress);
+
 #ifdef __cplusplus
 }
 #endif
