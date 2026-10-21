@@ -34,12 +34,12 @@ span.wp-menu__glyph { display: grid; place-items: center; }
 .wp-steps__row { display: flex; align-items: center; gap: var(--space-3); }
 .wp-steps__grow { flex: 1; min-width: 0; }
 
-/* Toast: one element; the icon follows the kind. */
-.wp-toast__icon { display: none; }
-.wp-toast--info > .wp-toast__icon--info, .wp-toast--success > .wp-toast__icon--success, .wp-toast--error > .wp-toast__icon--error { display: block; }
+/* Toast: only its buttons take the pointer, so it never blocks the controls under it (it closes itself, or x). */
+.wp-toast { pointer-events: none; }
+.wp-toast button { pointer-events: auto; }
 
 /* Nearby popup window: the card is the window (Windows draws corners and shadow). */
-.wp-popup--window { width: 100%; border-radius: 0; box-shadow: none; }
+.wp-popup--window { width: 100%; box-sizing: border-box; border-radius: 0; box-shadow: none; }
 .wp-popup__view { display: contents; }
 .wp-popup__id { max-width: 100%; }
 .wp-popup__head { margin-top: var(--space-2); }
@@ -64,5 +64,5 @@ span.wp-menu__glyph { display: grid; place-items: center; }
 .wp-slider__input:focus-visible:active::-webkit-slider-thumb { transform: scale(0.9); }
 .wp-search__input:focus-visible { border-color: var(--border-strong); }
 
-/* Long single-word labels (e.g. Ukrainian "Шумозаглушення") break instead of overflowing the segment. */
+/* Long single-word labels (long Ukrainian words) break instead of overflowing the segment. */
 .wp-seg__label { hyphens: auto; overflow-wrap: break-word; }

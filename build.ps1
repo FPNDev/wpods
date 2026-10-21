@@ -1,5 +1,5 @@
 # Builds everything and produces dist\WPods-Setup.exe:
-# native DLLs (only when an output is missing) -> driver packages -> dotnet publish -> Inno Setup 6.
+# native DLLs (only when an output is missing) -> driver packages -> web UI -> dotnet publish -> Inno Setup 6.
 param(
     [switch]$SkipNative, # never build the native DLLs (use .build\native\bin as is)
     [switch]$SkipDrivers # use the driver packages already in .build\drivers
@@ -39,6 +39,24 @@ if (-not $SkipNative) {
 
 if (-not $SkipDrivers) {
     Invoke-Script 'drivers\build.ps1'
+}
+
+# Web UI: ui\ (TypeScript + JSX via our build-time transform) -> src\WPods\web (generated, not committed).
+$ui = Join-Path $root 'ui'
+Push-Location $ui
+try {
+    if (-not (Test-Path (Join-Path $ui 'node_modules'))) {
+        npm ci
+        if ($LASTEXITCODE -ne 0) {
+            throw "npm ci failed ($LASTEXITCODE)"
+        }
+    }
+    npm run build
+    if ($LASTEXITCODE -ne 0) {
+        throw "UI build failed ($LASTEXITCODE)"
+    }
+} finally {
+    Pop-Location
 }
 
 $publish = Join-Path $build 'publish'

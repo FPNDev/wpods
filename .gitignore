@@ -6,3 +6,5 @@ obj/
 x64/
 *.pdb
 dist/
+ui/node_modules/
+src/WPods/web/
