@@ -63,18 +63,19 @@ span.wp-menu__glyph { display: grid; place-items: center; }
 .wp-slider__input:focus-visible::-webkit-slider-thumb { transform: scale(1.1); }
 .wp-slider__input:focus-visible:active::-webkit-slider-thumb { transform: scale(0.9); }
 .wp-search__input:focus-visible { border-color: var(--border-strong); }
-/* Lists clip to radius-lg; edge rows share it so their inset focus outline keeps its corners. */
-.wp-list > :first-child { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
-.wp-list > :last-child { border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg); }
+/* Focus rings follow the element's own radius and are never clipped (Round 19). Lists clip to radius-lg, so their
+   rows draw the ring inset and the first / last VISIBLE row takes the list's corner radius (hidden rows, such as
+   lock notes, don't count): top-rounded, bottom-rounded, fully rounded (only row) or square (middle rows). */
+.wp-list > :not([hidden]):not(:not([hidden]) ~ *) { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
+.wp-list > :not([hidden]):not(:has(~ :not([hidden]))) { border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg); }
+/* Menu items and segment faces touch their neighbours: the ring goes inside so a neighbour never paints over it. */
+.wp-menu__item:focus-visible { outline-offset: calc(var(--focus-w) * -1); }
+.wp-seg__input:focus-visible + .wp-seg__face { outline-offset: calc(var(--focus-w) * -1); }
 
 /* Long single-word labels (long Ukrainian words) break instead of overflowing the segment. */
 .wp-seg__label { hyphens: auto; overflow-wrap: break-word; }
 
-/* ChoiceList rows that can't change: disabled (not connected) or aria-disabled (reason shown next to them). */
-.wp-choice:disabled, .wp-choice[aria-disabled="true"] { cursor: not-allowed; background: transparent; }
-.wp-choice:disabled .wp-row__title, .wp-choice[aria-disabled="true"] .wp-row__title { color: var(--text-disabled); }
-.wp-choice:disabled .wp-row__check { color: var(--text-disabled); }
-
-/* Slider with a text label in front (Conversation awareness: "Lower media to"). */
-.wp-slider__label { flex: none; }
+/* ChoiceList rows that can't change (not connected). */
+.wp-choice:disabled { cursor: not-allowed; background: transparent; }
+.wp-choice:disabled .wp-row__title, .wp-choice:disabled .wp-row__check { color: var(--text-disabled); }
 .wp-slider__input:disabled ~ .wp-slider__value { color: var(--text-disabled); }

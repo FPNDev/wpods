@@ -1,11 +1,11 @@
 /* Controls: double-press speed, press-and-hold duration, the modes press-and-hold cycles through, tone volume
    (each shown only when supported). */
 import { createChoiceList } from '../components/choiceList';
-import { Checking, LockRow, Note } from '../components/common';
+import { Checking, LockRow } from '../components/common';
 import { createSegmented, type Segmented } from '../components/segmented';
 import { setAttr, setDisabled, setHidden, setText } from '../dom';
 import { post } from '../host';
-import type { LabelKey } from '../i18n';
+import { t, type LabelKey } from '../i18n';
 import { Icon, type IconName } from '../icons';
 import type { HoldDuration, PressSpeed, StemMode } from '../protocol';
 import { capsOf, current, live, store } from '../state';
@@ -15,6 +15,8 @@ type SegRow<V extends string> = { row: HTMLDivElement; check: HTMLSpanElement; s
 
 const STEM_ORDER: StemMode[] = ['off', 'noiseCancellation', 'transparency', 'adaptive'];
 const STEM_MIN = 2;
+const DUCK_MIN = 10;
+const DUCK_MAX = 90;
 
 const segRow = <V extends string>(icon: IconName, title: LabelKey, desc: LabelKey, seg: Segmented<V>): SegRow<V> => {
   const check = Checking();
@@ -62,26 +64,24 @@ export const createControls = (ctx: Ctx): Page => {
       post({ type: 'setHoldDuration', value });
     },
   }));
-  /* Press-and-hold cycle (replaces Allow Off): at least STEM_MIN modes stay checked; unchecking the second-last is
-     blocked with the reason shown under the list. */
+  /* Press-and-hold cycle (replaces Allow Off). At least STEM_MIN modes stay checked: a click that would leave fewer
+     is ignored, without a message (iPhone behaviour). Rows show in the stem's own cycle order. */
   const stemLocked = LockRow('stemLocked');
-  const stemMinNote = Note({ label: 'stem.minNote', id: 'stemMin' });
-  const stemMinRow = <div class="wp-row" hidden>{stemMinNote}</div> as HTMLDivElement;
   const stemChecked = new Set<StemMode>();
   const stem = createChoiceList<StemMode>({
     role: 'checkbox',
     items: [
       { value: 'off', label: 'nc.off' },
-      { value: 'noiseCancellation', label: 'nc.noiseCancellation' },
       { value: 'transparency', label: 'nc.transparency' },
       { value: 'adaptive', label: 'nc.adaptive' },
+      { value: 'noiseCancellation', label: 'nc.noiseCancellation' },
     ],
     onPick: (mode) => {
       const d = current();
-      if (!d) {
+      const on = !stemChecked.has(mode);
+      if (!d || (!on && stemChecked.size <= STEM_MIN)) {
         return;
       }
-      const on = !stemChecked.has(mode);
       const modes: StemMode[] = [];
       for (const m of STEM_ORDER) {
         if (m === mode ? on : stemChecked.has(m)) {
@@ -95,6 +95,17 @@ export const createControls = (ctx: Ctx): Page => {
   });
   let stemGroup!: HTMLElement;
   let stemList!: HTMLDivElement;
+  /* Conversation awareness "Lower media to": host setting duckPercent (10..90 step 5); shown with the
+     conversationAwareness cap, enabled while the pair is attached (whether Conversation awareness is on or off). */
+  const duckLocked = LockRow('duckLocked');
+  let duckGroup!: HTMLElement;
+  let duck!: HTMLInputElement;
+  let duckValue!: HTMLSpanElement;
+  let lastDuck: number | null = null;
+  const showDuck = (value: number): void => {
+    duck.style.setProperty('--v', `${((value - DUCK_MIN) * 100) / (DUCK_MAX - DUCK_MIN)}%`);
+    setText(duckValue, t('battery.pct', { pct: value }));
+  };
   const pressLocked = LockRow('pressLocked');
   const toneLocked = LockRow('toneLocked');
   const toneCheck = Checking();
@@ -119,6 +130,31 @@ export const createControls = (ctx: Ctx): Page => {
       <section class="wp-group" ref={stemGroup}>
         <h2 class="wp-group__title" id="stemTitle" l:text="stem.title" />
         <div class="wp-list" role="group" aria-labelledby="stemTitle" ref={stemList}>{stemLocked}</div>
+      </section>
+      <section class="wp-group" ref={duckGroup}>
+        <h2 class="wp-group__title" l:text="features.conversation" />
+        <div class="wp-list">
+          {duckLocked}
+          <div class="wp-row wp-row--stack">
+            <div class="wp-row__head">
+              <div class="wp-row__text"><span class="wp-row__title" id="duckTitle" l:text="features.duck" /><span class="wp-row__desc" l:text="features.duckDesc" /></div>
+            </div>
+            <div class="wp-slider">
+              <input class="wp-slider__input" type="range" min={String(DUCK_MIN)} max={String(DUCK_MAX)} step="5" aria-labelledby="duckTitle" ref={duck}
+                oninput={() => showDuck(Number(duck.value))}
+                onchange={() => {
+                  const d = current();
+                  const value = Number(duck.value);
+                  lastDuck = value;
+                  if (d) {
+                    d.host.duckPercent = value;
+                    post({ type: 'setHostSetting', id: d.id, name: 'duckPercent', value });
+                  }
+                }} />
+              <span class="wp-slider__value" ref={duckValue} />
+            </div>
+          </div>
+        </div>
       </section>
       <section class="wp-group" ref={toneGroup}>
         <h2 class="wp-group__title" l:text="controls.soundsTitle" />
@@ -149,7 +185,7 @@ export const createControls = (ctx: Ctx): Page => {
     </div>
   ) as HTMLDivElement;
 
-  stemList.append(...stem.rows, stemMinRow);
+  stemList.append(...stem.rows);
 
   const renderStem = (modes: StemMode[], shown: boolean, adaptive: boolean, locked: boolean): void => {
     setHidden(stemGroup, !shown);
@@ -161,14 +197,10 @@ export const createControls = (ctx: Ctx): Page => {
     for (const m of modes) {
       stemChecked.add(m);
     }
-    const atMin = stemChecked.size <= STEM_MIN;
     setHidden(stemLocked, !locked);
-    setHidden(stemMinRow, locked || !atMin);
     stem.lock(locked, 'stemLocked');
     for (const m of STEM_ORDER) {
-      const on = stemChecked.has(m);
-      stem.set(m, on);
-      stem.block(m, !locked && atMin && on, 'stemMin');
+      stem.set(m, stemChecked.has(m));
     }
   };
 
@@ -196,6 +228,16 @@ export const createControls = (ctx: Ctx): Page => {
     renderSeg(hold, hasHold, !st, pending && st.holdDuration === null, st?.holdDuration ?? null);
 
     renderStem(d.stemModes, caps.has('listeningMode'), caps.has('adaptive'), !st);
+
+    setHidden(duckGroup, !caps.has('conversationAwareness'));
+    setHidden(duckLocked, !!st);
+    setDisabled(duck, !st);
+    setAttr(duck, 'aria-describedby', st ? null : 'duckLocked');
+    if (d.host.duckPercent !== lastDuck) {
+      lastDuck = d.host.duckPercent;
+      duck.value = String(lastDuck);
+      showDuck(lastDuck);
+    }
 
     setHidden(toneGroup, !caps.has('toneVolume'));
     setHidden(toneLocked, !!st);

@@ -38,10 +38,9 @@ const MIC_MODES: MicModeItem[] = [
   { value: 'voiceIso3', label: 'mic.voiceIso3', desc: 'mic.test' },
   { value: 'voiceIso4', label: 'mic.voiceIso4', desc: 'mic.test' },
 ];
-const DUCK_MIN = 10;
-const DUCK_MAX = 90;
+
 const HR_ON = new Set<HeartRate>(['starting', 'streaming', 'noReading']);
-const CONTROLS_CAPS: Capability[] = ['listeningMode', 'pressSpeed', 'holdDuration', 'toneVolume'];
+const CONTROLS_CAPS: Capability[] = ['listeningMode', 'pressSpeed', 'holdDuration', 'conversationAwareness', 'toneVolume'];
 const FEATURES: FeatureDef[] = [
   { key: 'earDetection', title: 'features.ear', desc: 'features.earDesc', descMax: 'features.earDescMax' },
   { key: 'conversationAwareness', title: 'features.conversation', desc: 'features.conversationDesc' },
@@ -97,10 +96,11 @@ export const createHome = (ctx: Ctx): Page => {
     legend: 'nc.title',
     icons: true,
     items: [
+      /* Display order = the order the stem cycles on the AirPods (Round 19). */
       { value: 'off', label: 'nc.off', icon: 'nc-off' },
-      { value: 'noiseCancellation', label: 'nc.noiseCancellation', icon: 'nc-anc' },
       { value: 'transparency', label: 'nc.transparency', icon: 'nc-transparency' },
       { value: 'adaptive', label: 'nc.adaptive', icon: 'nc-adaptive' },
+      { value: 'noiseCancellation', label: 'nc.noiseCancellation', icon: 'nc-anc' },
     ],
     onChange: (mode) => {
       setState('listeningMode', mode);
@@ -183,33 +183,6 @@ export const createHome = (ctx: Ctx): Page => {
     </div>
   ) as HTMLDivElement;
   features.find((f) => f.def.key === 'heartRate')?.row.append(hrLive, hrWait, hrNote);
-
-  /* Conversation awareness: "Lower media to" (host setting duckPercent, 10..90 step 5). */
-  let duck!: HTMLInputElement;
-  let duckValue!: HTMLSpanElement;
-  let lastDuck: number | null = null;
-  const showDuck = (value: number): void => {
-    duck.style.setProperty('--v', `${((value - DUCK_MIN) * 100) / (DUCK_MAX - DUCK_MIN)}%`);
-    setText(duckValue, t('battery.pct', { pct: value }));
-  };
-  const duckRow = (
-    <div class="wp-slider">
-      <span class="wp-row__desc wp-slider__label" id="duckLabel" l:text="features.duck" />
-      <input class="wp-slider__input" type="range" min={String(DUCK_MIN)} max={String(DUCK_MAX)} step="5" aria-labelledby="duckLabel" ref={duck}
-        oninput={() => showDuck(Number(duck.value))}
-        onchange={() => {
-          const d = current();
-          const value = Number(duck.value);
-          lastDuck = value;
-          if (d) {
-            d.host.duckPercent = value;
-            post({ type: 'setHostSetting', id: d.id, name: 'duckPercent', value });
-          }
-        }} />
-      <span class="wp-slider__value" ref={duckValue} />
-    </div>
-  ) as HTMLDivElement;
-  features.find((f) => f.def.key === 'conversationAwareness')?.row.append(duckRow);
 
   /* More */
   const toControls = NavRow({ icon: 'press', title: 'controls.title', desc: 'home.controlsDesc', onclick: () => ctx.go('controls') });
@@ -399,7 +372,8 @@ export const createHome = (ctx: Ctx): Page => {
     setHidden(micSideCheck, !checking);
     setHidden(micSide.el, checking);
     micSide.lock(!st, st ? null : 'micLocked');
-    micSide.set(st?.micSide ?? null);
+    /* Not reported = the device default, Automatic (Round 19). */
+    micSide.set(st ? st.micSide ?? 'automatic' : null);
   };
 
   const renderFeatures = (): void => {
@@ -443,14 +417,6 @@ export const createHome = (ctx: Ctx): Page => {
       setAttr(f.input, 'aria-describedby', !st ? 'featLocked' : reason ? f.desc.id : null);
     }
     setHidden(featGroup, !any);
-    const duckPercent = d.host.duckPercent;
-    setDisabled(duck, !st);
-    setAttr(duck, 'aria-describedby', st ? null : 'featLocked');
-    if (duckPercent !== lastDuck) {
-      lastDuck = duckPercent;
-      duck.value = String(duckPercent);
-      showDuck(duckPercent);
-    }
     setHidden(featLocked, !!st);
 
     const hrOn = !!st && HR_ON.has(st.heartRate) && caps.has('heartRate');
