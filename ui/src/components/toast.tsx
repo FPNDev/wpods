@@ -20,6 +20,7 @@ const ACTIONS: Record<ToastId, ToastAction | null> = {
   micFailed: null,
   lowLatencyFailed: null,
   handsFreeFailed: null,
+  disconnectFailed: null,
 };
 
 export const createToast = (onAction: (action: ToastAction) => void): Toast => {

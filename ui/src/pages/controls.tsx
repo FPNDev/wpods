@@ -1,15 +1,20 @@
-/* Controls: double-press speed, press-and-hold duration, tone volume (each shown only when supported). */
-import { Checking, LockRow } from '../components/common';
+/* Controls: double-press speed, press-and-hold duration, the modes press-and-hold cycles through, tone volume
+   (each shown only when supported). */
+import { createChoiceList } from '../components/choiceList';
+import { Checking, LockRow, Note } from '../components/common';
 import { createSegmented, type Segmented } from '../components/segmented';
 import { setAttr, setDisabled, setHidden, setText } from '../dom';
 import { post } from '../host';
 import type { LabelKey } from '../i18n';
 import { Icon, type IconName } from '../icons';
-import type { HoldDuration, PressSpeed } from '../protocol';
+import type { HoldDuration, PressSpeed, StemMode } from '../protocol';
 import { capsOf, current, live, store } from '../state';
-import type { Page } from './page';
+import type { Ctx, Page } from './page';
 
 type SegRow<V extends string> = { row: HTMLDivElement; check: HTMLSpanElement; seg: Segmented<V> };
+
+const STEM_ORDER: StemMode[] = ['off', 'noiseCancellation', 'transparency', 'adaptive'];
+const STEM_MIN = 2;
 
 const segRow = <V extends string>(icon: IconName, title: LabelKey, desc: LabelKey, seg: Segmented<V>): SegRow<V> => {
   const check = Checking();
@@ -26,7 +31,7 @@ const segRow = <V extends string>(icon: IconName, title: LabelKey, desc: LabelKe
   return { row, check, seg };
 };
 
-export const createControls = (): Page => {
+export const createControls = (ctx: Ctx): Page => {
   const press = segRow('double', 'controls.pressSpeed', 'controls.pressSpeedDesc', createSegmented<PressSpeed>({
     name: 'pressSpeed',
     legend: 'controls.pressSpeed',
@@ -57,6 +62,39 @@ export const createControls = (): Page => {
       post({ type: 'setHoldDuration', value });
     },
   }));
+  /* Press-and-hold cycle (replaces Allow Off): at least STEM_MIN modes stay checked; unchecking the second-last is
+     blocked with the reason shown under the list. */
+  const stemLocked = LockRow('stemLocked');
+  const stemMinNote = Note({ label: 'stem.minNote', id: 'stemMin' });
+  const stemMinRow = <div class="wp-row" hidden>{stemMinNote}</div> as HTMLDivElement;
+  const stemChecked = new Set<StemMode>();
+  const stem = createChoiceList<StemMode>({
+    role: 'checkbox',
+    items: [
+      { value: 'off', label: 'nc.off' },
+      { value: 'noiseCancellation', label: 'nc.noiseCancellation' },
+      { value: 'transparency', label: 'nc.transparency' },
+      { value: 'adaptive', label: 'nc.adaptive' },
+    ],
+    onPick: (mode) => {
+      const d = current();
+      if (!d) {
+        return;
+      }
+      const on = !stemChecked.has(mode);
+      const modes: StemMode[] = [];
+      for (const m of STEM_ORDER) {
+        if (m === mode ? on : stemChecked.has(m)) {
+          modes.push(m);
+        }
+      }
+      d.stemModes = modes;
+      post({ type: 'setStemModes', id: d.id, modes });
+      ctx.update('controls');
+    },
+  });
+  let stemGroup!: HTMLElement;
+  let stemList!: HTMLDivElement;
   const pressLocked = LockRow('pressLocked');
   const toneLocked = LockRow('toneLocked');
   const toneCheck = Checking();
@@ -77,6 +115,10 @@ export const createControls = (): Page => {
       <section class="wp-group" ref={pressGroup}>
         <h2 class="wp-group__title" l:text="controls.pressTitle" />
         <div class="wp-list">{pressLocked}{press.row}{hold.row}</div>
+      </section>
+      <section class="wp-group" ref={stemGroup}>
+        <h2 class="wp-group__title" id="stemTitle" l:text="stem.title" />
+        <div class="wp-list" role="group" aria-labelledby="stemTitle" ref={stemList}>{stemLocked}</div>
       </section>
       <section class="wp-group" ref={toneGroup}>
         <h2 class="wp-group__title" l:text="controls.soundsTitle" />
@@ -107,6 +149,29 @@ export const createControls = (): Page => {
     </div>
   ) as HTMLDivElement;
 
+  stemList.append(...stem.rows, stemMinRow);
+
+  const renderStem = (modes: StemMode[], shown: boolean, adaptive: boolean, locked: boolean): void => {
+    setHidden(stemGroup, !shown);
+    if (!shown) {
+      return;
+    }
+    stem.show('adaptive', adaptive);
+    stemChecked.clear();
+    for (const m of modes) {
+      stemChecked.add(m);
+    }
+    const atMin = stemChecked.size <= STEM_MIN;
+    setHidden(stemLocked, !locked);
+    setHidden(stemMinRow, locked || !atMin);
+    stem.lock(locked, 'stemLocked');
+    for (const m of STEM_ORDER) {
+      const on = stemChecked.has(m);
+      stem.set(m, on);
+      stem.block(m, !locked && atMin && on, 'stemMin');
+    }
+  };
+
   const renderSeg = <V extends string>(r: SegRow<V>, shown: boolean, locked: boolean, checking: boolean, value: V | null): void => {
     setHidden(r.row, !shown);
     setHidden(r.check, !checking);
@@ -129,6 +194,8 @@ export const createControls = (): Page => {
     setHidden(pressLocked, !!st);
     renderSeg(press, hasPress, !st, pending && st.pressSpeed === null, st?.pressSpeed ?? null);
     renderSeg(hold, hasHold, !st, pending && st.holdDuration === null, st?.holdDuration ?? null);
+
+    renderStem(d.stemModes, caps.has('listeningMode'), caps.has('adaptive'), !st);
 
     setHidden(toneGroup, !caps.has('toneVolume'));
     setHidden(toneLocked, !!st);

@@ -1,7 +1,7 @@
 /* Main window store: the host's data as last received, plus which render sections it made stale. Messages are
    applied as they arrive; main.tsx renders the stale sections of the shown page once per animation frame. */
 import { t } from './i18n';
-import type { Batteries, Capability, Device, DeviceId, HostToMain, Language, MicStatus, State, ToastId } from './protocol';
+import type { Batteries, Capability, Conn, Device, DeviceId, HostToMain, Language, MicStatus, State, ToastId } from './protocol';
 
 export type Section = 'page' | 'title' | 'hero' | 'menu' | 'nc' | 'mic' | 'features' | 'controls' | 'windows' | 'langs' | 'firstRun';
 type Entry = Device & { capSet: Set<Capability> };
@@ -47,11 +47,33 @@ export const live = (d: Entry): State | null => (d.conn === 'connected' && d.id 
 /* Capabilities of a pair: the attached session's (they grow as the AirPods report) or the remembered ones. */
 export const capsOf = (d: Entry): Set<Capability> => (live(d) ? store.stateCaps : d.capSet);
 
+/* Pairs the user just disconnected: shown Not connected at once (optimistic) until the host reports a conn that
+   isn't connected / reconnecting / connecting, or a disconnectFailed toast reverts to the host's real value. */
+const disconnecting = new Set<DeviceId>();
+const MASKED = new Set<Conn>(['connected', 'reconnecting', 'connecting']);
+let lastDevices: Device[] = [];
+
+export const beginDisconnect = (id: DeviceId): void => {
+  disconnecting.add(id);
+  const d = store.byId.get(id);
+  if (d) {
+    d.conn = 'notConnected';
+  }
+};
+
 const applyDevices = (devices: Device[], attached: DeviceId | null): void => {
+  lastDevices = devices;
   store.devices = [];
   store.byId.clear();
   for (const d of devices) {
     const entry = { ...d, capSet: new Set(d.caps) };
+    if (disconnecting.has(d.id)) {
+      if (MASKED.has(d.conn)) {
+        entry.conn = 'notConnected';
+      } else {
+        disconnecting.delete(d.id);
+      }
+    }
     store.devices.push(entry);
     store.byId.set(d.id, entry);
   }
@@ -193,6 +215,9 @@ export const apply = (msg: HostToMain): void => {
     case 'toast':
       store.toast = msg.toast;
       store.toastDevice = msg.device;
+      if (msg.toast === 'disconnectFailed' && msg.device !== null && disconnecting.delete(msg.device)) {
+        applyDevices(lastDevices, store.attached);
+      }
       break;
     default:
       break;

@@ -69,3 +69,12 @@ span.wp-menu__glyph { display: grid; place-items: center; }
 
 /* Long single-word labels (long Ukrainian words) break instead of overflowing the segment. */
 .wp-seg__label { hyphens: auto; overflow-wrap: break-word; }
+
+/* ChoiceList rows that can't change: disabled (not connected) or aria-disabled (reason shown next to them). */
+.wp-choice:disabled, .wp-choice[aria-disabled="true"] { cursor: not-allowed; background: transparent; }
+.wp-choice:disabled .wp-row__title, .wp-choice[aria-disabled="true"] .wp-row__title { color: var(--text-disabled); }
+.wp-choice:disabled .wp-row__check { color: var(--text-disabled); }
+
+/* Slider with a text label in front (Conversation awareness: "Lower media to"). */
+.wp-slider__label { flex: none; }
+.wp-slider__input:disabled ~ .wp-slider__value { color: var(--text-disabled); }

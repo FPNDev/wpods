@@ -21,6 +21,7 @@ type HtmlAttrs<E> = Handlers<HTMLElementEventMap> & LabelAttrs & {
   value?: string;
   min?: string;
   max?: string;
+  step?: string;
   tabindex?: string;
   lang?: string;
   hidden?: true;

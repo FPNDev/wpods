@@ -1,5 +1,6 @@
-/* Home: hero (art, switcher, status, batteries, action), noise control, microphone, features, More. */
+/* Home: hero (art, switcher, status, batteries, action), noise control, microphone, mic mode, features, More. */
 import { createBatteries } from '../components/batteryRing';
+import { createChoiceList } from '../components/choiceList';
 import { Checking, LockRow, NavRow, Note } from '../components/common';
 import { createDeviceMenu } from '../components/deviceMenu';
 import { createSegmented } from '../components/segmented';
@@ -8,36 +9,55 @@ import { setAttr, setClass, setDisabled, setHidden, setText } from '../dom';
 import { post } from '../host';
 import { t, type LabelKey } from '../i18n';
 import { Art, Icon, Spinner } from '../icons';
-import type { Capability, Conn, EarState, HeartRate, ListeningMode, MicMode, MicSide, ToggleName } from '../protocol';
-import { capsOf, current, live, store } from '../state';
+import type { Capability, Conn, HeartRate, ListeningMode, MicMode, MicSide, State, ToggleName } from '../protocol';
+import { beginDisconnect, capsOf, current, live, store } from '../state';
 import type { Ctx, Page } from './page';
 
 type FeatureKey = ToggleName | 'heartRate' | 'hearingAid';
 type FeatureDef = { key: FeatureKey; title: LabelKey; desc: LabelKey; descMax?: LabelKey };
 type Feature = SwitchRow & { def: FeatureDef };
+type Side = 'left' | 'right';
+type MicModeItem = { value: MicMode; label: LabelKey; desc?: LabelKey };
 
-const STATUS_KIND: Record<Conn, string> = { connected: 'connected', disconnected: 'disconnected', elsewhere: 'nearby', connecting: 'busy', reconnecting: 'busy' };
-const EAR_KEY = { inEar: 'ear.inEar', outOfEar: 'ear.out', inCase: 'ear.inCase' } as const;
+const STATUS_KIND: Record<Conn, string> = {
+  connected: 'connected',
+  notConnected: 'disconnected',
+  attachFailed: 'disconnected',
+  elsewhere: 'nearby',
+  connecting: 'busy',
+  reconnecting: 'busy',
+};
+const EAR_KEY = { inEar: 'ear.inEar', out: 'ear.out', inCase: 'ear.inCase' } as const;
+/* VI 1..VI 4 are a temporary test set (decisions Round 17/18): drop their rows here when the winner is picked. */
+const MIC_MODES: MicModeItem[] = [
+  { value: 'standard', label: 'mic.standard' },
+  { value: 'voiceIsolation', label: 'mic.voiceIsolation' },
+  { value: 'wideSpectrum', label: 'mic.wideSpectrum' },
+  { value: 'voiceIso1', label: 'mic.voiceIso1', desc: 'mic.test' },
+  { value: 'voiceIso2', label: 'mic.voiceIso2', desc: 'mic.test' },
+  { value: 'voiceIso3', label: 'mic.voiceIso3', desc: 'mic.test' },
+  { value: 'voiceIso4', label: 'mic.voiceIso4', desc: 'mic.test' },
+];
+const DUCK_MIN = 10;
+const DUCK_MAX = 90;
 const HR_ON = new Set<HeartRate>(['starting', 'streaming', 'noReading']);
-const CONTROLS_CAPS: Capability[] = ['pressSpeed', 'holdDuration', 'toneVolume'];
+const CONTROLS_CAPS: Capability[] = ['listeningMode', 'pressSpeed', 'holdDuration', 'toneVolume'];
 const FEATURES: FeatureDef[] = [
   { key: 'earDetection', title: 'features.ear', desc: 'features.earDesc', descMax: 'features.earDescMax' },
   { key: 'conversationAwareness', title: 'features.conversation', desc: 'features.conversationDesc' },
   { key: 'oneBudAnc', title: 'features.oneBud', desc: 'features.oneBudDesc' },
   { key: 'personalizedVolume', title: 'features.personalizedVolume', desc: 'features.personalizedVolumeDesc' },
-  { key: 'allowOff', title: 'features.allowOff', desc: 'features.allowOffDesc', descMax: 'features.allowOffDescMax' },
   { key: 'heartRate', title: 'features.heartRate', desc: 'features.heartRateDesc' },
   { key: 'hearingAid', title: 'features.hearingAid', desc: 'features.hearingAidDesc' },
 ];
 
-/* Ear text for one bud; '' while the core can't tell which bud is left (primaryLeft null). */
-const earText = (ear: EarState | null, left: boolean): string => {
-  if (!ear || ear.primaryLeft === null) {
-    return '';
-  }
-  const status = ear.primaryLeft === left ? ear.primary : ear.secondary;
-  return status === 'inEar' || status === 'outOfEar' || status === 'inCase' ? t(EAR_KEY[status]) : '';
+/* Ear line under one bud ring; '' (hidden) for null, 'disconnected' and AirPods Max (the host sends null there). */
+const earText = (st: State | null, side: Side): string => {
+  const ear = st ? st.ear[side] : null;
+  return ear === 'inEar' || ear === 'out' || ear === 'inCase' ? t(EAR_KEY[ear]) : '';
 };
+/* A bud counts as present when its battery is reported and it isn't 'disconnected'. */
+const budPresent = (st: State, side: Side): boolean => st.battery[side] !== null && st.ear[side] !== 'disconnected';
 
 export const createHome = (ctx: Ctx): Page => {
   /* Optimistic: the control already shows the new value; the host echoes the real one (also on failure). */
@@ -93,21 +113,20 @@ export const createHome = (ctx: Ctx): Page => {
   let chipLabel!: HTMLSpanElement;
   let micDesc!: HTMLSpanElement;
   let micSideRow!: HTMLDivElement;
+  let micModeList!: HTMLDivElement;
   const micLocked = LockRow('micLocked');
   const micSideCheck = Checking();
-  const micMode = createSegmented<MicMode>({
-    name: 'micMode',
-    legend: 'mic.mode',
-    items: [
-      { value: 'standard', label: 'mic.standard' },
-      { value: 'voiceIsolation', label: 'mic.voiceIsolation' },
-      { value: 'wideSpectrum', label: 'mic.wideSpectrum' },
-    ],
-    onChange: (value) => {
+  const micModeLocked = LockRow('micModeLocked');
+  let micModeShown: MicMode | null = null;
+  const micMode = createChoiceList<MicMode>({
+    role: 'radio',
+    items: MIC_MODES,
+    onPick: (value) => {
       const d = current();
-      if (d) {
+      if (d && value !== d.host.micMode) {
         d.host.micMode = value;
         post({ type: 'setHostSetting', id: d.id, name: 'micMode', value });
+        ctx.update('mic');
       }
     },
   });
@@ -165,6 +184,33 @@ export const createHome = (ctx: Ctx): Page => {
   ) as HTMLDivElement;
   features.find((f) => f.def.key === 'heartRate')?.row.append(hrLive, hrWait, hrNote);
 
+  /* Conversation awareness: "Lower media to" (host setting duckPercent, 10..90 step 5). */
+  let duck!: HTMLInputElement;
+  let duckValue!: HTMLSpanElement;
+  let lastDuck: number | null = null;
+  const showDuck = (value: number): void => {
+    duck.style.setProperty('--v', `${((value - DUCK_MIN) * 100) / (DUCK_MAX - DUCK_MIN)}%`);
+    setText(duckValue, t('battery.pct', { pct: value }));
+  };
+  const duckRow = (
+    <div class="wp-slider">
+      <span class="wp-row__desc wp-slider__label" id="duckLabel" l:text="features.duck" />
+      <input class="wp-slider__input" type="range" min={String(DUCK_MIN)} max={String(DUCK_MAX)} step="5" aria-labelledby="duckLabel" ref={duck}
+        oninput={() => showDuck(Number(duck.value))}
+        onchange={() => {
+          const d = current();
+          const value = Number(duck.value);
+          lastDuck = value;
+          if (d) {
+            d.host.duckPercent = value;
+            post({ type: 'setHostSetting', id: d.id, name: 'duckPercent', value });
+          }
+        }} />
+      <span class="wp-slider__value" ref={duckValue} />
+    </div>
+  ) as HTMLDivElement;
+  features.find((f) => f.def.key === 'conversationAwareness')?.row.append(duckRow);
+
   /* More */
   const toControls = NavRow({ icon: 'press', title: 'controls.title', desc: 'home.controlsDesc', onclick: () => ctx.go('controls') });
   const toWindows = NavRow({ icon: 'pc', title: 'windows.title', desc: 'home.windowsDesc', onclick: () => ctx.go('windows') });
@@ -188,8 +234,16 @@ export const createHome = (ctx: Ctx): Page => {
           <button type="button" class="wp-btn wp-btn--primary" ref={action}
             onclick={() => {
               const d = current();
-              if (d) {
-                post({ type: d.conn === 'connected' ? 'disconnect' : d.conn === 'connecting' ? 'cancel' : 'connect', id: d.id });
+              if (!d) {
+                return;
+              }
+              if (d.conn === 'connected') {
+                /* Optimistic and immediate: Not connected at once, never Reconnecting; reverted only on disconnectFailed. */
+                beginDisconnect(d.id);
+                ctx.update('hero', 'menu', 'nc', 'mic', 'features', 'controls', 'windows');
+                post({ type: 'disconnect', id: d.id });
+              } else {
+                post({ type: d.conn === 'connecting' ? 'cancel' : 'connect', id: d.id });
               }
             }} />
         </div>
@@ -215,11 +269,6 @@ export const createHome = (ctx: Ctx): Page => {
         <div class="wp-list">
           {micLocked}
           <div class="wp-row"><div class="wp-row__text"><span class="wp-row__desc" ref={micDesc} /></div></div>
-          <div class="wp-row wp-row--stack">
-            <div class="wp-row__head"><div class="wp-row__text"><span class="wp-row__title" l:text="mic.mode" /></div></div>
-            {micMode.el}
-            {Note({ label: 'mic.rnnoiseNote' })}
-          </div>
           <div class="wp-row wp-row--stack" ref={micSideRow}>
             <div class="wp-row__head">
               <div class="wp-row__text"><span class="wp-row__title" l:text="mic.side" /><span class="wp-row__desc" l:text="mic.sideDesc" /></div>
@@ -228,6 +277,12 @@ export const createHome = (ctx: Ctx): Page => {
             {micSide.el}
           </div>
         </div>
+      </section>
+
+      <section class="wp-group">
+        <h2 class="wp-group__title" id="micModeTitle" l:text="mic.mode" />
+        <div class="wp-list" role="radiogroup" aria-labelledby="micModeTitle" ref={micModeList}>{micModeLocked}</div>
+        <p class="wp-group__foot" l:text="mic.rnnoiseNote" />
       </section>
 
       <section class="wp-group" ref={featGroup}>
@@ -244,6 +299,7 @@ export const createHome = (ctx: Ctx): Page => {
   for (const f of features) {
     featList.append(f.row);
   }
+  micModeList.append(...micMode.rows);
 
   const renderHero = (): void => {
     const d = current();
@@ -264,13 +320,12 @@ export const createHome = (ctx: Ctx): Page => {
     setText(statusText, conn === 'connected' ? t('status.connectedModel', { model: d.model }) : t(`status.${conn}`));
 
     const bat = st ? st.battery : conn === 'reconnecting' ? store.lastBattery.get(d.id) ?? null : conn === 'elsewhere' ? d.batteries : null;
-    const ear = st ? st.ear : null;
-    const any = batteries.update(bat, { left: earText(ear, true), right: earText(ear, false) }, d.art === 'pro' ? 'case-pro' : 'case');
+    const any = batteries.update(bat, { left: earText(st, 'left'), right: earText(st, 'right') }, d.art === 'pro' ? 'case-pro' : 'case');
     setHidden(batteries.el, !any);
     setClass(hero, 'wp-hero--stale', conn === 'reconnecting');
 
     const single = capsOf(d).has('singleBattery');
-    const hintKey = conn === 'disconnected' ? (single ? 'home.hintMax' : 'home.hintBuds') : conn === 'elsewhere' ? 'home.hintElsewhere' : null;
+    const hintKey = conn === 'notConnected' ? (single ? 'home.hintMax' : 'home.hintBuds') : conn === 'elsewhere' ? 'home.hintElsewhere' : null;
     setHidden(hint, !hintKey);
     if (hintKey) {
       setText(hint, t(hintKey));
@@ -279,7 +334,8 @@ export const createHome = (ctx: Ctx): Page => {
 
     const act = conn === 'connected' ? (['home.disconnect', 'secondary'] as const)
       : conn === 'connecting' ? (['home.cancel', 'secondary'] as const)
-        : conn === 'reconnecting' ? null : (['home.connect', 'primary'] as const);
+        : conn === 'reconnecting' ? null
+          : conn === 'attachFailed' ? (['home.reconnect', 'primary'] as const) : (['home.connect', 'primary'] as const);
     setHidden(actions, !act);
     if (act) {
       setAttr(action, 'class', `wp-btn wp-btn--${act[1]}`);
@@ -301,8 +357,14 @@ export const createHome = (ctx: Ctx): Page => {
     const st = live(d);
     nc.showItem('adaptive', caps.has('adaptive'));
     setHidden(ncLocked, !!st);
-    const inEar = st ? Number(st.ear.primary === 'inEar') + Number(st.ear.secondary === 'inEar') : 2;
-    const oneIn = !!st && !caps.has('singleBattery') && inEar === 1 && st.oneBudAnc !== true;
+    /* Round 17: NC and Adaptive need both buds unless "Noise cancellation with one AirPod" is on: locked when fewer
+       than 2 buds are present OR exactly one is in ear. Off and Transparency stay available. */
+    let oneIn = false;
+    if (st && !caps.has('singleBattery') && st.oneBudAnc !== true) {
+      const present = Number(budPresent(st, 'left')) + Number(budPresent(st, 'right'));
+      const inEar = Number(st.ear.left === 'inEar') + Number(st.ear.right === 'inEar');
+      oneIn = present < 2 || inEar === 1;
+    }
     setHidden(ncOneBud, !oneIn);
     for (const mode of ['off', 'noiseCancellation', 'transparency', 'adaptive'] as const) {
       const needsBoth = mode === 'noiseCancellation' || mode === 'adaptive';
@@ -323,8 +385,15 @@ export const createHome = (ctx: Ctx): Page => {
     setText(micDesc, t(`mic.desc.${mic}`));
     const st = live(d);
     setHidden(micLocked, !!st);
-    micMode.set(d.host.micMode);
-    micMode.lock(!st, st ? null : 'micLocked');
+    if (d.host.micMode !== micModeShown) {
+      if (micModeShown !== null) {
+        micMode.set(micModeShown, false);
+      }
+      micModeShown = d.host.micMode;
+      micMode.set(micModeShown, true);
+    }
+    setHidden(micModeLocked, !!st);
+    micMode.lock(!st, 'micModeLocked');
     setHidden(micSideRow, !capsOf(d).has('micSide'));
     const checking = !!st && st.checking && st.micSide === null;
     setHidden(micSideCheck, !checking);
@@ -374,6 +443,14 @@ export const createHome = (ctx: Ctx): Page => {
       setAttr(f.input, 'aria-describedby', !st ? 'featLocked' : reason ? f.desc.id : null);
     }
     setHidden(featGroup, !any);
+    const duckPercent = d.host.duckPercent;
+    setDisabled(duck, !st);
+    setAttr(duck, 'aria-describedby', st ? null : 'featLocked');
+    if (duckPercent !== lastDuck) {
+      lastDuck = duckPercent;
+      duck.value = String(duckPercent);
+      showDuck(duckPercent);
+    }
     setHidden(featLocked, !!st);
 
     const hrOn = !!st && HR_ON.has(st.heartRate) && caps.has('heartRate');

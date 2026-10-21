@@ -1,17 +1,18 @@
-/* Host <-> page messages (scratchpad ui-protocol.md, v2). Every message is one JSON object with a string `type`. */
+/* Host <-> page messages (scratchpad ui-protocol.md, v3). Every message is one JSON object with a string `type`. */
 
 export type DeviceId = string;
 export type Battery = { pct: number; charging: boolean } | null;
 export type Batteries = { left: Battery; right: Battery; case: Battery; headphone: Battery };
-export type Ear = 'inEar' | 'outOfEar' | 'inCase' | 'disconnected' | 'unknown' | null;
-export type EarState = { primary: Ear; secondary: Ear; primaryLeft: boolean | null };
+export type Ear = 'inEar' | 'out' | 'inCase' | 'disconnected' | null;
+export type EarState = { left: Ear; right: Ear };
 export type Art = 'pro' | 'airpods4' | 'airpods' | 'max';
 export type Capability = 'listeningMode' | 'adaptive' | 'earDetection' | 'conversationAwareness' | 'oneBudAnc'
   | 'personalizedVolume' | 'allowOff' | 'micSide' | 'pressSpeed' | 'holdDuration' | 'toneVolume' | 'hearingAid' | 'heartRate'
   | 'singleBattery';
-export type Conn = 'connected' | 'connecting' | 'reconnecting' | 'elsewhere' | 'disconnected';
-export type MicMode = 'standard' | 'voiceIsolation' | 'wideSpectrum';
-type HostSettings = { disableHandsFree: boolean; lowLatency: boolean; micMode: MicMode };
+export type Conn = 'connected' | 'connecting' | 'reconnecting' | 'notConnected' | 'elsewhere' | 'attachFailed';
+export type MicMode = 'standard' | 'voiceIsolation' | 'wideSpectrum' | 'voiceIso1' | 'voiceIso2' | 'voiceIso3' | 'voiceIso4';
+type HostSettings = { disableHandsFree: boolean; lowLatency: boolean; micMode: MicMode; duckPercent: number };
+export type StemMode = 'off' | 'noiseCancellation' | 'transparency' | 'adaptive';
 export type Device = {
   id: DeviceId;
   name: string;
@@ -22,6 +23,7 @@ export type Device = {
   hasKeys: boolean;
   batteries: Batteries | null;
   host: HostSettings;
+  stemModes: StemMode[];
 };
 export type ListeningMode = 'off' | 'noiseCancellation' | 'transparency' | 'adaptive';
 export type MicSide = 'automatic' | 'left' | 'right';
@@ -32,7 +34,6 @@ type Settings = {
   earDetection: boolean | null;
   conversationAwareness: boolean | null;
   personalizedVolume: boolean | null;
-  allowOff: boolean | null;
   oneBudAnc: boolean | null;
   micSide: MicSide | null;
   pressSpeed: PressSpeed | null;
@@ -50,12 +51,12 @@ export type State = Settings & {
   caps: Capability[];
   checking: boolean;
 };
-export type ToggleName = 'earDetection' | 'conversationAwareness' | 'personalizedVolume' | 'allowOff' | 'oneBudAnc';
+export type ToggleName = 'earDetection' | 'conversationAwareness' | 'personalizedVolume' | 'oneBudAnc';
 export type Theme = 'light' | 'dark' | 'auto';
 export type AccentRamp = { accent: string; dark1: string; dark2: string; dark3: string; light1: string; light2: string; light3: string };
 export type Language = { code: string; originalName: string; engName: string };
 export type MicStatus = 'notActive' | 'starting' | 'live' | 'problem';
-export type ToastId = 'noResponse' | 'connectFailed' | 'bluetoothOff' | 'micFailed' | 'lowLatencyFailed' | 'handsFreeFailed';
+export type ToastId = 'noResponse' | 'connectFailed' | 'bluetoothOff' | 'micFailed' | 'lowLatencyFailed' | 'handsFreeFailed' | 'disconnectFailed';
 type OfferState = 'offer' | 'connecting' | 'connected' | 'failed';
 export type Offer = { id: DeviceId; name: string; art: Art; batteries: Batteries; state: OfferState };
 
@@ -116,6 +117,8 @@ export type MainToHost =
   | { type: 'setToneVolume'; value: number }
   | { type: 'setHostSetting'; id: DeviceId; name: 'disableHandsFree' | 'lowLatency'; value: boolean }
   | { type: 'setHostSetting'; id: DeviceId; name: 'micMode'; value: MicMode }
+  | { type: 'setHostSetting'; id: DeviceId; name: 'duckPercent'; value: number }
+  | { type: 'setStemModes'; id: DeviceId; modes: StemMode[] }
   | { type: 'setTheme'; theme: Theme }
   | { type: 'setLanguage'; code: string }
   | { type: 'openBluetoothSettings' | 'openAddDevice' | 'getStarted' | 'minimize' | 'close' | 'beginDrag' };
