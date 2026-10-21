@@ -88,6 +88,9 @@ internal sealed partial class TrayApp
             case "setHostSetting" when id != 0:
                 SetHostSetting(id, m.Name, m.Value);
                 break;
+            case "setStemModes" when id != 0 && m.Modes is not null:
+                SetStemModes(id, m.Modes);
+                break;
             case "setTheme" when m.Theme is "light" or "dark" or "auto":
                 SavePrefs(_prefs with { Theme = m.Theme });
                 ApplyTheme();
@@ -315,12 +318,19 @@ internal sealed partial class TrayApp
         }
     }
 
+    // The core marks the pair and detaches at once (DevicesChanged, so "notConnected" goes out immediately); false
+    // means Windows refused both requests and the pair is attached again: toast plus its real devices and state.
     private async void Disconnect(ulong address, bool reconnect)
     {
         if (_connections.Session?.Address == address)
         {
             bool ok = await _connections.DisconnectAsync();
             Log.Info("ui", $"disconnect {Mac.Format(address)}: {ok}, reconnect={reconnect}");
+            if (!ok)
+            {
+                SendToast("disconnectFailed", address);
+                SendRealState();
+            }
         }
         if (reconnect)
         {
@@ -341,6 +351,36 @@ internal sealed partial class TrayApp
     }
 
     // ---- Device commands: success shows through the core's Changed event; failure sends the current value back ----
+
+    // Stem press-and-hold cycle of the attached pair (the core stores it and writes it on every attach). Always answers
+    // with devices carrying the stored value; a failed write also gets noResponse.
+    private async void SetStemModes(ulong address, string[] names)
+    {
+        if (_connections.Session is { } session && session.Address == address && MessageWriter.TryParseStemModes(names, out StemModes modes))
+        {
+            bool ok = false;
+            using var timeout = new CancellationTokenSource(CommandTimeout);
+            try
+            {
+                ok = await session.SetStemModesAsync(modes, timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // No reply in 3 s.
+            }
+            catch (Exception e) when (e is ArgumentException or InvalidOperationException)
+            {
+                Log.Warn("ui", $"setStemModes {Mac.Format(address)} [{string.Join(',', names)}] rejected: {e.Message}");
+                ok = true;
+            }
+            if (!ok)
+            {
+                SendToast("noResponse", address);
+            }
+        }
+        _devices = _connections.GetDevices();
+        SendDevices(force: true);
+    }
 
     private void Toggle(string? name, bool on)
     {
@@ -397,6 +437,7 @@ internal sealed partial class TrayApp
             "disableHandsFree" when value.ValueKind is JsonValueKind.True or JsonValueKind.False => current with { DisableHandsFree = value.GetBoolean() },
             "lowLatency" when value.ValueKind is JsonValueKind.True or JsonValueKind.False => current with { LowLatency = value.GetBoolean() },
             "micMode" when value.ValueKind == JsonValueKind.String && MessageWriter.TryParse(value.GetString(), out MicMode mode) => current with { MicMode = mode },
+            "duckPercent" when value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int duck) && duck is >= 10 and <= 90 => current with { DuckPercent = duck },
             _ => null,
         };
         // Host settings are editable only for the attached pair; anything else just gets the saved value back.

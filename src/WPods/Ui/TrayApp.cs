@@ -402,11 +402,18 @@ internal sealed partial class TrayApp : ApplicationContext
         }
     }
 
-    private void SendDevices()
+    private void SendDevices(bool force = false)
     {
         Utf8JsonWriter w = _writer.Begin("devices");
         WriteDevices(w);
-        SendMain(Sent.Devices, _writer.End(), force: false);
+        SendMain(Sent.Devices, _writer.End(), force);
+    }
+
+    /// <summary>Fresh devices and state, sent even if unchanged: the page drops an optimistic view it is still showing.</summary>
+    private void SendRealState()
+    {
+        _lastSent[(int)Sent.Devices] = null;
+        MarkDirty(Dirty.Session | Dirty.Devices);
     }
 
     /// <summary>Battery, ear, listening mode, settings, heart-rate, caps and checking messages for the flags set in <paramref name="dirty"/>.</summary>
@@ -537,12 +544,20 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             return "connecting";
         }
+        switch (device.Idle)
+        {
+            case IdleReason.UserDisconnected:
+                // Never "reconnecting" after a user Disconnect, even while Windows still has the link up.
+                return "notConnected";
+            case IdleReason.AttachGaveUp:
+                return "attachFailed";
+        }
         if (device.LinkUp)
         {
             return "reconnecting";
         }
         // Its own proximity adverts are seen while its link to Windows is down: connected to another device.
-        return _nearby.IsNearby(device.Address) ? "elsewhere" : "disconnected";
+        return _nearby.IsNearby(device.Address) ? "elsewhere" : "notConnected";
     }
 
     private string Text(string key) => _locale.Text(key);
@@ -580,7 +595,7 @@ internal sealed partial class TrayApp : ApplicationContext
         if (_session?.State is not { } state)
         {
             glyph = new TrayGlyph(size, _lightTaskbar, false, IsMax(_connections.LastUsed) ? TrayDevice.Max : TrayDevice.Buds, -1, false, false);
-            tip = Text("status.disconnected");
+            tip = Text("status.notConnected");
         }
         else
         {

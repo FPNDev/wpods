@@ -20,6 +20,7 @@ internal sealed class PageMessage
     public string? Code { get; set; }
     public JsonElement Value { get; set; }
     public string[]? Ids { get; set; }
+    public string[]? Modes { get; set; }
     public double Height { get; set; }
 }
 
@@ -31,6 +32,9 @@ internal sealed partial class PageJson : JsonSerializerContext;
 internal sealed class MessageWriter
 {
     private static readonly DeviceCapabilities[] Capabilities = Enum.GetValues<DeviceCapabilities>();
+
+    // Protocol order of Device.stemModes.
+    private static readonly StemModes[] StemModeOrder = [StemModes.Off, StemModes.NoiseCancellation, StemModes.Transparency, StemModes.Adaptive];
 
     private readonly ArrayBufferWriter<byte> _buffer = new(4096);
     private readonly Utf8JsonWriter _json;
@@ -90,14 +94,34 @@ internal sealed class MessageWriter
     public static void WriteBatteries(Utf8JsonWriter w, DeviceState s) =>
         WriteBatteries(w, "battery", s.LeftBattery, s.RightBattery, s.CaseBattery, s.HeadphoneBattery);
 
+    /// <summary>"ear": per bud (null until the primary bud is known, always null for AirPods Max).</summary>
     public static void WriteEar(Utf8JsonWriter w, DeviceState s)
     {
         w.WriteStartObject("ear");
-        WriteEnum(w, "primary", s.PrimaryEar);
-        WriteEnum(w, "secondary", s.SecondaryEar);
-        // Core cannot tell which bud is primary yet (protocol: send null, the page hides the per-bud line).
-        w.WriteNull("primaryLeft");
+        WriteEar(w, "left", s.LeftEar);
+        WriteEar(w, "right", s.RightEar);
         w.WriteEndObject();
+    }
+
+    // Protocol names differ from the enum for OutOfEar ("out"); Unknown is sent as null.
+    private static void WriteEar(Utf8JsonWriter w, string name, EarStatus? ear)
+    {
+        string? value = ear switch
+        {
+            EarStatus.InEar => "inEar",
+            EarStatus.OutOfEar => "out",
+            EarStatus.InCase => "inCase",
+            EarStatus.Disconnected => "disconnected",
+            _ => null,
+        };
+        if (value is null)
+        {
+            w.WriteNull(name);
+        }
+        else
+        {
+            w.WriteString(name, value);
+        }
     }
 
     public static void WriteListeningMode(Utf8JsonWriter w, DeviceState s) => WriteEnum(w, "listeningMode", s.ListeningMode);
@@ -114,7 +138,6 @@ internal sealed class MessageWriter
         WriteBool(w, "earDetection", s.EarDetection);
         WriteBool(w, "conversationAwareness", s.ConversationAwareness);
         WriteBool(w, "personalizedVolume", s.PersonalizedVolume);
-        WriteBool(w, "allowOff", s.AllowOff);
         WriteBool(w, "oneBudAnc", s.OneBudAnc);
         WriteEnum(w, "micSide", s.MicSide);
         WriteEnum(w, "pressSpeed", s.PressSpeed);
@@ -157,6 +180,7 @@ internal sealed class MessageWriter
         w.WriteBoolean("disableHandsFree", host.DisableHandsFree);
         w.WriteBoolean("lowLatency", host.LowLatency);
         w.WriteString("micMode", Camel(host.MicMode));
+        w.WriteNumber("duckPercent", host.DuckPercent);
         w.WriteEndObject();
     }
 
@@ -181,7 +205,31 @@ internal sealed class MessageWriter
             w.WriteNull("batteries");
         }
         WriteHost(w, host);
+        w.WriteStartArray("stemModes");
+        foreach (StemModes mode in StemModeOrder)
+        {
+            if ((d.StemModes & mode) != 0)
+            {
+                w.WriteStringValue(Camel(mode));
+            }
+        }
+        w.WriteEndArray();
         w.WriteEndObject();
+    }
+
+    /// <summary>Parses the page's stem mode names ("off", "noiseCancellation", "transparency", "adaptive"); false on an unknown name.</summary>
+    public static bool TryParseStemModes(string[] names, out StemModes modes)
+    {
+        modes = StemModes.None;
+        foreach (string name in names)
+        {
+            if (!TryParse(name, out StemModes mode) || mode == StemModes.None)
+            {
+                return false;
+            }
+            modes |= mode;
+        }
+        return true;
     }
 
     private static void WriteCaps(Utf8JsonWriter w, DeviceCapabilities capabilities, bool singleBattery)

@@ -25,7 +25,8 @@ if (-not $SkipNative) {
     $native = @(
         @{ Script = 'native\build-ffmpeg.ps1'; Outputs = 'avcodec-61.dll', 'avutil-59.dll', 'swresample-5.dll' },
         @{ Script = 'native\build-rnnoise.ps1'; Outputs = 'rnnoise.dll' },
-        @{ Script = 'native\build-helper.ps1'; Outputs = 'wpods_native.dll' }
+        @{ Script = 'native\build-helper.ps1'; Outputs = 'wpods_native.dll' },
+        @{ Script = 'native\build-deepfilter.ps1'; Outputs = 'deepfilter.dll', 'DeepFilterNet3_onnx.tar.gz' }
     )
     foreach ($step in $native) {
         foreach ($output in $step.Outputs) {

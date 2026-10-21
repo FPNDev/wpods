@@ -13,7 +13,10 @@ public enum IdleReason
     /// never auto-attached until its link drops (flag cleared) or the user connects it (<see cref="ConnectionManager.ConnectAsync"/>).
     /// </summary>
     UserDisconnected,
-    /// <summary>The link is up but the attach and every retry failed; waits for the next link event or a user Connect.</summary>
+    /// <summary>
+    /// The link is up but the attach and every fast retry failed. WPods keeps trying every 30 s, and at once on the
+    /// next link-up, case opening (<see cref="ConnectionManager.OnCaseOpened"/>) or user Connect.
+    /// </summary>
     AttachGaveUp,
 }
 
@@ -47,6 +50,9 @@ public sealed class ConnectionManager : IAsyncDisposable
     [
         TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8),
     ];
+    // After the fast retries: as long as Windows keeps the link up, WPods keeps trying (only a user Disconnect or
+    // another attached pair holds a linked pair back). One fail-fast CreateFile per 30 s.
+    private static readonly TimeSpan SlowRetryDelay = TimeSpan.FromSeconds(30);
 
     private readonly BluetoothLink _link = new();
     // Serializes every attach/detach decision; _session writes, _retries, _retrySerial and _disposed are guarded by it.
@@ -368,6 +374,41 @@ public sealed class ConnectionManager : IAsyncDisposable
     // Link up and nothing (user disconnect, gave up) holds the pair back.
     private bool CanAutoAttach(ulong address) => address != 0 && _link.IsUp(address) && GetIdle(address) == IdleReason.None;
 
+    // A retry series continues while the link is up, unless the user disconnected the pair.
+    private bool CanRetry(ulong address) => _link.IsUp(address) && GetIdle(address) != IdleReason.UserDisconnected;
+
+    /// <summary>
+    /// The pair's case lid opened or a bud left the case (<see cref="Nearby.NearbyService.CaseOpened"/>): as on iPhone
+    /// and Mac, that means the user wants them. A pair held back (<see cref="IdleReason.UserDisconnected"/>,
+    /// <see cref="IdleReason.AttachGaveUp"/>) whose Windows link is up is released and attached like a link-up, with
+    /// retries. Never pages. Called on the BLE thread; returns at once.
+    /// </summary>
+    public void OnCaseOpened(ulong address)
+    {
+        if (GetIdle(address) != IdleReason.None && _link.IsUp(address))
+        {
+            _ = Task.Run(() => ReleaseOnCaseOpenedAsync(address));
+        }
+    }
+
+    private async Task ReleaseOnCaseOpenedAsync(ulong address)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_disposed || GetIdle(address) == IdleReason.None || !_link.IsUp(address))
+            {
+                return;
+            }
+            SetIdle(address, IdleReason.None, "lid opened or bud out of case");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+        await OnLinkAsync(address).ConfigureAwait(false);
+    }
+
     // One attempt now; on failure the next retry is scheduled. newSeries restarts the retry count.
     private bool AttachLocked(ulong address, string reason, bool newSeries)
     {
@@ -383,10 +424,11 @@ public sealed class ConnectionManager : IAsyncDisposable
         return false;
     }
 
-    // Schedules the next retry for a pair whose link is up (replacing any pending one), or gives up after the last.
+    // Schedules the next retry for a pair whose link is up (replacing any pending one); after the fast series the
+    // pair is marked AttachGaveUp and retried slowly.
     private void ScheduleRetryLocked(ulong address)
     {
-        if (_disposed || !CanAutoAttach(address))
+        if (_disposed || !CanRetry(address))
         {
             _retries.Remove(address);
             Log.Info("conn", $"attach {Mac.Format(address)}: no retry (linkUp={_link.IsUp(address)}, idle={GetIdle(address)})");
@@ -397,15 +439,21 @@ public sealed class ConnectionManager : IAsyncDisposable
             retry = new AttachRetry();
             _retries[address] = retry;
         }
+        TimeSpan delay;
         if (retry.Attempts >= RetryDelays.Length)
         {
-            _retries.Remove(address);
-            Log.Warn("conn", $"attach {Mac.Format(address)}: all {RetryDelays.Length} retries failed with the link up; giving up until the next link event or a user Connect");
-            SetIdle(address, IdleReason.AttachGaveUp, "retries exhausted");
-            AttachOtherUpLocked(address);
-            return;
+            if (GetIdle(address) != IdleReason.AttachGaveUp)
+            {
+                Log.Warn("conn", $"attach {Mac.Format(address)}: all {RetryDelays.Length} fast retries failed with the link up; retrying every {SlowRetryDelay.TotalSeconds} s");
+                SetIdle(address, IdleReason.AttachGaveUp, "retries exhausted");
+                AttachOtherUpLocked(address);
+            }
+            delay = SlowRetryDelay;
         }
-        TimeSpan delay = RetryDelays[retry.Attempts++];
+        else
+        {
+            delay = RetryDelays[retry.Attempts++];
+        }
         retry.Serial = ++_retrySerial;
         Log.Info("conn", $"attach {Mac.Format(address)}: retry {retry.Attempts}/{RetryDelays.Length} in {delay.TotalMilliseconds} ms");
         _ = RetryAsync(address, retry.Serial, delay);
@@ -428,7 +476,7 @@ public sealed class ConnectionManager : IAsyncDisposable
                 Log.Info("conn", $"attach {Mac.Format(address)}: {reason} skipped, session={Describe(_session)}");
                 return;
             }
-            if (_disposed || !CanAutoAttach(address))
+            if (_disposed || !CanRetry(address))
             {
                 Log.Info("conn", $"attach {Mac.Format(address)}: {reason} stopped (linkUp={_link.IsUp(address)}, idle={GetIdle(address)})");
                 _retries.Remove(address);
@@ -464,6 +512,11 @@ public sealed class ConnectionManager : IAsyncDisposable
             if (error != Native.ErrorDeviceNotConnected)
             {
                 AttachFailed?.Invoke(address, error);
+            }
+            else
+            {
+                // The driver sees no ACL: correct a stale "up" so the next real link-up raises an event again.
+                _link.Recheck(address);
             }
             return false;
         }

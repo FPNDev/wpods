@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <Content Include="..\..\.build\native\bin\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\.build\native\bin\DeepFilterNet3_onnx.tar.gz" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\native\licenses\**" LinkBase="licenses\" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="web\**" CopyToOutputDirectory="PreserveNewest" />
     <None Remove="web\**" />

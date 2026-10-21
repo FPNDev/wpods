@@ -79,6 +79,25 @@ internal sealed unsafe class BluetoothLink : IDisposable
         }
     }
 
+    /// <summary>
+    /// Re-reads the connected flag of one device (NTAPD refused with 1167, so the cached state may be stale, e.g. an
+    /// HCI disconnect lost over sleep) and raises <see cref="LinkChanged"/> when it differs.
+    /// </summary>
+    public void Recheck(ulong address)
+    {
+        bool up;
+        lock (_lock)
+        {
+            if (!_devices.TryGetValue(address, out Entry? entry) || entry.Up == (up = Query(address, out _)))
+            {
+                return;
+            }
+            entry.Up = up;
+        }
+        Log.Info("link", $"recheck {Mac.Format(address)}: link actually {(up ? "up" : "down")}");
+        LinkChanged?.Invoke(address, up);
+    }
+
     public List<LinkDevice> Snapshot()
     {
         lock (_lock)
@@ -173,8 +192,11 @@ internal sealed unsafe class BluetoothLink : IDisposable
         LinkChanged?.Invoke(address, connected);
     }
 
+    // A radio arrived (start, radio switched on, resume from sleep, adapter plugged in). Links Windows brought up
+    // before the HCI registration existed raised no event: re-check them once it is registered.
     private void AddRadio(string path)
     {
+        List<ulong> up = [];
         lock (_lock)
         {
             if (_disposed || _radioByPath.ContainsKey(path))
@@ -187,7 +209,19 @@ internal sealed unsafe class BluetoothLink : IDisposable
                 _radioByPath[path] = notify;
                 _radioByNotify[notify] = path;
             }
-            Log.Info("link", $"radio added {path}, HCI notify registered={notify != 0}");
+            foreach ((ulong address, Entry entry) in _devices)
+            {
+                if (!entry.Up && Query(address, out _))
+                {
+                    entry.Up = true;
+                    up.Add(address);
+                }
+            }
+            Log.Info("link", $"radio added {path}, HCI notify registered={notify != 0}, links found up: {up.Count}");
+        }
+        foreach (ulong address in up)
+        {
+            LinkChanged?.Invoke(address, true);
         }
     }
 

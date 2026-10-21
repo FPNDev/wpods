@@ -71,6 +71,12 @@ public sealed class NearbyService : IDisposable
     public event Action? NearbyChanged;
 
     /// <summary>
+    /// A paired AirPods' case lid opened, or a bud left the case (proximity adverts), whatever the link state. Raised on
+    /// the BLE thread on the edge only; handlers must not block. Not raised for single-battery models (no case signal).
+    /// </summary>
+    public event Action<ulong>? CaseOpened;
+
+    /// <summary>
     /// "Connected to another device": the pair's proximity adverts are seen (resolved with its keys, last one less
     /// than 45 s ago) while its link to Windows is down.
     /// </summary>
@@ -116,20 +122,21 @@ public sealed class NearbyService : IDisposable
         }
         OffersChanged?.Invoke();
         OfferState result = OfferState.Failed;
+        // One 10 s budget for link up and attach. A refused request (hr < 0) still waits: Windows or the AirPods may
+        // connect anyway, and only "no link" or "no attach" within the budget is a failure.
+        long deadline = Environment.TickCount64 + (long)ConnectTimeout.TotalMilliseconds;
         try
         {
             int hr = await Task.Run(() => NearbyNative.wpn_bt_connect_audio(address)).ConfigureAwait(false);
             Log.Info("nearby", $"connect {Mac.Format(address)}: connect audio hr=0x{hr:X8}");
-            if (hr >= 0)
+            await link.Task.WaitAsync(Remaining(deadline)).ConfigureAwait(false);
+            Log.Info("nearby", $"connect {Mac.Format(address)}: link up, attaching");
+            bool attached = await _connections.ConnectAsync(address).ConfigureAwait(false)
+                || await WaitForAttachAsync(address, deadline).ConfigureAwait(false);
+            Log.Info("nearby", $"connect {Mac.Format(address)}: attached={attached}");
+            if (attached)
             {
-                await link.Task.WaitAsync(ConnectTimeout).ConfigureAwait(false);
-                Log.Info("nearby", $"connect {Mac.Format(address)}: link up, attaching");
-                bool attached = await _connections.ConnectAsync(address).ConfigureAwait(false);
-                Log.Info("nearby", $"connect {Mac.Format(address)}: ConnectAsync -> {attached}");
-                if (attached)
-                {
-                    result = OfferState.Connected;
-                }
+                result = OfferState.Connected;
             }
         }
         catch (TimeoutException)
@@ -157,6 +164,38 @@ public sealed class NearbyService : IDisposable
         if (changed)
         {
             OffersChanged?.Invoke();
+        }
+    }
+
+    private static TimeSpan Remaining(long deadline) => TimeSpan.FromMilliseconds(Math.Max(0, deadline - Environment.TickCount64));
+
+    // ConnectAsync failed but its retry series (or the link-up attach) may still attach the pair within the budget.
+    private async Task<bool> WaitForAttachAsync(ulong address, long deadline)
+    {
+        var attached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnAttached(AapSession session)
+        {
+            if (session.Address == address)
+            {
+                attached.TrySetResult();
+            }
+        }
+        _connections.Attached += OnAttached;
+        try
+        {
+            if (_connections.Session?.Address != address)
+            {
+                await attached.Task.WaitAsync(Remaining(deadline)).ConfigureAwait(false);
+            }
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+        finally
+        {
+            _connections.Attached -= OnAttached;
         }
     }
 
@@ -283,6 +322,7 @@ public sealed class NearbyService : IDisposable
         }
         bool changed;
         bool nearbyChanged;
+        ulong caseOpened = 0;
         lock (_lock)
         {
             if (!_resolved.TryGetValue(address, out Pair? pair))
@@ -300,8 +340,14 @@ public sealed class NearbyService : IDisposable
                 return;
             }
             bool wasNearby = pair.Nearby;
+            bool wasOpen = pair.LidOpen;
+            bool wasBudInCase = pair.BudInCase;
             changed = Update(pair, data);
             nearbyChanged = pair.Nearby != wasNearby;
+            if (((!wasOpen && pair.LidOpen) || (wasBudInCase && !pair.BudInCase)) && Models.FromModelNumber(pair.ModelNumber)?.SingleBattery != true)
+            {
+                caseOpened = pair.Address;
+            }
             if (changed)
             {
                 Publish();
@@ -314,6 +360,10 @@ public sealed class NearbyService : IDisposable
         if (nearbyChanged)
         {
             NearbyChanged?.Invoke();
+        }
+        if (caseOpened != 0)
+        {
+            CaseOpened?.Invoke(caseOpened);
         }
     }
 
