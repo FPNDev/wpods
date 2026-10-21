@@ -34,7 +34,6 @@ public sealed record UiPrefs
     /// <summary>Main window height in DIPs.</summary>
     public double WindowHeight { get; init; } = 640;
     public bool FirstRunDone { get; init; }
-    public bool FirstHideToastShown { get; init; }
 }
 
 /// <summary>Model reported over AAP 0x1D, remembered for pairs that are not attached.</summary>

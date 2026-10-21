@@ -327,11 +327,7 @@ public sealed class AapSession : IAsyncDisposable
             await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
             lock (_stateLock)
             {
-                DeviceChange change = State.FinishInitialReport();
-                if (change != DeviceChange.None)
-                {
-                    Changed?.Invoke(change);
-                }
+                Changed?.Invoke(State.FinishInitialReport() | DeviceChange.InitialReport);
             }
             SaveCapabilities();
             for (int attempt = 0; attempt < 2; attempt++)

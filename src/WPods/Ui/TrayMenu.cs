@@ -6,7 +6,7 @@ namespace WPods.Ui;
 /// The tray icon's right-click menu as a native Win32 popup menu, so Windows draws its own check mark, spacing,
 /// DPI scaling and menu theme.
 /// </summary>
-internal static partial class TrayMenu
+internal static unsafe partial class TrayMenu
 {
     public const int Open = 1;
     public const int Startup = 2;
@@ -22,6 +22,40 @@ internal static partial class TrayMenu
     private const uint TpmReturnCmd = 0x0100;
     private const int SmMenuDropAlignment = 40;
     private const int WmNull = 0x0000;
+    // uxtheme.dll exports by ordinal only (undocumented, used by Explorer and Notepad): SetPreferredAppMode, FlushMenuThemes.
+    private const nint SetPreferredAppModeOrdinal = 135;
+    private const nint FlushMenuThemesOrdinal = 136;
+    private const int AllowDark = 1;
+
+    private static delegate* unmanaged<void> s_flushMenuThemes;
+
+    /// <summary>
+    /// Lets Win32 menus follow Windows' light/dark app mode. Call once before the first menu; without the ordinals
+    /// (other Windows builds) menus stay light.
+    /// </summary>
+    public static void AllowDarkMode()
+    {
+        nint uxtheme = LoadLibrary("uxtheme.dll");
+        if (uxtheme == 0)
+        {
+            return;
+        }
+        nint setPreferredAppMode = GetProcAddress(uxtheme, SetPreferredAppModeOrdinal);
+        if (setPreferredAppMode != 0)
+        {
+            ((delegate* unmanaged<int, int>)setPreferredAppMode)(AllowDark);
+        }
+        s_flushMenuThemes = (delegate* unmanaged<void>)GetProcAddress(uxtheme, FlushMenuThemesOrdinal);
+    }
+
+    /// <summary>Drops cached menu themes after Windows' app mode changed.</summary>
+    public static void FlushThemes()
+    {
+        if (s_flushMenuThemes != null)
+        {
+            s_flushMenuThemes();
+        }
+    }
 
     /// <summary>Shows the menu at the cursor and returns the chosen command (0 = dismissed).</summary>
     public static int Show(nint owner, string open, string startup, bool startupChecked, string quit)
@@ -50,6 +84,12 @@ internal static partial class TrayMenu
             DestroyMenu(menu);
         }
     }
+
+    [LibraryImport("kernel32.dll", EntryPoint = "LoadLibraryW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial nint LoadLibrary(string name);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial nint GetProcAddress(nint module, nint ordinal);
 
     [LibraryImport("user32.dll")]
     private static partial nint CreatePopupMenu();

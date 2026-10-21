@@ -460,6 +460,7 @@ internal sealed partial class TrayApp
         {
             _appsLight = appsLight;
             ApplyTheme();
+            TrayMenu.FlushThemes();
         }
         AccentRamp? accent = WindowsTheme.ReadAccent();
         if (accent != _accent)

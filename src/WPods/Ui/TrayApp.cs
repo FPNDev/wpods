@@ -31,6 +31,7 @@ internal sealed partial class TrayApp : ApplicationContext
         HostSettings = 1 << 10,
         Toast = 1 << 11,
         Caps = 1 << 12,
+        Checking = 1 << 13,
     }
 
     // Main-page messages whose last sent JSON is kept to skip sends that change nothing.
@@ -211,6 +212,10 @@ internal sealed partial class TrayApp : ApplicationContext
         if ((change & DeviceChange.Capabilities) != 0)
         {
             dirty |= Dirty.Caps;
+        }
+        if ((change & DeviceChange.InitialReport) != 0)
+        {
+            dirty |= Dirty.Checking;
         }
         if (dirty != Dirty.None)
         {
@@ -411,7 +416,7 @@ internal sealed partial class TrayApp : ApplicationContext
             MessageWriter.WriteCaps(w, state);
             SendMain(Sent.Caps, _writer.End(), force);
         }
-        if ((dirty & Dirty.Status) != 0)
+        if ((dirty & (Dirty.Status | Dirty.Checking)) != 0)
         {
             Utf8JsonWriter w = _writer.Begin("checking");
             MessageWriter.WriteChecking(w, state);

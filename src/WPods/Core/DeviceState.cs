@@ -20,6 +20,8 @@ public enum DeviceChange
     Keys = 1 << 8,
     /// <summary><see cref="DeviceState.Capabilities"/> changed.</summary>
     Capabilities = 1 << 9,
+    /// <summary>The initial report window after attach ended (<see cref="DeviceState.InitialReportDone"/> is now true).</summary>
+    InitialReport = 1 << 10,
 }
 
 /// <summary>
@@ -158,7 +160,8 @@ public sealed class DeviceState
     /// </summary>
     internal DeviceCapabilities Reported { get; private set; }
 
-    internal bool InitialReportDone { get; private set; }
+    /// <summary>The 1 s window after attach in which the device reports its state has ended.</summary>
+    public bool InitialReportDone { get; private set; }
 
     public string? Name { get; internal set; }
     public string? ModelNumber { get; internal set; }

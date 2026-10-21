@@ -40,6 +40,7 @@ internal static class Program
             activation, static (_, _) => ActivationRequested?.Invoke(), null, Timeout.Infinite, executeOnlyOnce: false);
 
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        TrayMenu.AllowDarkMode();
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 

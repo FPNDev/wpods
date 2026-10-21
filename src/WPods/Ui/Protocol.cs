@@ -147,11 +147,9 @@ internal sealed class MessageWriter
     public static void WriteCaps(Utf8JsonWriter w, DeviceState s) =>
         WriteCaps(w, s.Capabilities, Models.FromModelNumber(s.ModelNumber)?.SingleBattery == true);
 
-    /// <summary>
-    /// "checking": true until the session's handshake is answered (Status leaves Initializing). The core raises no event
-    /// when its 1 s initial-report window ends, so the status change is the last signal the host gets.
-    /// </summary>
-    public static void WriteChecking(Utf8JsonWriter w, DeviceState s) => w.WriteBoolean("checking", s.Status == SessionStatus.Initializing);
+    /// <summary>"checking": true from attach until the initial report window ends (or the handshake got no answer).</summary>
+    public static void WriteChecking(Utf8JsonWriter w, DeviceState s) =>
+        w.WriteBoolean("checking", !s.InitialReportDone && s.Status != SessionStatus.NoResponse);
 
     public static void WriteHost(Utf8JsonWriter w, HostSettings host)
     {
