@@ -138,8 +138,20 @@ internal sealed class MessageWriter
         WriteListeningMode(w, s);
         WriteSettingFields(w, s);
         WriteHeartRate(w, s);
+        WriteCaps(w, s);
+        WriteChecking(w, s);
         w.WriteEndObject();
     }
+
+    /// <summary>"caps" of the attached pair: its effective capabilities plus "singleBattery" for AirPods Max.</summary>
+    public static void WriteCaps(Utf8JsonWriter w, DeviceState s) =>
+        WriteCaps(w, s.Capabilities, Models.FromModelNumber(s.ModelNumber)?.SingleBattery == true);
+
+    /// <summary>
+    /// "checking": true until the session's handshake is answered (Status leaves Initializing). The core raises no event
+    /// when its 1 s initial-report window ends, so the status change is the last signal the host gets.
+    /// </summary>
+    public static void WriteChecking(Utf8JsonWriter w, DeviceState s) => w.WriteBoolean("checking", s.Status == SessionStatus.Initializing);
 
     public static void WriteHost(Utf8JsonWriter w, HostSettings host)
     {
@@ -159,19 +171,7 @@ internal sealed class MessageWriter
         w.WriteString("name", d.Name);
         w.WriteString("model", model.Name);
         w.WriteString("art", model.Art);
-        w.WriteStartArray("caps");
-        foreach (DeviceCapabilities capability in Capabilities)
-        {
-            if (capability != DeviceCapabilities.None && (d.Capabilities & capability) != 0)
-            {
-                w.WriteStringValue(Camel(capability));
-            }
-        }
-        if (model.SingleBattery)
-        {
-            w.WriteStringValue("singleBattery");
-        }
-        w.WriteEndArray();
+        WriteCaps(w, d.Capabilities, model.SingleBattery);
         w.WriteString("conn", conn);
         w.WriteBoolean("hasKeys", d.HasKeys);
         if (batteries is { } b)
@@ -184,6 +184,23 @@ internal sealed class MessageWriter
         }
         WriteHost(w, host);
         w.WriteEndObject();
+    }
+
+    private static void WriteCaps(Utf8JsonWriter w, DeviceCapabilities capabilities, bool singleBattery)
+    {
+        w.WriteStartArray("caps");
+        foreach (DeviceCapabilities capability in Capabilities)
+        {
+            if (capability != DeviceCapabilities.None && (capabilities & capability) != 0)
+            {
+                w.WriteStringValue(Camel(capability));
+            }
+        }
+        if (singleBattery)
+        {
+            w.WriteStringValue("singleBattery");
+        }
+        w.WriteEndArray();
     }
 
     public static void WriteOffer(Utf8JsonWriter w, NearbyOffer offer)

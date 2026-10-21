@@ -25,7 +25,6 @@ internal sealed partial class TrayApp
     private bool _mainShown;
     private bool _suspendPending;
     private Point? _mainPosition;
-    private bool _stillRunningPending;
     private PopupWindow? _popup;
     private bool _popupShown;
     private double _popupHeight;
@@ -77,7 +76,7 @@ internal sealed partial class TrayApp
     {
         var pane = new WebPane(OnMainMessage, OnPaneFailed);
         var window = new MainWindow(MainBounds(), MainBackground, Dark, Text("app.name"), _appIcon, pane);
-        window.CloseRequested += OnCloseRequested;
+        window.CloseRequested += HideMain;
         window.HeightChanged += OnMainHeightChanged;
         _main = window;
         _mainShown = true;
@@ -150,15 +149,6 @@ internal sealed partial class TrayApp
         _mainShown = false;
         _hideTimer.Stop();
         window.Destroy();
-    }
-
-    private void OnCloseRequested()
-    {
-        if (!_prefs.FirstHideToastShown)
-        {
-            _stillRunningPending = true;
-        }
-        HideMain();
     }
 
     private void OnMainHeightChanged(double heightDip)
@@ -245,12 +235,6 @@ internal sealed partial class TrayApp
         w.WriteString("mic", MessageWriter.Camel(_micStatus));
         w.WriteBoolean("visible", _mainShown);
         PostMain(_writer.End());
-        if (_stillRunningPending)
-        {
-            _stillRunningPending = false;
-            SavePrefs(_prefs with { FirstHideToastShown = true });
-            SendToast("stillRunning", 0);
-        }
     }
 
     // attached ?? last used ?? first device.

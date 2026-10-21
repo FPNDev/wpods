@@ -42,7 +42,6 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.SetColorMode(SystemColorMode.System);
 
         if (Localization.Load(Path.Combine(AppContext.BaseDirectory, "locales")) is not { } locales)
         {

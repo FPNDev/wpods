@@ -30,6 +30,7 @@ internal sealed partial class TrayApp : ApplicationContext
         Offers = 1 << 9,
         HostSettings = 1 << 10,
         Toast = 1 << 11,
+        Caps = 1 << 12,
     }
 
     // Main-page messages whose last sent JSON is kept to skip sends that change nothing.
@@ -41,6 +42,8 @@ internal sealed partial class TrayApp : ApplicationContext
         ListeningMode,
         Settings,
         HeartRate,
+        Caps,
+        Checking,
         Mic,
         Count,
     }
@@ -59,9 +62,6 @@ internal sealed partial class TrayApp : ApplicationContext
     private readonly SynchronizationContext _ui;
     private readonly HostWindow _host;
     private readonly NotifyIcon _tray;
-    private readonly ToolStripMenuItem _openItem;
-    private readonly ToolStripMenuItem _startupItem;
-    private readonly ToolStripMenuItem _quitItem;
     private readonly MessageWriter _writer = new();
     private readonly string?[] _lastSent = new string?[(int)Sent.Count];
     private readonly Lock _hostSettingsLock = new();
@@ -81,7 +81,6 @@ internal sealed partial class TrayApp : ApplicationContext
     private MicStatus _micSeen;
     private int _lowLatencyFailures;
     private ulong _lastAttached;
-    private ulong _userDisconnect;
 
     // UI-thread state, refreshed by Flush.
     private AapSession? _session;
@@ -116,19 +115,7 @@ internal sealed partial class TrayApp : ApplicationContext
         _appIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!)!;
         _host = new HostWindow(OnColorsChanged, OnDisplayChanged, OnHotKey);
         _hideTimer.Tick += OnHideTimer;
-
-        _openItem = new ToolStripMenuItem(Text("tray.open"), null, (_, _) => ShowMain());
-        _openItem.Font = new Font(_openItem.Font, FontStyle.Bold);
-        _startupItem = new ToolStripMenuItem(Text("tray.startup"), null, (_, _) => ToggleStartupFromTray());
-        _quitItem = new ToolStripMenuItem(Text("tray.quit"), null, (_, _) => Exit());
-        var menu = new ContextMenuStrip();
-        menu.Items.Add(_openItem);
-        menu.Items.Add(_startupItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(_quitItem);
-        // The Run value can change elsewhere (the window's switch, Settings > Startup apps): re-read on every open.
-        menu.Opening += (_, _) => _startupItem.Checked = StartupRegistration.IsEnabled();
-        _tray = new NotifyIcon { ContextMenuStrip = menu };
+        _tray = new NotifyIcon();
         _tray.MouseClick += OnTrayClick;
 
         connections.Attached += OnAttached;
@@ -140,6 +127,7 @@ internal sealed partial class TrayApp : ApplicationContext
         mic.StatusChanged += OnMicStatus;
         keepAlive.Failed += OnLowLatencyFailed;
         nearby.OffersChanged += () => MarkDirty(Dirty.Offers);
+        nearby.NearbyChanged += () => MarkDirty(Dirty.Devices);
         Program.ActivationRequested += () => _ui.Post(static s => ((TrayApp)s!).ShowMain(), this);
 
         _devices = connections.GetDevices();
@@ -173,7 +161,13 @@ internal sealed partial class TrayApp : ApplicationContext
     {
         session.Changed += OnSessionChanged;
         Volatile.Write(ref _lastAttached, session.Address);
-        Interlocked.CompareExchange(ref _userDisconnect, 0, session.Address);
+        lock (_linkLock)
+        {
+            if (_attachWaits.Remove(session.Address, out TaskCompletionSource? wait))
+            {
+                wait.TrySetResult();
+            }
+        }
         MarkDirty(Dirty.Session);
     }
 
@@ -214,14 +208,17 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             dirty |= Dirty.HeartRate;
         }
+        if ((change & DeviceChange.Capabilities) != 0)
+        {
+            dirty |= Dirty.Caps;
+        }
         if (dirty != Dirty.None)
         {
             MarkDirty(dirty);
         }
     }
 
-    // CM notification thread. A link that comes up ends a connect wait; the attached pair's link dropping without
-    // the user asking is the "disconnected" toast.
+    // CM notification thread. A link that comes up ends a user connect's wait; a link drop is only a status change.
     private void OnLinkChanged(ulong address, bool up)
     {
         if (up)
@@ -233,10 +230,6 @@ internal sealed partial class TrayApp : ApplicationContext
                     wait.TrySetResult();
                 }
             }
-        }
-        else if (Volatile.Read(ref _lastAttached) == address && Volatile.Read(ref _userDisconnect) != address)
-        {
-            QueueToast("disconnected", address);
         }
         MarkDirty(Dirty.Devices);
     }
@@ -342,6 +335,7 @@ internal sealed partial class TrayApp : ApplicationContext
             Utf8JsonWriter w = _writer.Begin("state");
             MessageWriter.WriteState(w, state);
             PostMain(_writer.End());
+            // The snapshot carries every state field: forget what was sent for the previous session.
             Array.Clear(_lastSent, (int)Sent.Battery, (int)Sent.Mic - (int)Sent.Battery);
         }
         else if (state is not null)
@@ -376,7 +370,7 @@ internal sealed partial class TrayApp : ApplicationContext
         SendMain(Sent.Devices, _writer.End(), force: false);
     }
 
-    /// <summary>Battery, ear, listening mode, settings and heart-rate messages for the flags set in <paramref name="dirty"/>.</summary>
+    /// <summary>Battery, ear, listening mode, settings, heart-rate, caps and checking messages for the flags set in <paramref name="dirty"/>.</summary>
     private void SendStateDeltas(Dirty dirty, DeviceState state, bool force)
     {
         if ((dirty & Dirty.Battery) != 0)
@@ -411,6 +405,18 @@ internal sealed partial class TrayApp : ApplicationContext
             MessageWriter.WriteHeartRate(w, state);
             SendMain(Sent.HeartRate, _writer.End(), force);
         }
+        if ((dirty & Dirty.Caps) != 0)
+        {
+            Utf8JsonWriter w = _writer.Begin("caps");
+            MessageWriter.WriteCaps(w, state);
+            SendMain(Sent.Caps, _writer.End(), force);
+        }
+        if ((dirty & Dirty.Status) != 0)
+        {
+            Utf8JsonWriter w = _writer.Begin("checking");
+            MessageWriter.WriteChecking(w, state);
+            SendMain(Sent.Checking, _writer.End(), force);
+        }
     }
 
     private void SendMain(Sent kind, string json, bool force)
@@ -440,7 +446,7 @@ internal sealed partial class TrayApp : ApplicationContext
     }
 
     /// <summary>In-page toast; only while the main window shows (protocol 6).</summary>
-    private void SendToast(string id, ulong device, string? name = null)
+    private void SendToast(string id, ulong device)
     {
         if (!MainLive)
         {
@@ -456,14 +462,6 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             w.WriteNull("device");
         }
-        if (name is not null)
-        {
-            w.WriteString("name", name);
-        }
-        else
-        {
-            w.WriteNull("name");
-        }
         PostMain(_writer.End());
     }
 
@@ -474,7 +472,7 @@ internal sealed partial class TrayApp : ApplicationContext
         foreach (KnownDevice device in _devices)
         {
             string conn = Conn(device, out NearbyOffer? offer);
-            MessageWriter.WriteDevice(w, device, conn, conn == "elsewhere" ? offer!.Batteries : null, _settings.Get(device.Address));
+            MessageWriter.WriteDevice(w, device, conn, conn == "elsewhere" ? offer?.Batteries : null, _settings.Get(device.Address));
         }
         w.WriteEndArray();
         if (_session is { } session)
@@ -502,7 +500,8 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             return "reconnecting";
         }
-        return offer is { State: OfferState.Offer or OfferState.Failed } ? "elsewhere" : "disconnected";
+        // Its own proximity adverts are seen while its link to Windows is down: connected to another device.
+        return _nearby.IsNearby(device.Address) ? "elsewhere" : "disconnected";
     }
 
     private string Text(string key) => _locale.Text(key);
@@ -511,6 +510,11 @@ internal sealed partial class TrayApp : ApplicationContext
 
     private void OnTrayClick(object? sender, MouseEventArgs e)
     {
+        if (e.Button == MouseButtons.Right)
+        {
+            ShowTrayMenu();
+            return;
+        }
         if (e.Button != MouseButtons.Left)
         {
             return;
@@ -613,6 +617,23 @@ internal sealed partial class TrayApp : ApplicationContext
         if (battery.Status == BatteryStatus.Charging)
         {
             parts.Append(' ').Append(Text("battery.charging").ToLowerInvariant());
+        }
+    }
+
+    // Native menu, rebuilt on each open so labels and the startup check are current.
+    private void ShowTrayMenu()
+    {
+        switch (TrayMenu.Show(_host.Handle, Text("tray.open"), Text("tray.startup"), StartupRegistration.IsEnabled(), Text("tray.quit")))
+        {
+            case TrayMenu.Open:
+                ShowMain();
+                break;
+            case TrayMenu.Startup:
+                ToggleStartupFromTray();
+                break;
+            case TrayMenu.Quit:
+                Exit();
+                break;
         }
     }
 

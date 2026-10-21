@@ -17,9 +17,10 @@ internal sealed partial class TrayApp
     private readonly HashSet<ulong> _connecting = [];
     private readonly Dictionary<ulong, CancellationTokenSource> _connectCancels = [];
     private readonly HashSet<ulong> _cancelled = [];
-    // Link-up waits, completed from the CM notification thread.
+    // Link-up and attach waits of user connects, completed from core threads.
     private readonly Lock _linkLock = new();
     private readonly Dictionary<ulong, TaskCompletionSource> _linkWaits = [];
+    private readonly Dictionary<ulong, TaskCompletionSource> _attachWaits = [];
 
     private void OnMainMessage(WebPane pane, PageMessage m)
     {
@@ -116,7 +117,7 @@ internal sealed partial class TrayApp
                 main.WindowState = FormWindowState.Minimized;
                 break;
             case "close":
-                OnCloseRequested();
+                HideMain();
                 break;
             case "beginDrag":
                 main.BeginDrag();
@@ -136,7 +137,7 @@ internal sealed partial class TrayApp
                 SendPopupInit();
                 break;
             case "popupConnect" when Mac.TryParse(m.Id, out ulong address):
-                PopupConnect(address);
+                _ = _nearby.ConnectAsync(address);
                 break;
             case "popupCancel":
                 _nearby.CancelConnect();
@@ -166,70 +167,69 @@ internal sealed partial class TrayApp
         }
         _cancelled.Remove(address);
         SendDevices();
-        string result = "connectFailed";
+        string? failure = null;
         try
         {
-            KnownDevice? device = Find(address);
-            if (device is { LinkUp: true })
-            {
-                result = await _connections.ConnectAsync(address) ? "connected" : result;
-            }
-            else if (_offerByAddress.TryGetValue(address, out NearbyOffer? offer) && offer.State is OfferState.Offer or OfferState.Failed)
+            if (_offerByAddress.TryGetValue(address, out NearbyOffer? offer) && offer.State is OfferState.Offer or OfferState.Failed)
             {
                 await _nearby.ConnectAsync(address);
-                result = _connections.Session?.Address == address ? "connected" : result;
+                failure = _connections.Session?.Address == address ? null : "connectFailed";
             }
-            else if (Native.GetInterfaces(Native.RadioInterface).Count == 0)
+            else if (Find(address) is not { LinkUp: true } && Native.GetInterfaces(Native.RadioInterface).Count == 0)
             {
-                result = "bluetoothOff";
+                failure = "bluetoothOff";
             }
-            else
+            else if (!await ConnectAudioAsync(address))
             {
-                result = await ConnectAudioAsync(address) ? "connected" : result;
+                failure = "connectFailed";
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Cancelled by the user.
         }
         finally
         {
             _connecting.Remove(address);
             SendDevices();
         }
-        if (_cancelled.Remove(address))
+        if (_cancelled.Remove(address) || failure is null)
         {
             return;
         }
-        SendToast(result, address, result == "connected" ? DeviceName(address) : null);
+        SendToast(failure, address);
     }
 
-    // Windows audio connect (KS one-shot reconnect), wait up to 10 s for the link, then attach.
+    /// <summary>
+    /// Link up (asking Windows to connect audio only when it is down), then attached, within 10 s. The waits are
+    /// registered before anything can complete them, and an already-up link or an attach by the connection manager
+    /// itself counts as success. False on timeout, attach failure or Cancel.
+    /// </summary>
     private async Task<bool> ConnectAudioAsync(ulong address)
     {
-        using var cancel = new CancellationTokenSource();
+        using var cancel = new CancellationTokenSource(LinkWait);
         var link = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _connectCancels[address] = cancel;
         lock (_linkLock)
         {
             _linkWaits[address] = link;
+            _attachWaits[address] = attached;
         }
         try
         {
-            int hr = await Task.Run(() => NearbyNative.wpn_bt_connect_audio(address), cancel.Token);
-            if (hr < 0)
-            {
-                return false;
-            }
             if (Find(address) is not { LinkUp: true })
             {
-                await link.Task.WaitAsync(LinkWait, cancel.Token);
+                await Task.Run(() => NearbyNative.wpn_bt_connect_audio(address), cancel.Token);
+                await link.Task.WaitAsync(cancel.Token);
             }
-            return await _connections.ConnectAsync(address);
+            if (_connections.Session?.Address == address || await _connections.ConnectAsync(address))
+            {
+                return true;
+            }
+            // The connection manager may still be attaching this pair on its own (link-up event): wait for it.
+            await attached.Task.WaitAsync(cancel.Token);
+            return true;
         }
-        catch (TimeoutException)
+        catch (OperationCanceledException)
         {
-            return false;
+            return _connections.Session?.Address == address;
         }
         finally
         {
@@ -237,6 +237,7 @@ internal sealed partial class TrayApp
             lock (_linkLock)
             {
                 _linkWaits.Remove(address);
+                _attachWaits.Remove(address);
             }
         }
     }
@@ -262,21 +263,11 @@ internal sealed partial class TrayApp
     {
         if (_connections.Session?.Address == address)
         {
-            Volatile.Write(ref _userDisconnect, address);
             await _connections.DisconnectAsync();
         }
         if (reconnect)
         {
             Connect(address);
-        }
-    }
-
-    private async void PopupConnect(ulong address)
-    {
-        await _nearby.ConnectAsync(address);
-        if (_connections.Session?.Address == address)
-        {
-            SendToast("connected", address, DeviceName(address));
         }
     }
 
@@ -350,7 +341,8 @@ internal sealed partial class TrayApp
             "micMode" when value.ValueKind == JsonValueKind.String && MessageWriter.TryParse(value.GetString(), out MicMode mode) => current with { MicMode = mode },
             _ => null,
         };
-        if (next is not null)
+        // Host settings are editable only for the attached pair; anything else just gets the saved value back.
+        if (next is not null && _connections.Session?.Address == address)
         {
             int lowLatencyFailures = Volatile.Read(ref _lowLatencyFailures);
             try
@@ -413,6 +405,7 @@ internal sealed partial class TrayApp
     }
 
     // "" = Same as Windows. The main window restarts (after this message handler returns) with the new labels.
+    // "" = Same as Windows. Applied live: both pages relabel in place; the tray and notifications read the labels on use.
     private void SetLanguage(string code)
     {
         string choice = code.Length == 0 ? "system" : code;
@@ -422,25 +415,12 @@ internal sealed partial class TrayApp
         }
         SavePrefs(_prefs with { Language = choice });
         _locale = _locales.Resolve(choice);
-        _openItem.Text = Text("tray.open");
-        _startupItem.Text = Text("tray.startup");
-        _quitItem.Text = Text("tray.quit");
         UpdateTray();
-        _ui.Post(static s =>
-        {
-            var app = (TrayApp)s!;
-            bool shown = app._mainShown;
-            app.DestroyMain();
-            if (shown)
-            {
-                app.CreateMain();
-            }
-            if (app._popup is not null)
-            {
-                app.DestroyPopup();
-                app.UpdatePopup();
-            }
-        }, this);
+        Utf8JsonWriter w = _writer.Begin("labels");
+        MessageWriter.WriteLocale(w, _locale);
+        string json = _writer.End();
+        PostMain(json);
+        _popup?.Pane.Post(json);
     }
 
     private static void Launch(string target)
