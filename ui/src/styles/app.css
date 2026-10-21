@@ -63,6 +63,9 @@ span.wp-menu__glyph { display: grid; place-items: center; }
 .wp-slider__input:focus-visible::-webkit-slider-thumb { transform: scale(1.1); }
 .wp-slider__input:focus-visible:active::-webkit-slider-thumb { transform: scale(0.9); }
 .wp-search__input:focus-visible { border-color: var(--border-strong); }
+/* Lists clip to radius-lg; edge rows share it so their inset focus outline keeps its corners. */
+.wp-list > :first-child { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
+.wp-list > :last-child { border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg); }
 
 /* Long single-word labels (long Ukrainian words) break instead of overflowing the segment. */
 .wp-seg__label { hyphens: auto; overflow-wrap: break-word; }
