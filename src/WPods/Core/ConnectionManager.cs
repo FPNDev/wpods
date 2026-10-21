@@ -3,31 +3,62 @@ using Microsoft.Win32.SafeHandles;
 
 namespace WPods.Core;
 
+/// <summary>Why a pair is not attached although WPods is not trying to attach it (<see cref="KnownDevice.Idle"/>).</summary>
+public enum IdleReason
+{
+    /// <summary>Attached, link down, or WPods is attaching / retrying.</summary>
+    None,
+    /// <summary>
+    /// The user pressed Disconnect. Set at once when <see cref="ConnectionManager.DisconnectAsync"/> starts; the pair is
+    /// never auto-attached until its link drops (flag cleared) or the user connects it (<see cref="ConnectionManager.ConnectAsync"/>).
+    /// </summary>
+    UserDisconnected,
+    /// <summary>The link is up but the attach and every retry failed; waits for the next link event or a user Connect.</summary>
+    AttachGaveUp,
+}
+
 /// <summary>
 /// A paired AirPods device for the device list. <see cref="ModelName"/> comes from <see cref="Models"/>;
 /// <see cref="Capabilities"/> is the live set while attached, else the set reported on the last attach plus the
-/// model baseline.
+/// model baseline. <see cref="StemModes"/> is the stored stem press-and-hold cycle (written on every attach).
 /// </summary>
 public sealed record KnownDevice(
-    ulong Address, string Name, string? ModelNumber, string? ModelName, bool LinkUp, bool HasKeys, bool Attached, DeviceCapabilities Capabilities);
+    ulong Address, string Name, string? ModelNumber, string? ModelName, bool LinkUp, bool HasKeys, bool Attached, DeviceCapabilities Capabilities,
+    IdleReason Idle, StemModes StemModes);
 
 /// <summary>
 /// Owns the single AAP session. Never pages: opens NTAPD only when Windows reports the ACL link up, attaches the
 /// last-used device first, detaches quietly when the link drops, then attaches another pair whose link is already
-/// up (last-used first) or waits for the next link-up event.
+/// up (last-used first) or waits for the next link-up event. While a pair's link is up and opening NTAPD or the
+/// session fails, the attach is retried with bounded backoff (opening NTAPD never pages); after the last retry the
+/// pair is marked <see cref="IdleReason.AttachGaveUp"/>.
 /// All events fire on thread-pool (or CM notification) threads; handlers must not block.
 /// </summary>
 public sealed class ConnectionManager : IAsyncDisposable
 {
+    // Windows may keep the ACL up after a disconnect request (seen with the buds in a closed case); one more
+    // request follows this wait.
     private static readonly TimeSpan DisconnectTimeout = TimeSpan.FromSeconds(3);
-    private const int MaxReopenAttempts = 3;
+    // Attach retries while the link is up: the AACP L2CAP channel may refuse right after the ACL comes up while
+    // Windows and the AirPods still set up A2DP/AVRCP/HFP (1-3 s), or longer while the buds sit in an open case.
+    // 0.5 s catches the short race; doubling up to 8 s covers ~15.5 s in 5 retries. Each retry is one CreateFile
+    // that fails fast and never pages. After that only a link event or a user Connect tries again.
+    private static readonly TimeSpan[] RetryDelays =
+    [
+        TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8),
+    ];
 
     private readonly BluetoothLink _link = new();
+    // Serializes every attach/detach decision; _session writes, _retries, _retrySerial and _disposed are guarded by it.
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Dictionary<ulong, AttachRetry> _retries = [];
+    // Guards _idle and _linkDownWaits (read by GetDevices and the CM notification thread without the gate).
+    private readonly Lock _idleLock = new();
+    private readonly Dictionary<ulong, IdleReason> _idle = [];
+    private readonly Dictionary<ulong, TaskCompletionSource> _linkDownWaits = [];
     private AapSession? _session;
-    private AapSession? _disconnecting;
-    private int _generation;
-    private int _reopenAttempts;
+    private long _retrySerial;
+    private bool _disposed;
 
     public ConnectionManager(SettingsStore settings)
     {
@@ -50,7 +81,7 @@ public sealed class ConnectionManager : IAsyncDisposable
     /// <summary>ACL link of a paired AirPods went up (true) or down (false).</summary>
     public event Action<ulong, bool>? LinkChanged;
 
-    /// <summary>The result of <see cref="GetDevices"/> changed (pairing, link, attach, identity, keys).</summary>
+    /// <summary>The result of <see cref="GetDevices"/> changed (pairing, link, attach, identity, keys, <see cref="KnownDevice.Idle"/>).</summary>
     public event Action? DevicesChanged;
 
     /// <summary>Opening NTAPD failed with a Win32 error other than 1167 (e.g. 32: another app holds the channel).</summary>
@@ -83,14 +114,18 @@ public sealed class ConnectionManager : IAsyncDisposable
             DeviceCapabilities capabilities = attached
                 ? session!.State.Capabilities
                 : Settings.GetCapabilities(device.Address) | (model?.Capabilities ?? DeviceCapabilities.None);
-            list.Add(new KnownDevice(device.Address, name, modelNumber, model?.Name, device.Up, Settings.HasKeys(device.Address), attached, capabilities));
+            list.Add(new KnownDevice(
+                device.Address, name, modelNumber, model?.Name, device.Up, Settings.HasKeys(device.Address), attached, capabilities,
+                attached ? IdleReason.None : GetIdle(device.Address), Settings.GetStemModes(device.Address)));
         }
         return list;
     }
 
     /// <summary>
     /// Switches the session to <paramref name="address"/> when Windows already has its link up (detaching the
-    /// current one first). False when the link is not up or opening failed. Never pages.
+    /// current one first) and clears its <see cref="KnownDevice.Idle"/> reason. Returns the result of the immediate
+    /// attempt; on failure a fresh retry series replaces any pending one (never cancelled), so the pair may still
+    /// attach shortly after (<see cref="Attached"/>). False when the link is not up. Never pages.
     /// </summary>
     public async Task<bool> ConnectAsync(ulong address)
     {
@@ -99,9 +134,12 @@ public sealed class ConnectionManager : IAsyncDisposable
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            _generation++;
-            _reopenAttempts = 0;
-            Log.Info("conn", $"ConnectAsync {Mac.Format(address)}: gate after {Environment.TickCount64 - waitStart} ms, generation={_generation}, session={Describe(_session)}, linkUp={_link.IsUp(address)}");
+            Log.Info("conn", $"ConnectAsync {Mac.Format(address)}: gate after {Environment.TickCount64 - waitStart} ms, session={Describe(_session)}, linkUp={_link.IsUp(address)}");
+            if (_disposed)
+            {
+                return false;
+            }
+            SetIdle(address, IdleReason.None, "user connect");
             if (_session?.Address == address)
             {
                 Log.Info("conn", "ConnectAsync -> true (already attached)");
@@ -116,8 +154,8 @@ public sealed class ConnectionManager : IAsyncDisposable
             {
                 await DetachLocked("switch").ConfigureAwait(false);
             }
-            bool attached = TryAttachLocked(address, "user");
-            Log.Info("conn", $"ConnectAsync -> {attached}");
+            bool attached = AttachLocked(address, "user", newSeries: true);
+            Log.Info("conn", attached ? "ConnectAsync -> true" : "ConnectAsync -> false (retries continue)");
             return attached;
         }
         finally
@@ -127,57 +165,91 @@ public sealed class ConnectionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Mac-like full disconnect: asks Windows to drop the device's Bluetooth audio connection, then detaches when
-    /// the link drops (or after 3 s). Returns false when there is no session or Windows rejected the request.
+    /// Mac-like full disconnect, optimistic: marks the pair <see cref="IdleReason.UserDisconnected"/> and detaches at
+    /// once (<see cref="DevicesChanged"/>, <see cref="Detached"/>), then asks Windows to drop the Bluetooth audio
+    /// connection; when the request fails or the link is still up 3 s later it asks once more. Completes when the
+    /// link dropped or after the last wait. False when there is no session, or when both requests failed with an
+    /// HRESULT error: the flag is then cleared and the pair attached again (its real state).
     /// </summary>
     public async Task<bool> DisconnectAsync()
     {
-        AapSession? session;
+        ulong address;
+        Task linkDown;
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            session = _session;
-            if (session is null)
+            if (_session is not { } session)
             {
                 Log.Info("conn", "DisconnectAsync -> false (no session)");
                 return false;
             }
-            _generation++;
-            _disconnecting = session;
-            Log.Info("conn", $"DisconnectAsync {Mac.Format(session.Address)}, generation={_generation}");
+            address = session.Address;
+            Log.Info("conn", $"DisconnectAsync {Mac.Format(address)}");
+            _retries.Remove(address);
+            linkDown = WaitForLinkDown(address);
+            SetIdle(address, IdleReason.UserDisconnected, "user disconnect");
+            await DetachLocked("user disconnect").ConfigureAwait(false);
+            AttachOtherUpLocked(address);
         }
         finally
         {
             _gate.Release();
         }
-        int hr = await Task.Run(() => Native.wpn_bt_disconnect_audio(session.Address)).ConfigureAwait(false);
-        Log.Info("conn", $"DisconnectAsync: disconnect audio hr=0x{hr:X8}");
+        bool accepted = false;
         try
         {
-            SessionEnd end = await session.Completion.WaitAsync(DisconnectTimeout).ConfigureAwait(false);
-            Log.Info("conn", $"DisconnectAsync: session ended ({end})");
+            for (int attempt = 1; attempt <= 2 && _link.IsUp(address); attempt++)
+            {
+                int hr = await Task.Run(() => Native.wpn_bt_disconnect_audio(address)).ConfigureAwait(false);
+                Log.Info("conn", $"DisconnectAsync {Mac.Format(address)}: disconnect audio attempt {attempt}/2 hr=0x{hr:X8}");
+                if (hr < 0)
+                {
+                    continue;
+                }
+                accepted = true;
+                try
+                {
+                    await linkDown.WaitAsync(DisconnectTimeout).ConfigureAwait(false);
+                    break;
+                }
+                catch (TimeoutException)
+                {
+                    Log.Info("conn", $"DisconnectAsync {Mac.Format(address)}: link still up {DisconnectTimeout.TotalSeconds} s after attempt {attempt}");
+                }
+            }
         }
-        catch (TimeoutException)
+        finally
         {
-            // Link still up: detach anyway (closing the AAP channel lets the link drop).
-            Log.Info("conn", "DisconnectAsync: session still open after 3 s, detaching anyway");
+            lock (_idleLock)
+            {
+                _linkDownWaits.Remove(address);
+            }
         }
+        bool linkUp = _link.IsUp(address);
+        Log.Info("conn", $"DisconnectAsync {Mac.Format(address)}: final link {(linkUp ? "up" : "down")}, accepted by Windows={accepted}, idle={GetIdle(address)}");
+        if (accepted || !linkUp)
+        {
+            return true;
+        }
+        // Both requests rejected: the pair is still connected; show its real state.
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_session == session)
+            if (GetIdle(address) == IdleReason.UserDisconnected)
             {
-                await DetachLocked("user disconnect").ConfigureAwait(false);
-                AttachOtherUpLocked(session.Address);
+                SetIdle(address, IdleReason.None, "disconnect failed");
+                if (_session is null && _link.IsUp(address))
+                {
+                    AttachLocked(address, "disconnect failed", newSeries: true);
+                }
             }
-            _disconnecting = null;
         }
         finally
         {
             _gate.Release();
         }
-        Log.Info("conn", $"DisconnectAsync -> {hr >= 0}");
-        return hr >= 0;
+        Log.Warn("conn", $"DisconnectAsync {Mac.Format(address)} -> false (both requests failed)");
+        return false;
     }
 
     /// <summary>
@@ -187,7 +259,7 @@ public sealed class ConnectionManager : IAsyncDisposable
     public async Task SetHostSettingsAsync(ulong address, HostSettings settings)
     {
         bool handsFreeChanged = Settings.Get(address).DisableHandsFree != settings.DisableHandsFree;
-        Log.Info("conn", $"host settings {Mac.Format(address)}: disableHandsFree={settings.DisableHandsFree} lowLatency={settings.LowLatency} micMode={settings.MicMode}");
+        Log.Info("conn", $"host settings {Mac.Format(address)}: disableHandsFree={settings.DisableHandsFree} lowLatency={settings.LowLatency} micMode={settings.MicMode} duckPercent={settings.DuckPercent}");
         Settings.Set(address, settings);
         if (handsFreeChanged && Session?.Address == address)
         {
@@ -202,7 +274,8 @@ public sealed class ConnectionManager : IAsyncDisposable
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            _generation++;
+            _disposed = true;
+            _retries.Clear();
             if (_session is not null)
             {
                 await DetachLocked("exit").ConfigureAwait(false);
@@ -218,6 +291,16 @@ public sealed class ConnectionManager : IAsyncDisposable
     private void OnLinkChanged(ulong address, bool up)
     {
         Log.Info("conn", $"link {Mac.Format(address)} {(up ? "up" : "down")}");
+        if (!up)
+        {
+            lock (_idleLock)
+            {
+                if (_linkDownWaits.Remove(address, out TaskCompletionSource? wait))
+                {
+                    wait.TrySetResult();
+                }
+            }
+        }
         LinkChanged?.Invoke(address, up);
         DevicesChanged?.Invoke();
         _ = Task.Run(() => OnLinkAsync(address));
@@ -230,19 +313,31 @@ public sealed class ConnectionManager : IAsyncDisposable
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
+            if (_disposed)
+            {
+                return;
+            }
             bool up = address != 0 && _link.IsUp(address);
             Log.Info("conn", $"link decision for {(address == 0 ? "startup" : Mac.Format(address))}: gate after {Environment.TickCount64 - waitStart} ms, linkUp now={(address == 0 ? "n/a" : up.ToString())}, session={Describe(_session)}");
             if (address != 0 && !up)
             {
+                _retries.Remove(address);
+                SetIdle(address, IdleReason.None, "link down");
                 if (_session?.Address == address)
                 {
                     await DetachLocked("link down").ConfigureAwait(false);
                 }
-                if (_session is null)
-                {
-                    AttachOtherUpLocked(address);
-                }
+                AttachOtherUpLocked(address);
                 return;
+            }
+            if (address != 0)
+            {
+                // Every link-up event starts a new attach series for that pair.
+                _retries.Remove(address);
+                if (GetIdle(address) == IdleReason.AttachGaveUp)
+                {
+                    SetIdle(address, IdleReason.None, "link up again");
+                }
             }
             if (_session is not null)
             {
@@ -250,18 +345,98 @@ public sealed class ConnectionManager : IAsyncDisposable
                 return;
             }
             ulong last = Settings.LastUsed;
-            if (last != 0 && _link.IsUp(last) && TryAttachLocked(last, address == 0 ? "startup last-used" : "link-up last-used"))
+            if (CanAutoAttach(last) && AttachLocked(last, address == 0 ? "startup last-used" : "link-up last-used", newSeries: false))
             {
                 return;
             }
             ulong candidate = address != 0 ? address : _link.FirstUp();
-            if (candidate != 0 && candidate != last)
+            if (candidate != last && CanAutoAttach(candidate))
             {
-                TryAttachLocked(candidate, address == 0 ? "startup first-up" : "link-up");
+                AttachLocked(candidate, address == 0 ? "startup first-up" : "link-up", newSeries: false);
             }
             else
             {
-                Log.Info("conn", $"link decision: nothing attached (candidate={Mac.Format(candidate)}, lastUsed={Mac.Format(last)}); waiting for the next link event");
+                Log.Info("conn", $"link decision: nothing more to attach (candidate={Mac.Format(candidate)} idle={GetIdle(candidate)}, lastUsed={Mac.Format(last)} idle={GetIdle(last)}, retry pending={_retries.ContainsKey(candidate) || _retries.ContainsKey(last)})");
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    // Link up and nothing (user disconnect, gave up) holds the pair back.
+    private bool CanAutoAttach(ulong address) => address != 0 && _link.IsUp(address) && GetIdle(address) == IdleReason.None;
+
+    // One attempt now; on failure the next retry is scheduled. newSeries restarts the retry count.
+    private bool AttachLocked(ulong address, string reason, bool newSeries)
+    {
+        if (newSeries)
+        {
+            _retries.Remove(address);
+        }
+        if (TryAttachLocked(address, reason))
+        {
+            return true;
+        }
+        ScheduleRetryLocked(address);
+        return false;
+    }
+
+    // Schedules the next retry for a pair whose link is up (replacing any pending one), or gives up after the last.
+    private void ScheduleRetryLocked(ulong address)
+    {
+        if (_disposed || !CanAutoAttach(address))
+        {
+            _retries.Remove(address);
+            Log.Info("conn", $"attach {Mac.Format(address)}: no retry (linkUp={_link.IsUp(address)}, idle={GetIdle(address)})");
+            return;
+        }
+        if (!_retries.TryGetValue(address, out AttachRetry? retry))
+        {
+            retry = new AttachRetry();
+            _retries[address] = retry;
+        }
+        if (retry.Attempts >= RetryDelays.Length)
+        {
+            _retries.Remove(address);
+            Log.Warn("conn", $"attach {Mac.Format(address)}: all {RetryDelays.Length} retries failed with the link up; giving up until the next link event or a user Connect");
+            SetIdle(address, IdleReason.AttachGaveUp, "retries exhausted");
+            AttachOtherUpLocked(address);
+            return;
+        }
+        TimeSpan delay = RetryDelays[retry.Attempts++];
+        retry.Serial = ++_retrySerial;
+        Log.Info("conn", $"attach {Mac.Format(address)}: retry {retry.Attempts}/{RetryDelays.Length} in {delay.TotalMilliseconds} ms");
+        _ = RetryAsync(address, retry.Serial, delay);
+    }
+
+    private async Task RetryAsync(ulong address, long serial, TimeSpan delay)
+    {
+        await Task.Delay(delay).ConfigureAwait(false);
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (!_retries.TryGetValue(address, out AttachRetry? retry) || retry.Serial != serial)
+            {
+                Log.Info("conn", $"attach {Mac.Format(address)}: retry superseded");
+                return;
+            }
+            string reason = $"retry {retry.Attempts}/{RetryDelays.Length}";
+            if (_session is not null)
+            {
+                Log.Info("conn", $"attach {Mac.Format(address)}: {reason} skipped, session={Describe(_session)}");
+                return;
+            }
+            if (_disposed || !CanAutoAttach(address))
+            {
+                Log.Info("conn", $"attach {Mac.Format(address)}: {reason} stopped (linkUp={_link.IsUp(address)}, idle={GetIdle(address)})");
+                _retries.Remove(address);
+                return;
+            }
+            if (!TryAttachLocked(address, reason))
+            {
+                ScheduleRetryLocked(address);
             }
         }
         finally
@@ -272,6 +447,10 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     private bool TryAttachLocked(ulong address, string reason)
     {
+        if (_disposed)
+        {
+            return false;
+        }
         if (_link.GetPath(address) is not { } path)
         {
             Log.Warn("conn", $"attach {Mac.Format(address)} ({reason}): no NTAPD interface");
@@ -303,6 +482,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         };
         Volatile.Write(ref _session, session);
         Settings.LastUsed = address;
+        SetIdle(address, IdleReason.None, "attached");
         Attached?.Invoke(session);
         session.Start();
         _ = WatchAsync(session);
@@ -321,8 +501,8 @@ public sealed class ConnectionManager : IAsyncDisposable
         DevicesChanged?.Invoke();
     }
 
-    // Session ended on its own: 1167 -> quiet; other failure while the link is still up -> bounded reopen
-    // of the same device (Windows briefly taking over the audio profile), never while the link is down.
+    // Session ended on its own (read error, 1167 or end of stream). Link still up -> retry the same pair (the count
+    // restarts only when the session had reached Ready, so open-then-fail loops stay bounded); else fallback.
     private async Task WatchAsync(AapSession session)
     {
         SessionEnd end = await session.Completion.ConfigureAwait(false);
@@ -332,7 +512,6 @@ public sealed class ConnectionManager : IAsyncDisposable
         {
             return;
         }
-        int generation;
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -341,85 +520,49 @@ public sealed class ConnectionManager : IAsyncDisposable
                 Log.Info("conn", "session end: already detached");
                 return;
             }
+            bool ready = session.State.Status == SessionStatus.Ready;
             await DetachLocked(end == SessionEnd.LinkLost ? "read error 1167" : "read error").ConfigureAwait(false);
-            if (session == _disconnecting)
+            if (CanAutoAttach(address))
             {
-                Log.Info("conn", "session end: user disconnect in progress, no reopen");
+                Log.Info("conn", $"session end with the link still up (end={end}, wasReady={ready}): retrying attach");
+                if (ready)
+                {
+                    _retries.Remove(address);
+                }
+                ScheduleRetryLocked(address);
                 return;
             }
-            bool up = _link.IsUp(address);
-            if (end == SessionEnd.LinkLost || !up)
-            {
-                Log.Info("conn", $"session end: no reopen (end={end}, linkUp={up}), trying other pairs");
-                AttachOtherUpLocked(address);
-                return;
-            }
-            if (session.State.Status == SessionStatus.Ready)
-            {
-                _reopenAttempts = 0;
-            }
-            generation = _generation;
-            Log.Info("conn", $"session end: reopen loop, attempts so far={_reopenAttempts}, generation={generation}");
+            Log.Info("conn", $"session end: no retry (linkUp={_link.IsUp(address)}, idle={GetIdle(address)}), trying other pairs");
+            AttachOtherUpLocked(address);
         }
         finally
         {
             _gate.Release();
         }
-        while (true)
-        {
-            int delay;
-            await _gate.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                if (_reopenAttempts >= MaxReopenAttempts || generation != _generation || _session is not null || !_link.IsUp(address))
-                {
-                    Log.Info("conn", $"reopen {Mac.Format(address)} stopped: attempts={_reopenAttempts}/{MaxReopenAttempts}, generation={generation}/{_generation}, session={Describe(_session)}, linkUp={_link.IsUp(address)}");
-                    return;
-                }
-                delay = 1000 << _reopenAttempts++;
-                Log.Info("conn", $"reopen {Mac.Format(address)} attempt {_reopenAttempts} in {delay} ms");
-            }
-            finally
-            {
-                _gate.Release();
-            }
-            await Task.Delay(delay).ConfigureAwait(false);
-            await _gate.WaitAsync().ConfigureAwait(false);
-            try
-            {
-                if (generation != _generation || _session is not null || !_link.IsUp(address))
-                {
-                    Log.Info("conn", $"reopen {Mac.Format(address)} cancelled: generation={generation}/{_generation}, session={Describe(_session)}, linkUp={_link.IsUp(address)}");
-                    return;
-                }
-                if (TryAttachLocked(address, "reopen"))
-                {
-                    return;
-                }
-            }
-            finally
-            {
-                _gate.Release();
-            }
-        }
     }
 
-    // Rule 2 again after a detach: attach another pair whose link is already up (last-used first). Never pages.
+    // Rule 2 again after a detach: attach another pair whose link is already up (last-used first), skipping pairs
+    // the user disconnected or WPods gave up on. Never pages.
     private void AttachOtherUpLocked(ulong excluded)
     {
+        if (_session is not null || _disposed)
+        {
+            return;
+        }
         ulong last = Settings.LastUsed;
-        if (last != excluded && last != 0 && _link.IsUp(last) && TryAttachLocked(last, "fallback last-used"))
+        if (last != excluded && CanAutoAttach(last) && AttachLocked(last, "fallback last-used", newSeries: true))
         {
             return;
         }
         foreach (LinkDevice device in _link.Snapshot())
         {
-            if (device.Up && device.Address != excluded && device.Address != last && TryAttachLocked(device.Address, "fallback"))
+            if (device.Address != excluded && device.Address != last && CanAutoAttach(device.Address)
+                && AttachLocked(device.Address, "fallback", newSeries: true))
             {
                 return;
             }
         }
-        Log.Info("conn", $"fallback: no other pair with link up (excluded {Mac.Format(excluded)})");
+        Log.Info("conn", $"fallback: no other pair to attach (excluded {Mac.Format(excluded)})");
     }
 
     // Persists the 0x1D model so the device list shows it while the pair is not attached.
@@ -470,5 +613,59 @@ public sealed class ConnectionManager : IAsyncDisposable
         Log.Info("conn", "hands-free applied");
     }
 
+    private IdleReason GetIdle(ulong address)
+    {
+        lock (_idleLock)
+        {
+            return _idle.GetValueOrDefault(address);
+        }
+    }
+
+    // Logs and raises DevicesChanged when the reason changed.
+    private void SetIdle(ulong address, IdleReason reason, string why)
+    {
+        IdleReason previous;
+        lock (_idleLock)
+        {
+            previous = _idle.GetValueOrDefault(address);
+            if (previous == reason)
+            {
+                return;
+            }
+            if (reason == IdleReason.None)
+            {
+                _idle.Remove(address);
+            }
+            else
+            {
+                _idle[address] = reason;
+            }
+        }
+        Log.Info("conn", $"{Mac.Format(address)}: idle {previous} -> {reason} ({why})");
+        DevicesChanged?.Invoke();
+    }
+
+    // Completed by OnLinkChanged when the pair's link goes down; registered before the disconnect request.
+    private Task WaitForLinkDown(ulong address)
+    {
+        lock (_idleLock)
+        {
+            if (!_linkDownWaits.TryGetValue(address, out TaskCompletionSource? wait))
+            {
+                wait = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _linkDownWaits[address] = wait;
+            }
+            return wait.Task;
+        }
+    }
+
     private static string Describe(AapSession? session) => session is null ? "none" : Mac.Format(session.Address);
+
+    // Attach retry series of one pair; guarded by _gate.
+    private sealed class AttachRetry
+    {
+        public int Attempts { get; set; }
+        // Identifies the pending delay; a newer schedule or a reset makes older delays no-ops.
+        public long Serial { get; set; }
+    }
 }

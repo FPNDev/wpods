@@ -349,7 +349,6 @@ internal sealed partial class TrayApp
             "earDetection" => (s, ct) => s.SetEarDetectionAsync(on, ct),
             "conversationAwareness" => (s, ct) => s.SetConversationAwarenessAsync(on, ct),
             "personalizedVolume" => (s, ct) => s.SetPersonalizedVolumeAsync(on, ct),
-            "allowOff" => (s, ct) => s.SetAllowOffAsync(on, ct),
             "oneBudAnc" => (s, ct) => s.SetOneBudAncAsync(on, ct),
             _ => null,
         };

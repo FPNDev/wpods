@@ -10,6 +10,7 @@ public enum DeviceChange
     /// <summary>Name / model (AAP 0x1D).</summary>
     Identity = 1 << 1,
     Battery = 1 << 2,
+    /// <summary>Primary/secondary ear status or the left/right mapping (<see cref="DeviceState.LeftEar"/>, <see cref="DeviceState.RightEar"/>).</summary>
     Ear = 1 << 3,
     ListeningMode = 1 << 4,
     /// <summary>Any device-side setting other than the listening mode.</summary>
@@ -90,6 +91,17 @@ public enum HoldDuration : byte
     Shortest = 2,
 }
 
+/// <summary>Listening modes the stem press-and-hold cycles through (setting 0x1A bitmask; at least two).</summary>
+[Flags]
+public enum StemModes : byte
+{
+    None = 0,
+    Off = 0x01,
+    NoiseCancellation = 0x02,
+    Transparency = 0x04,
+    Adaptive = 0x08,
+}
+
 public enum EarStatus : byte
 {
     InEar,
@@ -139,6 +151,16 @@ public sealed class DeviceState
     private byte _hearingAidEnabled = NotReported;
     private DeviceCapabilities _observed;
     private DeviceCapabilities _baseline;
+    // AAP battery component of the primary bud (Aap.LeftComponent / RightComponent / HeadphoneComponent); 0 = unknown.
+    private byte _primaryPod;
+    private bool _budRoleSeen;
+    // Listening-mode hold (anti-flicker): the mode WPods last requested, until the device reports it or the hold
+    // expires; device reports of other modes are not applied meanwhile. 0 = no hold.
+    private byte _heldMode;
+    private long _heldUntil;
+    private int _holdSerial;
+    // Latest listening mode the device reported (applied or not); 0 = none yet.
+    private byte _deviceMode;
 
     /// <param name="remembered">Reported on the last attach.</param>
     /// <param name="baseline">Baseline of the last known model.</param>
@@ -176,12 +198,30 @@ public sealed class DeviceState
     public EarStatus? PrimaryEar { get; internal set; }
     public EarStatus? SecondaryEar { get; internal set; }
 
+    /// <summary>Ear status of the left bud: primary or secondary, by which bud is primary; null while unknown or for over-ear models.</summary>
+    public EarStatus? LeftEar => _primaryPod switch
+    {
+        Aap.LeftComponent => PrimaryEar,
+        Aap.RightComponent => SecondaryEar,
+        _ => null,
+    };
+
+    /// <summary>Ear status of the right bud; see <see cref="LeftEar"/>.</summary>
+    public EarStatus? RightEar => _primaryPod switch
+    {
+        Aap.LeftComponent => SecondaryEar,
+        Aap.RightComponent => PrimaryEar,
+        _ => null,
+    };
+
     public ListeningMode? ListeningMode => _settings[Aap.ListeningModeId] is >= 1 and <= 4 and var v ? (ListeningMode)v : null;
     public bool? EarDetection => Flag(Aap.EarDetectionId);
     public bool? ConversationAwareness => Flag(Aap.ConversationAwarenessId);
     public bool? PersonalizedVolume => Flag(Aap.PersonalizedVolumeId);
     public bool? AllowOff => Flag(Aap.AllowOffId);
     public bool? OneBudAnc => Flag(Aap.OneBudAncId);
+    /// <summary>Stem press-and-hold cycle (0x1A) as last written by WPods or reported by the device; null until then.</summary>
+    public StemModes? StemModes => _settings[Aap.StemModesId] is var v && v != NotReported ? (StemModes)v : null;
     public MicSide? MicSide => _settings[Aap.MicSideId] is <= 2 and var v ? (MicSide)v : null;
     public PressSpeed? PressSpeed => _settings[Aap.PressSpeedId] is <= 2 and var v ? (PressSpeed)v : null;
     public HoldDuration? HoldDuration => _settings[Aap.HoldDurationId] is <= 2 and var v ? (HoldDuration)v : null;
@@ -243,6 +283,80 @@ public sealed class DeviceState
         return true;
     }
 
+    /// <summary>
+    /// Sets the primary bud (AAP battery component). The 0x08 bud role, once seen, wins over the 0x04 battery order.
+    /// Returns Ear when <see cref="LeftEar"/> or <see cref="RightEar"/> changed.
+    /// </summary>
+    internal DeviceChange SetPrimaryPod(byte component, bool fromBudRole)
+    {
+        if (!fromBudRole && _budRoleSeen)
+        {
+            if (component != _primaryPod)
+            {
+                Log.Warn("aap", $"0x04 battery order says primary={PodName(component)}, bud role 0x08 says {PodName(_primaryPod)}; keeping the bud role");
+            }
+            return DeviceChange.None;
+        }
+        _budRoleSeen |= fromBudRole;
+        if (component == _primaryPod)
+        {
+            return DeviceChange.None;
+        }
+        EarStatus? left = LeftEar;
+        EarStatus? right = RightEar;
+        Log.Info("aap", $"primary bud {PodName(_primaryPod)} -> {PodName(component)} (source: {(fromBudRole ? "0x08 bud role" : "first pod in 0x04 battery packet")})");
+        _primaryPod = component;
+        return left == LeftEar && right == RightEar ? DeviceChange.None : DeviceChange.Ear;
+    }
+
+    /// <summary>Starts (or replaces) the listening-mode hold for <paramref name="mode"/>; returns its serial.</summary>
+    internal int HoldListeningMode(byte mode, TimeSpan duration)
+    {
+        _heldMode = mode;
+        _heldUntil = Environment.TickCount64 + (long)duration.TotalMilliseconds;
+        return ++_holdSerial;
+    }
+
+    /// <summary>
+    /// A listening-mode report from the device. Not applied while a hold for another mode is active; the held mode
+    /// itself ends the hold. Returns true when <see cref="ListeningMode"/> changed.
+    /// </summary>
+    internal bool ReportListeningMode(byte value)
+    {
+        _deviceMode = value;
+        if (_heldMode != 0)
+        {
+            if (value != _heldMode && Environment.TickCount64 < _heldUntil)
+            {
+                Log.Info("aap", $"listening mode report {value} ignored: waiting for requested {_heldMode}");
+                return false;
+            }
+            Log.Info("aap", value == _heldMode
+                ? $"listening mode {value} confirmed by the device, hold ended"
+                : $"listening mode hold for {_heldMode} expired, device reports {value}");
+            _heldMode = 0;
+        }
+        return SetSetting(Aap.ListeningModeId, value);
+    }
+
+    /// <summary>
+    /// Ends hold <paramref name="serial"/> if it is still the active one (timeout or failed write) and applies the
+    /// device's latest reported mode. Returns true when <see cref="ListeningMode"/> changed.
+    /// </summary>
+    internal bool ReleaseListeningMode(int serial)
+    {
+        if (serial != _holdSerial || _heldMode == 0)
+        {
+            return false;
+        }
+        Log.Info("aap", $"listening mode hold for {_heldMode} released, device last reported {(_deviceMode == 0 ? "nothing" : _deviceMode.ToString())}");
+        _heldMode = 0;
+        return _deviceMode != 0 && SetSetting(Aap.ListeningModeId, _deviceMode);
+    }
+
+    /// <summary>True when hold <paramref name="serial"/> is still the latest request.</summary>
+    internal bool IsCurrentHold(int serial) => serial == _holdSerial;
+
     /// <summary>Stores a battery entry for AAP component 01/02/04/08; false if unknown or unchanged.</summary>
     internal bool SetBattery(byte component, Battery battery)
     {
@@ -272,6 +386,14 @@ public sealed class DeviceState
         Capabilities = capabilities;
         return DeviceChange.Capabilities;
     }
+
+    private static string PodName(byte component) => component switch
+    {
+        Aap.LeftComponent => "left",
+        Aap.RightComponent => "right",
+        Aap.HeadphoneComponent => "headphone",
+        _ => "unknown",
+    };
 
     private bool? Flag(byte id) => _settings[id] switch
     {

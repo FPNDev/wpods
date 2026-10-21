@@ -32,6 +32,9 @@ public sealed class AapSession : IAsyncDisposable
     // re-report after the notification request within ~25 ms; no end marker exists. 1 s after the request covers both.
     private static readonly TimeSpan InitialReportWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan HeartRateFirstReadingTimeout = TimeSpan.FromSeconds(12);
+    // After a listening-mode request, device reports of other modes (echoes of earlier requests) are ignored until
+    // the device reports the requested mode or this passes (Round 17: ~1.5 s; observed resync after 200-300 ms).
+    private static readonly TimeSpan ListeningModeHold = TimeSpan.FromSeconds(1.5);
     private const int HeartRateAttempts = 3;
     private const uint HeartRatePeriodUs = 1_000_000;
 
@@ -40,6 +43,8 @@ public sealed class AapSession : IAsyncDisposable
     private readonly SettingsStore _settings;
     private readonly byte[] _readBuffer = new byte[ReadBufferSize];
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+    // Serializes the 0x34 + 0x1A pair (attach write and SetStemModesAsync) so they never interleave.
+    private readonly SemaphoreSlim _stemGate = new(1, 1);
     private readonly CancellationTokenSource _life = new();
     private readonly Lock _stateLock = new();
     private CancellationTokenSource _writeTimeout = new();
@@ -126,13 +131,49 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    public ValueTask<bool> SetListeningModeAsync(ListeningMode mode, CancellationToken ct = default)
+    /// <summary>
+    /// Requests <paramref name="mode"/>. Until the device reports it (or 1.5 s pass, then the device's latest report
+    /// wins) device reports of other modes are ignored, so echoes of earlier requests cause no flicker. A newer
+    /// request replaces the pending one.
+    /// </summary>
+    public async ValueTask<bool> SetListeningModeAsync(ListeningMode mode, CancellationToken ct = default)
     {
         if (!Enum.IsDefined(mode))
         {
             throw new ArgumentOutOfRangeException(nameof(mode));
         }
-        return SendSettingAsync(Aap.Setting(Aap.ListeningModeId, (byte)mode), ct);
+        int serial;
+        lock (_stateLock)
+        {
+            serial = State.HoldListeningMode((byte)mode, ListeningModeHold);
+        }
+        Log.Info("aap", $"listening mode {mode} requested (hold {serial}); other reports ignored for up to {ListeningModeHold.TotalSeconds} s");
+        _ = ReleaseListeningModeAsync(serial);
+        byte[] packet = Aap.Setting(Aap.ListeningModeId, (byte)mode);
+        bool written;
+        try
+        {
+            written = await WriteAsync(packet, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            ReleaseListeningMode(serial);
+            throw;
+        }
+        if (!written)
+        {
+            ReleaseListeningMode(serial);
+            return false;
+        }
+        lock (_stateLock)
+        {
+            // Optimistic update, unless a newer request already replaced this one.
+            if (State.IsCurrentHold(serial) && Aap.ApplySetting(packet, State) is var change && change != DeviceChange.None)
+            {
+                Changed?.Invoke(change);
+            }
+        }
+        return true;
     }
 
     public ValueTask<bool> SetEarDetectionAsync(bool on, CancellationToken ct = default) =>
@@ -143,10 +184,6 @@ public sealed class AapSession : IAsyncDisposable
 
     public ValueTask<bool> SetPersonalizedVolumeAsync(bool on, CancellationToken ct = default) =>
         SendSettingAsync(Aap.Setting(Aap.PersonalizedVolumeId, Aap.Bool(on)), ct);
-
-    /// <summary>Allow "Off" in the listening-mode cycle.</summary>
-    public ValueTask<bool> SetAllowOffAsync(bool on, CancellationToken ct = default) =>
-        SendSettingAsync(Aap.Setting(Aap.AllowOffId, Aap.Bool(on)), ct);
 
     public ValueTask<bool> SetOneBudAncAsync(bool on, CancellationToken ct = default) =>
         SendSettingAsync(Aap.Setting(Aap.OneBudAncId, Aap.Bool(on)), ct);
@@ -176,6 +213,53 @@ public sealed class AapSession : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(duration));
         }
         return SendSettingAsync(Aap.Setting(Aap.HoldDurationId, (byte)duration), ct);
+    }
+
+    /// <summary>
+    /// Sets the stem press-and-hold cycle: writes 0x34 (allow Off) = on when <see cref="StemModes.Off"/> is in
+    /// <paramref name="modes"/>, else off, then 0x1A = <paramref name="modes"/>; stores it for the pair (written again on
+    /// every attach) only when both writes succeeded. Throws <see cref="ArgumentOutOfRangeException"/> for fewer than
+    /// two modes or unknown bits, <see cref="InvalidOperationException"/> when the pair lacks the listening-mode
+    /// capability, or the Adaptive capability for a mask with Adaptive.
+    /// </summary>
+    public async ValueTask<bool> SetStemModesAsync(StemModes modes, CancellationToken ct = default)
+    {
+        if (!Aap.IsValidStemModes(modes))
+        {
+            throw new ArgumentOutOfRangeException(nameof(modes), modes, "Select at least two of Off, Noise Cancellation, Transparency and Adaptive.");
+        }
+        DeviceCapabilities capabilities = State.Capabilities;
+        if ((capabilities & DeviceCapabilities.ListeningMode) == 0)
+        {
+            throw new InvalidOperationException("This AirPods device has no listening modes.");
+        }
+        if ((modes & StemModes.Adaptive) != 0 && (capabilities & DeviceCapabilities.Adaptive) == 0)
+        {
+            throw new InvalidOperationException("This AirPods device has no Adaptive listening mode.");
+        }
+        await _stemGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            Log.Info("aap", $"stem modes {modes} (0x{(byte)modes:X2}) requested");
+            if (!await WriteStemModesAsync(modes, ct).ConfigureAwait(false))
+            {
+                return false;
+            }
+            try
+            {
+                _settings.SetStemModes(Address, modes);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // The device has it; the next attach writes the previously stored mask again.
+                Log.Warn("aap", $"stem modes not saved: {e.Message}");
+            }
+            return true;
+        }
+        finally
+        {
+            _stemGate.Release();
+        }
     }
 
     /// <summary>0..100 (1-byte form).</summary>
@@ -387,6 +471,7 @@ public sealed class AapSession : IAsyncDisposable
                 Changed?.Invoke(State.FinishInitialReport() | DeviceChange.InitialReport);
             }
             SaveCapabilities();
+            await WriteStemModesOnAttachAsync(ct).ConfigureAwait(false);
             for (int attempt = 0; attempt < 2; attempt++)
             {
                 TaskCompletionSource reply = NewSignal();
@@ -454,6 +539,74 @@ public sealed class AapSession : IAsyncDisposable
         await Task.Delay(milliseconds, ct).ConfigureAwait(false);
         return true;
     }
+
+    // Ends listening-mode hold <paramref name="serial"/> after ListeningModeHold unless the device confirmed it or a
+    // newer request replaced it.
+    private async Task ReleaseListeningModeAsync(int serial)
+    {
+        try
+        {
+            await Task.Delay(ListeningModeHold, _life.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Session closed.
+            return;
+        }
+        ReleaseListeningMode(serial);
+    }
+
+    private void ReleaseListeningMode(int serial)
+    {
+        lock (_stateLock)
+        {
+            if (State.ReleaseListeningMode(serial))
+            {
+                Changed?.Invoke(DeviceChange.ListeningMode);
+            }
+        }
+    }
+
+    // iOS writes 0x1A on every reconnect and the AirPods never report it on attach (research-r17 section 2), so
+    // the stored mask is written after the initial report. Adaptive is dropped for a pair without Adaptive.
+    private async Task WriteStemModesOnAttachAsync(CancellationToken ct)
+    {
+        DeviceCapabilities capabilities = State.Capabilities;
+        if ((capabilities & DeviceCapabilities.ListeningMode) == 0)
+        {
+            Log.Info("aap", "init: stem modes not written (no listening-mode capability)");
+            return;
+        }
+        await _stemGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            StemModes stored = _settings.GetStemModes(Address);
+            StemModes modes = stored;
+            if ((modes & StemModes.Adaptive) != 0 && (capabilities & DeviceCapabilities.Adaptive) == 0)
+            {
+                modes &= ~StemModes.Adaptive;
+                if (!Aap.IsValidStemModes(modes))
+                {
+                    modes = SettingsStore.DefaultStemModes;
+                }
+                Log.Warn("aap", $"init: stored stem modes {stored} include Adaptive, which this pair lacks; writing {modes}");
+            }
+            Log.Info("aap", $"init: writing stem modes {modes} (0x{(byte)modes:X2})");
+            if (!await WriteStemModesAsync(modes, ct).ConfigureAwait(false))
+            {
+                Log.Warn("aap", "init: stem modes not written");
+            }
+        }
+        finally
+        {
+            _stemGate.Release();
+        }
+    }
+
+    // Hidden coupling (Round 18): 0x34 allow-off follows the Off bit, written before 0x1A so the device honours it.
+    private async ValueTask<bool> WriteStemModesAsync(StemModes modes, CancellationToken ct) =>
+        await SendSettingAsync(Aap.Setting(Aap.AllowOffId, Aap.Bool((modes & StemModes.Off) != 0)), ct).ConfigureAwait(false)
+        && await SendSettingAsync(Aap.Setting(Aap.StemModesId, (byte)modes), ct).ConfigureAwait(false);
 
     // Writes a 0x09 setting, then applies the same bytes as the device echo would (optimistic update).
     private async ValueTask<bool> SendSettingAsync(byte[] packet, CancellationToken ct)

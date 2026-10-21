@@ -9,6 +9,11 @@ public enum MicMode
     Standard,
     VoiceIsolation,
     WideSpectrum,
+    // Test modes for the mic pipeline; appended so persisted names above stay unchanged.
+    VoiceIso1,
+    VoiceIso2,
+    VoiceIso3,
+    VoiceIso4,
 }
 
 /// <summary>Host-side settings of one device; editable while it is disconnected.</summary>
@@ -19,6 +24,12 @@ public sealed record HostSettings
     public bool DisableHandsFree { get; init; } = true;
     public bool LowLatency { get; init; }
     public MicMode MicMode { get; init; }
+    /// <summary>Media volume during a conversation, percent of the previous volume; 10..90 (clamped on load).</summary>
+    public int DuckPercent { get; init; } = DefaultDuckPercent;
+
+    internal const int DefaultDuckPercent = 40;
+    internal const int MinDuckPercent = 10;
+    internal const int MaxDuckPercent = 90;
 }
 
 /// <summary>App UI preferences (settings.json "ui"; every field optional so older files load).</summary>
@@ -45,6 +56,9 @@ public sealed record DeviceModel(string Number, string Name);
 /// </summary>
 public sealed class SettingsStore
 {
+    /// <summary>Apple default: press and hold switches between Noise Cancellation and Transparency.</summary>
+    internal const StemModes DefaultStemModes = StemModes.NoiseCancellation | StemModes.Transparency;
+
     private const int KeyRecordSize = 8 + 16 + 16;
 
     private readonly Lock _lock = new();
@@ -55,6 +69,7 @@ public sealed class SettingsStore
     private readonly Dictionary<ulong, ProximityKeys> _keys = [];
     private readonly Dictionary<ulong, DeviceModel> _models = [];
     private readonly Dictionary<ulong, DeviceCapabilities> _capabilities = [];
+    private readonly Dictionary<ulong, StemModes> _stemModes = [];
     private ulong _lastUsed;
     private UiPrefs _ui = UiPrefs.Default;
 
@@ -156,6 +171,15 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>Stem press-and-hold cycle of the pair; <see cref="DefaultStemModes"/> when never set.</summary>
+    internal StemModes GetStemModes(ulong address)
+    {
+        lock (_lock)
+        {
+            return _stemModes.GetValueOrDefault(address, DefaultStemModes);
+        }
+    }
+
     /// <summary>Capabilities the pair reported on its last attach; None if it was never attached.</summary>
     internal DeviceCapabilities GetCapabilities(ulong address)
     {
@@ -221,6 +245,20 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>Stores a valid (<see cref="Aap.IsValidStemModes"/>) stem cycle mask.</summary>
+    internal void SetStemModes(ulong address, StemModes modes)
+    {
+        lock (_lock)
+        {
+            if (_stemModes.TryGetValue(address, out StemModes current) && current == modes)
+            {
+                return;
+            }
+            _stemModes[address] = modes;
+            SaveSettings();
+        }
+    }
+
     /// <summary>Stores keys; false when identical to the stored ones (nothing written).</summary>
     internal bool SetKeys(ulong address, ProximityKeys keys)
     {
@@ -258,7 +296,7 @@ public sealed class SettingsStore
             {
                 if (Mac.TryParse(mac, out ulong address))
                 {
-                    _devices[address] = settings;
+                    _devices[address] = Normalize(address, settings);
                 }
             }
             foreach ((string mac, DeviceModel model) in file.Models)
@@ -275,12 +313,44 @@ public sealed class SettingsStore
                     _capabilities[address] = capabilities;
                 }
             }
+            foreach ((string mac, StemModes modes) in file.StemModes)
+            {
+                if (!Mac.TryParse(mac, out ulong address))
+                {
+                    continue;
+                }
+                if (Aap.IsValidStemModes(modes))
+                {
+                    _stemModes[address] = modes;
+                }
+                else
+                {
+                    Log.Warn("settings", $"{mac}: stemModes {modes} invalid (needs 2+ of Off, NC, Transparency, Adaptive), using the default");
+                }
+            }
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
             // Unreadable file: start from defaults; the next change rewrites it.
             Log.Error("settings", "settings.json unreadable, using defaults", e);
         }
+    }
+
+    // Fills values missing from an older file and clamps out-of-range ones from a hand-edited file. The source-generated
+    // reader sets a missing init property to 0 instead of keeping its default, and 0 is never a valid duck percent.
+    private static HostSettings Normalize(ulong address, HostSettings settings)
+    {
+        if (settings.DuckPercent == 0)
+        {
+            settings = settings with { DuckPercent = HostSettings.DefaultDuckPercent };
+        }
+        int duck = Math.Clamp(settings.DuckPercent, HostSettings.MinDuckPercent, HostSettings.MaxDuckPercent);
+        if (duck != settings.DuckPercent)
+        {
+            Log.Warn("settings", $"{Mac.Format(address)}: duckPercent {settings.DuckPercent} out of range, clamped to {duck}");
+            settings = settings with { DuckPercent = duck };
+        }
+        return settings;
     }
 
     // One-time import of %UserProfile%\.wpods\device_settings.jsonl (left in place).
@@ -333,6 +403,10 @@ public sealed class SettingsStore
         foreach ((ulong address, DeviceCapabilities capabilities) in _capabilities)
         {
             file.Capabilities[Mac.Format(address)] = capabilities;
+        }
+        foreach ((ulong address, StemModes modes) in _stemModes)
+        {
+            file.StemModes[Mac.Format(address)] = modes;
         }
         WriteAtomic(_settingsPath, JsonSerializer.SerializeToUtf8Bytes(file, SettingsJson.Default.SettingsFile));
     }
@@ -398,6 +472,8 @@ internal sealed class SettingsFile
     public Dictionary<string, HostSettings> Devices { get; set; } = [];
     public Dictionary<string, DeviceModel> Models { get; set; } = [];
     public Dictionary<string, DeviceCapabilities> Capabilities { get; set; } = [];
+    /// <summary>Stem press-and-hold cycle per pair (optional; older files have none).</summary>
+    public Dictionary<string, StemModes> StemModes { get; set; } = [];
 }
 
 internal sealed class LegacyRecord

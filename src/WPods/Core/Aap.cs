@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using System.Text;
 
 namespace WPods.Core;
@@ -15,6 +16,8 @@ internal static class Aap
     public const byte ListeningModeId = 0x0D;
     public const byte PressSpeedId = 0x17;
     public const byte HoldDurationId = 0x18;
+    /// <summary>Stem press-and-hold cycle bitmask (<see cref="StemModes"/>).</summary>
+    public const byte StemModesId = 0x1A;
     public const byte OneBudAncId = 0x1B;
     public const byte ToneVolumeId = 0x1F;
     public const byte PersonalizedVolumeId = 0x26;
@@ -24,6 +27,11 @@ internal static class Aap
     public const byte HeartRateStateId = 0x30;
     public const byte HearingAssistId = 0x33;
     public const byte AllowOffId = 0x34;
+
+    // Battery components (0x04 packet); 0x08 = case.
+    public const byte HeadphoneComponent = 0x01;
+    public const byte RightComponent = 0x02;
+    public const byte LeftComponent = 0x04;
 
     public const byte HeartRateService = 0x54;
     public const byte HeartRateLegacyService = 0x13;
@@ -44,6 +52,11 @@ internal static class Aap
     public static readonly byte[] HeartRatePowerOn = [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, 0x30, 0x01, 0x00, 0x00, 0x00];
 
     public static byte Bool(bool on) => on ? (byte)0x01 : (byte)0x02;
+
+    /// <summary>Only Off / NC / Transparency / Adaptive bits, at least two of them.</summary>
+    public static bool IsValidStemModes(StemModes modes) =>
+        (modes & ~(StemModes.Off | StemModes.NoiseCancellation | StemModes.Transparency | StemModes.Adaptive)) == 0
+        && BitOperations.PopCount((uint)modes) >= 2;
 
     public static byte[] Setting(byte id, byte value) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, id, value, 0x00, 0x00, 0x00];
 
@@ -73,8 +86,20 @@ internal static class Aap
                 return p.Length >= 7 ? ApplyBattery(p, state) : DeviceChange.None;
             case 0x06:
                 return p.Length >= 8 ? ApplyEar(p, state) : DeviceChange.None;
+            case 0x08:
+                // Bud role (apple-wireshark AACP dissector): 01 = left is primary, 02 = right is primary.
+                return p.Length >= 7 && p[6] is 0x01 or 0x02
+                    ? state.SetPrimaryPod(p[6] == 0x01 ? LeftComponent : RightComponent, fromBudRole: true)
+                    : DeviceChange.None;
             case 0x09:
-                return p.Length >= 8 ? ApplySetting(p, state) | state.Observe(CapabilityOf(p[6], p[7])) : DeviceChange.None;
+                if (p.Length < 8)
+                {
+                    return DeviceChange.None;
+                }
+                DeviceChange setting = p[6] == ListeningModeId
+                    ? (state.ReportListeningMode(p[7]) ? DeviceChange.ListeningMode : DeviceChange.None)
+                    : ApplySetting(p, state);
+                return setting | state.Observe(CapabilityOf(p[6], p[7]));
             case 0x17:
                 return ApplyHeartRate(p, state);
             case 0x1D:
@@ -137,6 +162,8 @@ internal static class Aap
     private static DeviceChange ApplyBattery(ReadOnlySpan<byte> p, DeviceState state)
     {
         bool changed = false;
+        // LibrePods: the first pod component in the packet is the primary bud.
+        byte firstPod = 0;
         int count = p[6];
         for (int i = 0; i < count; i++)
         {
@@ -157,8 +184,13 @@ internal static class Aap
                     _ => new Battery(Math.Min(level, (byte)100), BatteryStatus.Unknown),
                 };
             changed |= state.SetBattery(p[offset], battery);
+            if (firstPod == 0 && p[offset] is LeftComponent or RightComponent or HeadphoneComponent)
+            {
+                firstPod = p[offset];
+            }
         }
-        return changed ? DeviceChange.Battery : DeviceChange.None;
+        DeviceChange change = changed ? DeviceChange.Battery : DeviceChange.None;
+        return firstPod == 0 ? change : change | state.SetPrimaryPod(firstPod, fromBudRole: false);
     }
 
     private static DeviceChange ApplyEar(ReadOnlySpan<byte> p, DeviceState state)
@@ -201,7 +233,7 @@ internal static class Aap
                 }
                 return state.SetSetting(id, value) | state.SetHearingAidEnabled(p[8]) ? DeviceChange.Settings : DeviceChange.None;
             case MicSideId or EarDetectionId or PressSpeedId or HoldDurationId or OneBudAncId or ToneVolumeId
-                or PersonalizedVolumeId or ConversationAwarenessId or HearingAssistId or AllowOffId:
+                or PersonalizedVolumeId or ConversationAwarenessId or HearingAssistId or AllowOffId or StemModesId:
                 return state.SetSetting(id, value) ? DeviceChange.Settings : DeviceChange.None;
             default:
                 return DeviceChange.None;
