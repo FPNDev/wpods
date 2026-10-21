@@ -83,6 +83,7 @@ public sealed class SettingsStore
         {
             LoadKeys();
         }
+        Log.Info("settings", $"loaded: lastUsed={(_lastUsed == 0 ? "none" : Mac.Format(_lastUsed))} devices={_devices.Count} models={_models.Count} capabilities={_capabilities.Count} keys={_keys.Count} language={_ui.Language} theme={_ui.Theme}");
     }
 
     /// <summary>Raised on the caller's thread of <see cref="ConnectionManager.SetHostSettingsAsync"/>.</summary>
@@ -108,6 +109,7 @@ public sealed class SettingsStore
                 }
                 _lastUsed = value;
                 SaveSettings();
+                Log.Info("settings", $"lastUsed = {Mac.Format(value)}");
             }
         }
     }
@@ -232,6 +234,7 @@ public sealed class SettingsStore
             }
             _keys[address] = keys;
             SaveKeys();
+            Log.Info("settings", $"proximity keys stored for {Mac.Format(address)}");
             return true;
         }
     }
@@ -276,6 +279,7 @@ public sealed class SettingsStore
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
             // Unreadable file: start from defaults; the next change rewrites it.
+            Log.Error("settings", "settings.json unreadable, using defaults", e);
         }
     }
 
@@ -291,8 +295,9 @@ public sealed class SettingsStore
                 {
                     record = JsonSerializer.Deserialize(line, SettingsJson.Default.LegacyRecord);
                 }
-                catch (JsonException)
+                catch (JsonException e)
                 {
+                    Log.Warn("settings", $"legacy settings line skipped: {e.Message}");
                     continue;
                 }
                 if (record?.Mac is not { } mac || !Mac.TryParse(mac, out ulong address))
@@ -310,6 +315,7 @@ public sealed class SettingsStore
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Nothing to migrate.
+            Log.Warn("settings", $"legacy settings not migrated: {e.Message}");
         }
     }
 
@@ -341,10 +347,12 @@ public sealed class SettingsStore
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
+            Log.Error("settings", "keys.bin unreadable", e);
             return;
         }
         if (plain is null)
         {
+            Log.Warn("settings", "keys.bin could not be decrypted");
             return;
         }
         for (int offset = 0; offset + KeyRecordSize <= plain.Length; offset += KeyRecordSize)

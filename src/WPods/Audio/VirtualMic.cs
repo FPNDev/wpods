@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+using WPods.Core;
 using Timer = System.Threading.Timer;
 
 namespace WPods.Audio;
@@ -53,6 +54,7 @@ internal sealed unsafe partial class VirtualMic
         SafeFileHandle handle = CreateFile(DevicePath, GenericRead | GenericWrite, FileShareReadWrite, 0, OpenExisting, FileFlagOverlapped, 0);
         if (handle.IsInvalid)
         {
+            Log.Warn("vmic", $"open failed, Win32 error {Marshal.GetLastPInvokeError()}");
             handle.Dispose();
             lock (_lock)
             {
@@ -61,6 +63,7 @@ internal sealed unsafe partial class VirtualMic
             }
             return;
         }
+        Log.Info("vmic", "opened");
         var device = new Device(handle);
         device.Wait = ThreadPool.RegisterWaitForSingleObject(device.Completed, (s, _) => OnWaitCompleted((Device)s!), device, Timeout.Infinite, executeOnlyOnce: false);
         lock (_lock)
@@ -88,6 +91,7 @@ internal sealed unsafe partial class VirtualMic
                 }
             }
             // The pending capture IOCTL completes with 995; its callback closes the device.
+            Log.Warn("vmic", $"write failed, Win32 error {Marshal.GetLastPInvokeError()}; closing");
             _device = null;
             CancelIoEx(device.Handle, device.Overlapped);
             ScheduleReopenLocked();
@@ -108,12 +112,14 @@ internal sealed unsafe partial class VirtualMic
                 {
                     return;
                 }
-                if (Marshal.GetLastPInvokeError() == ErrorIoPending)
+                int error = Marshal.GetLastPInvokeError();
+                if (error == ErrorIoPending)
                 {
                     // Pending means the state equals the input (this makes an unknown state known after an open).
                     SetStateLocked(capturing ? CaptureState.Capturing : CaptureState.Idle);
                     return;
                 }
+                Log.Warn("vmic", $"capture-state IOCTL failed, Win32 error {error}; closing");
                 _device = null;
                 ScheduleReopenLocked();
                 SetStateLocked(CaptureState.Unavailable);
@@ -133,6 +139,7 @@ internal sealed unsafe partial class VirtualMic
             {
                 if (_device == device)
                 {
+                    Log.Warn("vmic", "capture-state IOCTL completed with an error; closing");
                     _device = null;
                     ScheduleReopenLocked();
                     SetStateLocked(CaptureState.Unavailable);
@@ -152,12 +159,14 @@ internal sealed unsafe partial class VirtualMic
         {
             return;
         }
+        Log.Info("vmic", $"capture state {_state?.ToString() ?? "unknown"} -> {state}");
         _state = state;
         _stateChanged(state);
     }
 
     private void ScheduleReopenLocked()
     {
+        Log.Info("vmic", $"reopen in {1000 << _failures} ms");
         _reopen.Change(1000 << _failures, Timeout.Infinite);
         _failures = Math.Min(_failures + 1, MaxBackoffShift);
     }

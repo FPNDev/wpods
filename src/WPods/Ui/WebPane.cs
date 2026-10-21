@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
+using WPods.Core;
 
 namespace WPods.Ui;
 
@@ -72,6 +73,7 @@ internal sealed class WebPane : IDisposable
         core.WebMessageReceived += OnWebMessage;
         core.ProcessFailed += (_, e) =>
         {
+            Log.Warn("ui", $"WebView2 {page} process failed: {e.ProcessFailedKind} {e.Reason}");
             if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.BrowserProcessExited or CoreWebView2ProcessFailedKind.RenderProcessExited)
             {
                 _onFailed(this);
@@ -119,6 +121,7 @@ internal sealed class WebPane : IDisposable
             catch (Exception e) when (e is InvalidOperationException or COMException)
             {
                 // Not suspendable right now; it stays hidden, which is enough.
+                Log.Info("ui", $"page not suspended: {e.Message}");
             }
         }
     }
@@ -150,8 +153,9 @@ internal sealed class WebPane : IDisposable
         {
             message = JsonSerializer.Deserialize(e.WebMessageAsJson, PageJson.Default.PageMessage);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            Log.Warn("ui", $"page message not parsed: {ex.Message}");
             return;
         }
         if (message is null)

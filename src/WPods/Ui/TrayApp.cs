@@ -93,6 +93,8 @@ internal sealed partial class TrayApp : ApplicationContext
     private Icon? _trayIcon;
     private nint _trayIconHandle;
     private bool _exiting;
+    // Last device/conn summary written to the log (UI thread).
+    private string _connLogged = "";
 
     public TrayApp(SettingsStore settings, ConnectionManager connections, NearbyService nearby, MicPipeline mic,
         LowLatencyKeepAlive keepAlive, ConversationDucker ducker, Localization locales, bool startHidden)
@@ -107,6 +109,7 @@ internal sealed partial class TrayApp : ApplicationContext
         _ui = SynchronizationContext.Current!;
         _prefs = settings.Ui;
         _locale = locales.Resolve(_prefs.Language);
+        Log.Info("ui", $"start: hidden={startHidden}, language={_prefs.Language} -> {_locale.Code}, theme={_prefs.Theme}");
         _lightTaskbar = WindowsTheme.TaskbarUsesLight();
         _appsLight = WindowsTheme.AppsUseLight();
         _accent = WindowsTheme.ReadAccent();
@@ -154,6 +157,7 @@ internal sealed partial class TrayApp : ApplicationContext
 
     private void QueueToast(string id, ulong device)
     {
+        Log.Info("ui", $"toast queued: {id} device={Mac.Format(device)}");
         Volatile.Write(ref _pendingToast, new ToastRequest(id, device));
         MarkDirty(Dirty.Toast);
     }
@@ -166,6 +170,7 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             if (_attachWaits.Remove(session.Address, out TaskCompletionSource? wait))
             {
+                Log.Info("ui", $"attached {Mac.Format(session.Address)}: user connect wait completed");
                 wait.TrySetResult();
             }
         }
@@ -232,6 +237,7 @@ internal sealed partial class TrayApp : ApplicationContext
             {
                 if (_linkWaits.Remove(address, out TaskCompletionSource? wait))
                 {
+                    Log.Info("ui", $"link up {Mac.Format(address)}: user connect link wait completed");
                     wait.TrySetResult();
                 }
             }
@@ -278,6 +284,7 @@ internal sealed partial class TrayApp : ApplicationContext
         AapSession? session = _connections.Session;
         if (session != _session)
         {
+            Log.Info("ui", $"session {(_session is null ? "none" : Mac.Format(_session.Address))} -> {(session is null ? "none" : Mac.Format(session.Address))}");
             _session = session;
             _sessionStatus = SessionStatus.Initializing;
             Array.Clear(_lowNotified);
@@ -304,6 +311,10 @@ internal sealed partial class TrayApp : ApplicationContext
         DeviceState? state = session?.State;
         if (state is not null && (dirty & Dirty.Status) != 0)
         {
+            if (state.Status != _sessionStatus)
+            {
+                Log.Info("ui", $"session status {_sessionStatus} -> {state.Status}");
+            }
             if (state.Status == SessionStatus.NoResponse && _sessionStatus != SessionStatus.NoResponse)
             {
                 SendToast("noResponse", session!.Address);
@@ -326,6 +337,29 @@ internal sealed partial class TrayApp : ApplicationContext
         if ((dirty & Dirty.Toast) != 0 && Interlocked.Exchange(ref _pendingToast, null) is { } toast)
         {
             SendToast(toast.Id, toast.Device);
+        }
+        if ((dirty & (Dirty.Devices | Dirty.Offers | Dirty.Session | Dirty.Status)) != 0)
+        {
+            LogConn();
+        }
+    }
+
+    /// <summary>Logs each device's conn (as the page shows it) when the summary changed.</summary>
+    private void LogConn()
+    {
+        var text = new StringBuilder();
+        foreach (KnownDevice device in _devices)
+        {
+            text.Append(Mac.Format(device.Address)).Append('=').Append(Conn(device, out _))
+                .Append(device.LinkUp ? " (link up" : " (link down").Append(device.HasKeys ? ", keys)" : ", no keys)").Append(' ');
+        }
+        text.Append("attached=").Append(_session is null ? "none" : Mac.Format(_session.Address) + " " + _sessionStatus);
+        text.Append(" offers=").Append(_offers.Count);
+        string summary = text.ToString();
+        if (summary != _connLogged)
+        {
+            _connLogged = summary;
+            Log.Info("ui", "conn: " + summary);
         }
     }
 
@@ -455,8 +489,10 @@ internal sealed partial class TrayApp : ApplicationContext
     {
         if (!MainLive)
         {
+            Log.Info("ui", $"toast {id} device={Mac.Format(device)} dropped (main window not showing)");
             return;
         }
+        Log.Info("ui", $"toast {id} device={Mac.Format(device)} shown");
         Utf8JsonWriter w = _writer.Begin("toast");
         w.WriteString("toast", id);
         if (device != 0)
@@ -526,10 +562,12 @@ internal sealed partial class TrayApp : ApplicationContext
         }
         if (_mainShown && _main!.WindowState != FormWindowState.Minimized)
         {
+            Log.Info("ui", "tray click: hide window");
             HideMain();
         }
         else
         {
+            Log.Info("ui", "tray click: show window");
             ShowMain();
         }
     }
@@ -628,7 +666,9 @@ internal sealed partial class TrayApp : ApplicationContext
     // Native menu, rebuilt on each open so labels and the startup check are current.
     private void ShowTrayMenu()
     {
-        switch (TrayMenu.Show(_host.Handle, Text("tray.open"), Text("tray.startup"), StartupRegistration.IsEnabled(), Text("tray.quit")))
+        int choice = TrayMenu.Show(_host.Handle, Text("tray.open"), Text("tray.startup"), StartupRegistration.IsEnabled(), Text("tray.quit"));
+        Log.Info("ui", $"tray menu choice {choice}");
+        switch (choice)
         {
             case TrayMenu.Open:
                 ShowMain();
@@ -724,6 +764,7 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             return;
         }
+        Log.Info("ui", "exit requested");
         _exiting = true;
         _hideTimer.Stop();
         DestroyPopup();

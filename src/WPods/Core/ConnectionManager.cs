@@ -61,6 +61,7 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     public void Start()
     {
+        Log.Info("conn", $"start, lastUsed={Mac.Format(Settings.LastUsed)}");
         _link.LinkChanged += OnLinkChanged;
         _link.DevicesChanged += () => DevicesChanged?.Invoke();
         _link.Start();
@@ -93,24 +94,31 @@ public sealed class ConnectionManager : IAsyncDisposable
     /// </summary>
     public async Task<bool> ConnectAsync(ulong address)
     {
+        Log.Info("conn", $"ConnectAsync {Mac.Format(address)}: waiting for gate");
+        long waitStart = Environment.TickCount64;
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             _generation++;
             _reopenAttempts = 0;
+            Log.Info("conn", $"ConnectAsync {Mac.Format(address)}: gate after {Environment.TickCount64 - waitStart} ms, generation={_generation}, session={Describe(_session)}, linkUp={_link.IsUp(address)}");
             if (_session?.Address == address)
             {
+                Log.Info("conn", "ConnectAsync -> true (already attached)");
                 return true;
             }
             if (!_link.IsUp(address))
             {
+                Log.Info("conn", "ConnectAsync -> false (link not up)");
                 return false;
             }
             if (_session is not null)
             {
-                await DetachLocked().ConfigureAwait(false);
+                await DetachLocked("switch").ConfigureAwait(false);
             }
-            return TryAttachLocked(address);
+            bool attached = TryAttachLocked(address, "user");
+            Log.Info("conn", $"ConnectAsync -> {attached}");
+            return attached;
         }
         finally
         {
@@ -131,30 +139,35 @@ public sealed class ConnectionManager : IAsyncDisposable
             session = _session;
             if (session is null)
             {
+                Log.Info("conn", "DisconnectAsync -> false (no session)");
                 return false;
             }
             _generation++;
             _disconnecting = session;
+            Log.Info("conn", $"DisconnectAsync {Mac.Format(session.Address)}, generation={_generation}");
         }
         finally
         {
             _gate.Release();
         }
         int hr = await Task.Run(() => Native.wpn_bt_disconnect_audio(session.Address)).ConfigureAwait(false);
+        Log.Info("conn", $"DisconnectAsync: disconnect audio hr=0x{hr:X8}");
         try
         {
-            await session.Completion.WaitAsync(DisconnectTimeout).ConfigureAwait(false);
+            SessionEnd end = await session.Completion.WaitAsync(DisconnectTimeout).ConfigureAwait(false);
+            Log.Info("conn", $"DisconnectAsync: session ended ({end})");
         }
         catch (TimeoutException)
         {
             // Link still up: detach anyway (closing the AAP channel lets the link drop).
+            Log.Info("conn", "DisconnectAsync: session still open after 3 s, detaching anyway");
         }
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_session == session)
             {
-                await DetachLocked().ConfigureAwait(false);
+                await DetachLocked("user disconnect").ConfigureAwait(false);
                 AttachOtherUpLocked(session.Address);
             }
             _disconnecting = null;
@@ -163,6 +176,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         {
             _gate.Release();
         }
+        Log.Info("conn", $"DisconnectAsync -> {hr >= 0}");
         return hr >= 0;
     }
 
@@ -173,6 +187,7 @@ public sealed class ConnectionManager : IAsyncDisposable
     public async Task SetHostSettingsAsync(ulong address, HostSettings settings)
     {
         bool handsFreeChanged = Settings.Get(address).DisableHandsFree != settings.DisableHandsFree;
+        Log.Info("conn", $"host settings {Mac.Format(address)}: disableHandsFree={settings.DisableHandsFree} lowLatency={settings.LowLatency} micMode={settings.MicMode}");
         Settings.Set(address, settings);
         if (handsFreeChanged && Session?.Address == address)
         {
@@ -182,6 +197,7 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        Log.Info("conn", "dispose");
         _link.Dispose();
         await _gate.WaitAsync().ConfigureAwait(false);
         try
@@ -189,7 +205,7 @@ public sealed class ConnectionManager : IAsyncDisposable
             _generation++;
             if (_session is not null)
             {
-                await DetachLocked().ConfigureAwait(false);
+                await DetachLocked("exit").ConfigureAwait(false);
             }
         }
         finally
@@ -201,6 +217,7 @@ public sealed class ConnectionManager : IAsyncDisposable
     // Called on the CM notification thread: relay, then decide off that thread.
     private void OnLinkChanged(ulong address, bool up)
     {
+        Log.Info("conn", $"link {Mac.Format(address)} {(up ? "up" : "down")}");
         LinkChanged?.Invoke(address, up);
         DevicesChanged?.Invoke();
         _ = Task.Run(() => OnLinkAsync(address));
@@ -209,14 +226,17 @@ public sealed class ConnectionManager : IAsyncDisposable
     // Re-reads the current link state rather than trusting event order. address 0 = startup.
     private async Task OnLinkAsync(ulong address)
     {
+        long waitStart = Environment.TickCount64;
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (address != 0 && !_link.IsUp(address))
+            bool up = address != 0 && _link.IsUp(address);
+            Log.Info("conn", $"link decision for {(address == 0 ? "startup" : Mac.Format(address))}: gate after {Environment.TickCount64 - waitStart} ms, linkUp now={(address == 0 ? "n/a" : up.ToString())}, session={Describe(_session)}");
+            if (address != 0 && !up)
             {
                 if (_session?.Address == address)
                 {
-                    await DetachLocked().ConfigureAwait(false);
+                    await DetachLocked("link down").ConfigureAwait(false);
                 }
                 if (_session is null)
                 {
@@ -226,17 +246,22 @@ public sealed class ConnectionManager : IAsyncDisposable
             }
             if (_session is not null)
             {
+                Log.Info("conn", "link decision: a session is attached, nothing to do");
                 return;
             }
             ulong last = Settings.LastUsed;
-            if (last != 0 && _link.IsUp(last) && TryAttachLocked(last))
+            if (last != 0 && _link.IsUp(last) && TryAttachLocked(last, address == 0 ? "startup last-used" : "link-up last-used"))
             {
                 return;
             }
             ulong candidate = address != 0 ? address : _link.FirstUp();
             if (candidate != 0 && candidate != last)
             {
-                TryAttachLocked(candidate);
+                TryAttachLocked(candidate, address == 0 ? "startup first-up" : "link-up");
+            }
+            else
+            {
+                Log.Info("conn", $"link decision: nothing attached (candidate={Mac.Format(candidate)}, lastUsed={Mac.Format(last)}); waiting for the next link event");
             }
         }
         finally
@@ -245,22 +270,25 @@ public sealed class ConnectionManager : IAsyncDisposable
         }
     }
 
-    private bool TryAttachLocked(ulong address)
+    private bool TryAttachLocked(ulong address, string reason)
     {
         if (_link.GetPath(address) is not { } path)
         {
+            Log.Warn("conn", $"attach {Mac.Format(address)} ({reason}): no NTAPD interface");
             return false;
         }
         SafeFileHandle handle = Native.OpenNtapd(path, out int error);
         if (handle.IsInvalid)
         {
             handle.Dispose();
+            Log.Warn("conn", $"attach {Mac.Format(address)} ({reason}): open failed, Win32 error {error}, linkUp={_link.IsUp(address)}");
             if (error != Native.ErrorDeviceNotConnected)
             {
                 AttachFailed?.Invoke(address, error);
             }
             return false;
         }
+        Log.Info("conn", $"attach {Mac.Format(address)} ({reason}): opened");
         var session = new AapSession(address, handle, Settings);
         session.Changed += change =>
         {
@@ -283,9 +311,10 @@ public sealed class ConnectionManager : IAsyncDisposable
         return true;
     }
 
-    private async Task DetachLocked()
+    private async Task DetachLocked(string reason)
     {
         AapSession session = _session!;
+        Log.Info("conn", $"detach {Mac.Format(session.Address)} ({reason}), status={session.State.Status}");
         Volatile.Write(ref _session, null);
         await session.DisposeAsync().ConfigureAwait(false);
         Detached?.Invoke(session);
@@ -297,26 +326,31 @@ public sealed class ConnectionManager : IAsyncDisposable
     private async Task WatchAsync(AapSession session)
     {
         SessionEnd end = await session.Completion.ConfigureAwait(false);
+        ulong address = session.Address;
+        Log.Info("conn", $"session {Mac.Format(address)} ended: {end}, status={session.State.Status}");
         if (end == SessionEnd.Closed)
         {
             return;
         }
-        ulong address = session.Address;
         int generation;
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
             if (_session != session)
             {
+                Log.Info("conn", "session end: already detached");
                 return;
             }
-            await DetachLocked().ConfigureAwait(false);
+            await DetachLocked(end == SessionEnd.LinkLost ? "read error 1167" : "read error").ConfigureAwait(false);
             if (session == _disconnecting)
             {
+                Log.Info("conn", "session end: user disconnect in progress, no reopen");
                 return;
             }
-            if (end == SessionEnd.LinkLost || !_link.IsUp(address))
+            bool up = _link.IsUp(address);
+            if (end == SessionEnd.LinkLost || !up)
             {
+                Log.Info("conn", $"session end: no reopen (end={end}, linkUp={up}), trying other pairs");
                 AttachOtherUpLocked(address);
                 return;
             }
@@ -325,6 +359,7 @@ public sealed class ConnectionManager : IAsyncDisposable
                 _reopenAttempts = 0;
             }
             generation = _generation;
+            Log.Info("conn", $"session end: reopen loop, attempts so far={_reopenAttempts}, generation={generation}");
         }
         finally
         {
@@ -338,9 +373,11 @@ public sealed class ConnectionManager : IAsyncDisposable
             {
                 if (_reopenAttempts >= MaxReopenAttempts || generation != _generation || _session is not null || !_link.IsUp(address))
                 {
+                    Log.Info("conn", $"reopen {Mac.Format(address)} stopped: attempts={_reopenAttempts}/{MaxReopenAttempts}, generation={generation}/{_generation}, session={Describe(_session)}, linkUp={_link.IsUp(address)}");
                     return;
                 }
                 delay = 1000 << _reopenAttempts++;
+                Log.Info("conn", $"reopen {Mac.Format(address)} attempt {_reopenAttempts} in {delay} ms");
             }
             finally
             {
@@ -350,7 +387,12 @@ public sealed class ConnectionManager : IAsyncDisposable
             await _gate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (generation != _generation || _session is not null || !_link.IsUp(address) || TryAttachLocked(address))
+                if (generation != _generation || _session is not null || !_link.IsUp(address))
+                {
+                    Log.Info("conn", $"reopen {Mac.Format(address)} cancelled: generation={generation}/{_generation}, session={Describe(_session)}, linkUp={_link.IsUp(address)}");
+                    return;
+                }
+                if (TryAttachLocked(address, "reopen"))
                 {
                     return;
                 }
@@ -366,17 +408,18 @@ public sealed class ConnectionManager : IAsyncDisposable
     private void AttachOtherUpLocked(ulong excluded)
     {
         ulong last = Settings.LastUsed;
-        if (last != excluded && last != 0 && _link.IsUp(last) && TryAttachLocked(last))
+        if (last != excluded && last != 0 && _link.IsUp(last) && TryAttachLocked(last, "fallback last-used"))
         {
             return;
         }
         foreach (LinkDevice device in _link.Snapshot())
         {
-            if (device.Up && device.Address != excluded && device.Address != last && TryAttachLocked(device.Address))
+            if (device.Up && device.Address != excluded && device.Address != last && TryAttachLocked(device.Address, "fallback"))
             {
                 return;
             }
         }
+        Log.Info("conn", $"fallback: no other pair with link up (excluded {Mac.Format(excluded)})");
     }
 
     // Persists the 0x1D model so the device list shows it while the pair is not attached.
@@ -393,6 +436,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Cosmetic data only; retried on the next attach.
+            Log.Warn("conn", $"model not saved: {e.Message}");
         }
     }
 
@@ -404,6 +448,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         }
         catch (Exception e) when (e is Win32Exception or InvalidOperationException)
         {
+            Log.Warn("conn", $"hands-free on attach failed: {e.Message}");
             HandsFreeFailed?.Invoke(address, e);
         }
     }
@@ -411,14 +456,19 @@ public sealed class ConnectionManager : IAsyncDisposable
     // One retry after 750 ms for the transient errors Windows reports right after a connect.
     private static async Task ApplyHandsFreeAsync(ulong address, bool disable)
     {
+        Log.Info("conn", $"hands-free {Mac.Format(address)}: {(disable ? "disable" : "enable")}");
         try
         {
             await Task.Run(() => HandsFree.SetEnabled(address, !disable)).ConfigureAwait(false);
         }
         catch (Win32Exception e) when (e.NativeErrorCode is Native.ErrorServiceDoesNotExist or Native.ErrorNotFound or Native.ErrorInvalidParameter)
         {
+            Log.Info("conn", $"hands-free: error {e.NativeErrorCode}, retrying in 750 ms");
             await Task.Delay(750).ConfigureAwait(false);
             await Task.Run(() => HandsFree.SetEnabled(address, !disable)).ConfigureAwait(false);
         }
+        Log.Info("conn", "hands-free applied");
     }
+
+    private static string Describe(AapSession? session) => session is null ? "none" : Mac.Format(session.Address);
 }

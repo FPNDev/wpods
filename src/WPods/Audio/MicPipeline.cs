@@ -55,6 +55,7 @@ public sealed class MicPipeline
     private int _errors;
     private int _peak;
     private long _levelTick;
+    private long _lastDecoderFlushLog;
 
     // Shared state; written under _lock.
     private AapSession? _session;
@@ -96,6 +97,7 @@ public sealed class MicPipeline
             _session = session;
             _startSent = false;
             _mode = _settings.Get(session.Address).MicMode;
+            Log.Info("mic", $"session {Mac.Format(session.Address)} attached, mode={_mode}, capturing={_capturing}");
         }
         session.Changed += OnSessionChanged;
         session.PacketReceived += OnPacket;
@@ -113,6 +115,7 @@ public sealed class MicPipeline
                 _session = null;
             }
         }
+        Log.Info("mic", $"session {Mac.Format(session.Address)} detached");
         _decoder?.Dispose();
         _decoder = null;
         _denoiser?.Dispose();
@@ -132,8 +135,8 @@ public sealed class MicPipeline
             if (_capturing && !_startSent && _session is { } session && IsReady(session))
             {
                 long now = Environment.TickCount64;
-                BeginWaitLocked(now);
-                SendStartLocked(session, now);
+                BeginWaitLocked(now, "session ready while capturing");
+                SendStartLocked(session, now, "session ready");
             }
         }
     }
@@ -145,6 +148,7 @@ public sealed class MicPipeline
             if (_session?.Address == address)
             {
                 _mode = settings.MicMode;
+                Log.Info("mic", $"mode -> {settings.MicMode}");
             }
         }
     }
@@ -154,19 +158,20 @@ public sealed class MicPipeline
     {
         lock (_lock)
         {
+            Log.Info("mic", $"capture state {state}, session={(_session is { } s ? Mac.Format(s.Address) + " " + s.State.Status : "none")}, startSent={_startSent}");
             _capturing = state == CaptureState.Capturing;
             if (!_capturing)
             {
                 _timer.Change(Timeout.Infinite, Timeout.Infinite);
-                SetStatusLocked(state == CaptureState.Unavailable ? MicStatus.Problem : MicStatus.NotActive);
+                SetStatusLocked(state == CaptureState.Unavailable ? MicStatus.Problem : MicStatus.NotActive, $"capture state {state}");
                 return;
             }
             _flush = true;
             long now = Environment.TickCount64;
-            BeginWaitLocked(now);
+            BeginWaitLocked(now, "app started capturing");
             if (!_startSent && _session is { } session && IsReady(session))
             {
-                SendStartLocked(session, now);
+                SendStartLocked(session, now, "capture started");
             }
         }
     }
@@ -187,7 +192,7 @@ public sealed class MicPipeline
                 ArmLocked(ProblemAfterMs - silent);
                 return;
             }
-            SetStatusLocked(MicStatus.Problem);
+            SetStatusLocked(MicStatus.Problem, $"no audio for {silent} ms");
             if (_session is not { } session || !IsReady(session))
             {
                 // Attach/ready restarts the wait.
@@ -196,7 +201,7 @@ public sealed class MicPipeline
             long sinceStart = now - _lastStart;
             if (silent >= StallAfterMs && sinceStart >= RestartEveryMs)
             {
-                SendStartLocked(session, now);
+                SendStartLocked(session, now, $"stalled {silent} ms");
                 sinceStart = 0;
             }
             ArmLocked(Math.Max(StallAfterMs - silent, RestartEveryMs - sinceStart));
@@ -249,7 +254,7 @@ public sealed class MicPipeline
             {
                 if (_capturing)
                 {
-                    SetStatusLocked(MicStatus.Live);
+                    SetStatusLocked(MicStatus.Live, "decoded audio");
                     ArmLocked(ProblemAfterMs);
                 }
             }
@@ -266,11 +271,13 @@ public sealed class MicPipeline
         {
             _decoder = new AacDecoder();
             _denoiser = new Denoiser();
+            Log.Info("mic", "decoder and denoiser created");
             return true;
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
         {
             // No audio -> Problem after 3 s; retried on the next session.
+            Log.Error("mic", "decoder/denoiser init failed", e);
             _decoder?.Dispose();
             _decoder = null;
             _nativeFailed = true;
@@ -288,6 +295,11 @@ public sealed class MicPipeline
             {
                 _decoder.Flush();
                 _errors = 0;
+                if (now - _lastDecoderFlushLog >= 1000)
+                {
+                    _lastDecoderFlushLog = now;
+                    Log.Warn("mic", $"{MaxConsecutiveErrors} AUs rejected in a row, decoder flushed");
+                }
             }
             return false;
         }
@@ -367,32 +379,39 @@ public sealed class MicPipeline
         Volatile.Write(ref _level, Math.Max(peak / 32768f, Volatile.Read(ref _level) * LevelDecay));
     }
 
-    private void BeginWaitLocked(long now)
+    private void BeginWaitLocked(long now, string reason)
     {
         Volatile.Write(ref _lastAudio, now);
-        SetStatusLocked(MicStatus.Starting);
+        SetStatusLocked(MicStatus.Starting, reason);
         ArmLocked(ProblemAfterMs);
     }
 
-    private void SendStartLocked(AapSession session, long now)
+    private void SendStartLocked(AapSession session, long now, string reason)
     {
+        Log.Info("mic", $"START sent to {Mac.Format(session.Address)} ({reason})");
         _startSent = true;
         _lastStart = now;
         _ = SendStartAsync(session);
     }
 
     // A failed write is covered by the stall re-send.
-    private static async Task SendStartAsync(AapSession session) =>
-        await session.WriteAsync(StartMicrophone).ConfigureAwait(false);
+    private static async Task SendStartAsync(AapSession session)
+    {
+        if (!await session.WriteAsync(StartMicrophone).ConfigureAwait(false))
+        {
+            Log.Warn("mic", "START write failed");
+        }
+    }
 
     private void ArmLocked(long dueMs) => _timer.Change(Math.Max(dueMs, 1), Timeout.Infinite);
 
-    private void SetStatusLocked(MicStatus status)
+    private void SetStatusLocked(MicStatus status, string reason)
     {
         if (_status == status)
         {
             return;
         }
+        Log.Info("mic", $"status {_status} -> {status} ({reason})");
         _status = status;
         if (status != MicStatus.Live)
         {

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using WPods.Core;
 
 namespace WPods.Ui;
 
@@ -46,6 +47,7 @@ internal sealed class Localization
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
+            Log.Error("ui", $"locales folder unreadable: {directory}", e);
             return null;
         }
         foreach (string path in paths)
@@ -61,6 +63,7 @@ internal sealed class Localization
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
             {
                 // Skip a broken file; the others still work.
+                Log.Warn("ui", $"locale file skipped: {path}: {e.Message}");
             }
         }
         return files.Count == 0 ? null : new Localization(files);

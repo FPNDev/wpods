@@ -78,6 +78,7 @@ public sealed unsafe partial class ConversationDucker : IDisposable
         }
         if ((change & DeviceChange.ConversationLevel) != 0)
         {
+            Log.Info("ducker", $"conversation level {session.State.ConversationLevel}");
             Post(session.State.ConversationLevel switch
             {
                 1 => Request.DuckFirst,
@@ -117,6 +118,11 @@ public sealed unsafe partial class ConversationDucker : IDisposable
                         if (!float.IsNaN(_set) && TryGetVolume(out float current) && MathF.Abs(current - _set) <= SameVolumeTolerance)
                         {
                             SetVolume(_original);
+                            Log.Info("ducker", $"restore to {_original:0.00}");
+                        }
+                        else
+                        {
+                            Log.Info("ducker", "restore skipped: volume changed by the user while ducked");
                         }
                         EndEpisode();
                     }
@@ -130,6 +136,7 @@ public sealed unsafe partial class ConversationDucker : IDisposable
                 case Request.Cap:
                     if (_active)
                     {
+                        Log.Info("ducker", $"cap at {Math.Min(_original, FirstLevelVolume):0.00}");
                         SetVolume(Math.Min(_original, FirstLevelVolume));
                     }
                     break;
@@ -144,10 +151,12 @@ public sealed unsafe partial class ConversationDucker : IDisposable
         {
             if (!TryOpenEndpoint())
             {
+                Log.Warn("ducker", "duck skipped: default render endpoint not available");
                 return;
             }
             if (!TryGetVolume(out float original))
             {
+                Log.Warn("ducker", "duck skipped: volume not readable");
                 EndEpisode();
                 return;
             }
@@ -156,6 +165,7 @@ public sealed unsafe partial class ConversationDucker : IDisposable
         }
         if (_original > target)
         {
+            Log.Info("ducker", $"duck {_original:0.00} -> {target:0.00}");
             SetVolume(target);
         }
     }

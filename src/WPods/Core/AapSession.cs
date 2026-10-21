@@ -52,6 +52,9 @@ public sealed class AapSession : IAsyncDisposable
     private byte _streamSequence;
     // Reported capability set last written to settings (read loop and initialization).
     private DeviceCapabilities _savedReported;
+    // Read loop: 0x58 mic audio packets are logged as one count per second.
+    private int _audioCount;
+    private long _audioWindowStart;
 
     internal AapSession(ulong address, SafeFileHandle handle, SettingsStore settings)
     {
@@ -92,8 +95,10 @@ public sealed class AapSession : IAsyncDisposable
         {
             if (_life.IsCancellationRequested)
             {
+                Log.Info("aap", "write skipped: session closed");
                 return false;
             }
+            Log.Packet(outbound: true, packet.Span);
             if (!_writeTimeout.TryReset())
             {
                 _writeTimeout.Dispose();
@@ -107,10 +112,12 @@ public sealed class AapSession : IAsyncDisposable
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            Log.Warn("aap", _life.IsCancellationRequested ? "write cancelled: session closing" : "write timed out after 5 s");
             return false;
         }
-        catch (IOException)
+        catch (IOException e)
         {
+            Log.Warn("aap", $"write failed: 0x{e.HResult:X8} {e.Message}");
             return false;
         }
         finally
@@ -227,8 +234,14 @@ public sealed class AapSession : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        Log.Info("aap", $"close session {Mac.Format(Address)}");
         await _life.CancelAsync().ConfigureAwait(false);
         await _readLoop.ConfigureAwait(false);
+        if (_audioCount > 0)
+        {
+            Log.Info("aap", $"RX 0x58 audio x{_audioCount} in the last {Environment.TickCount64 - _audioWindowStart} ms");
+            _audioCount = 0;
+        }
         await _heartRateTask.ConfigureAwait(false);
         _heartRateCts?.Dispose();
         await _stream.DisposeAsync().ConfigureAwait(false);
@@ -244,6 +257,7 @@ public sealed class AapSession : IAsyncDisposable
                 int count = await _stream.ReadAsync(_readBuffer, ct).ConfigureAwait(false);
                 if (count == 0)
                 {
+                    Log.Warn("aap", "read: end of stream");
                     return SessionEnd.Failed;
                 }
                 OnPacket(new ReadOnlySpan<byte>(_readBuffer, 0, count));
@@ -255,16 +269,19 @@ public sealed class AapSession : IAsyncDisposable
         }
         catch (IOException e) when ((e.HResult & 0xFFFF) == Native.ErrorDeviceNotConnected)
         {
+            Log.Warn("aap", $"read failed: 0x{e.HResult:X8} (1167, device not connected)");
             return SessionEnd.LinkLost;
         }
         catch (Exception e) when (e is IOException or OperationCanceledException or UnauthorizedAccessException)
         {
+            Log.Warn("aap", $"read failed: {e.GetType().Name} 0x{e.HResult:X8} {e.Message}");
             return SessionEnd.Failed;
         }
     }
 
     private void OnPacket(ReadOnlySpan<byte> packet)
     {
+        LogInbound(packet);
         PacketReceived?.Invoke(packet);
         if (_firstPacket is { } first)
         {
@@ -295,11 +312,48 @@ public sealed class AapSession : IAsyncDisposable
         _keysReply?.TrySetResult();
         try
         {
-            return keys is not null && _settings.SetKeys(Address, keys) ? DeviceChange.Keys : DeviceChange.None;
+            if (keys is null)
+            {
+                Log.Warn("aap", "keys reply without IRK and ENC_KEY");
+                return DeviceChange.None;
+            }
+            bool stored = _settings.SetKeys(Address, keys);
+            Log.Info("aap", stored ? "keys reply: stored (new or changed)" : "keys reply: same as stored");
+            return stored ? DeviceChange.Keys : DeviceChange.None;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
+            Log.Error("aap", "keys not saved", e);
             return DeviceChange.None;
+        }
+    }
+
+    // Every inbound packet as hex, except 0x58 mic audio (count per second) and the 0x31 keys reply (length only).
+    private void LogInbound(ReadOnlySpan<byte> packet)
+    {
+        int opcode = packet.Length >= 6 && packet[0] == 0x04 && packet[1] == 0x00 && packet[2] == 0x04 && packet[3] == 0x00
+            ? packet[4] | (packet[5] << 8)
+            : -1;
+        long now = Environment.TickCount64;
+        if (opcode == 0x58)
+        {
+            if (_audioCount++ == 0)
+            {
+                _audioWindowStart = now;
+            }
+        }
+        else if (opcode == 0x31)
+        {
+            Log.Info("aap", $"RX 0x31 keys reply, {packet.Length} bytes (content not logged)");
+        }
+        else
+        {
+            Log.Packet(outbound: false, packet);
+        }
+        if (_audioCount > 0 && now - _audioWindowStart >= 1000)
+        {
+            Log.Info("aap", $"RX 0x58 audio x{_audioCount} in {now - _audioWindowStart} ms");
+            _audioCount = 0;
         }
     }
 
@@ -309,11 +363,13 @@ public sealed class AapSession : IAsyncDisposable
         CancellationToken ct = _life.Token;
         try
         {
+            Log.Info("aap", $"init {Mac.Format(Address)}: handshake");
             TaskCompletionSource first = NewSignal();
             _firstPacket = first;
             if (!await WriteAsync(Aap.Handshake, ct).ConfigureAwait(false)
                 || !await WaitAsync(first.Task, HandshakeTimeout, ct).ConfigureAwait(false))
             {
+                Log.Warn("aap", "init: handshake not written or no packet within 10 s");
                 SetStatus(SessionStatus.NoResponse);
                 return;
             }
@@ -321,6 +377,7 @@ public sealed class AapSession : IAsyncDisposable
             if (!await WriteAsync(Aap.FeatureFlags, ct).ConfigureAwait(false)
                 || !await WriteAsync(Aap.RequestNotifications, ct).ConfigureAwait(false))
             {
+                Log.Warn("aap", "init: feature flags / notification request not written; status stays " + State.Status);
                 return;
             }
             SetStatus(SessionStatus.Ready);
@@ -339,11 +396,13 @@ public sealed class AapSession : IAsyncDisposable
                 {
                     return;
                 }
+                Log.Warn("aap", $"init: no keys reply within 3 s (attempt {attempt + 1})");
             }
         }
         catch (OperationCanceledException)
         {
             // Session closed.
+            Log.Info("aap", "init: stopped, session closed");
         }
     }
 
@@ -370,6 +429,7 @@ public sealed class AapSession : IAsyncDisposable
         catch (OperationCanceledException)
         {
             // Stopped or session closed.
+            Log.Info("aap", "heart rate start sequence stopped");
         }
     }
 
@@ -425,11 +485,13 @@ public sealed class AapSession : IAsyncDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Retried on the next change or attach.
+            Log.Warn("aap", $"capabilities not saved: {e.Message}");
         }
     }
 
     private void SetStatus(SessionStatus status)
     {
+        Log.Info("aap", $"status {State.Status} -> {status}");
         lock (_stateLock)
         {
             State.Status = status;
@@ -445,6 +507,7 @@ public sealed class AapSession : IAsyncDisposable
             {
                 return;
             }
+            Log.Info("aap", $"heart rate {State.HeartRate} -> {status}");
             State.HeartRate = status;
             if (clearReading)
             {

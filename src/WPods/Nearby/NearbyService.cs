@@ -30,6 +30,7 @@ public sealed record NearbyOffer(ulong Address, string Name, AirPodsModel Model,
 public sealed class NearbyService : IDisposable
 {
     private const long GoneMs = 45_000;
+    private const long MissLogIntervalMs = 10_000;
     private const int MaxResolvedAddresses = 256;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
 
@@ -48,6 +49,9 @@ public sealed class NearbyService : IDisposable
     private bool _disposed;
     private int _generation;
     private NearbyOffer[] _offers = [];
+    // Under _lock: valid proximity adverts that resolve to no paired AirPods, logged as one count per 10 s.
+    private int _misses;
+    private long _missWindowStart;
 
     public NearbyService(ConnectionManager connections)
     {
@@ -80,6 +84,7 @@ public sealed class NearbyService : IDisposable
 
     public unsafe void Start()
     {
+        Log.Info("nearby", "start");
         _self = GCHandle.Alloc(this);
         _connections.LinkChanged += OnLinkChanged;
         _connections.DevicesChanged += Refresh;
@@ -101,10 +106,12 @@ public sealed class NearbyService : IDisposable
         {
             if (!_pairs.TryGetValue(address, out pair) || pair.Offer is not { State: OfferState.Offer or OfferState.Failed } offer)
             {
+                Log.Info("nearby", $"connect {Mac.Format(address)}: ignored, offer state={pair?.Offer?.State.ToString() ?? "none"}");
                 return;
             }
             pair.Link = link;
             pair.Offer = offer with { State = OfferState.Connecting };
+            Log.Info("nearby", $"connect {Mac.Format(address)}: offer {offer.State} -> Connecting, linkUp={pair.LinkUp}");
             Publish();
         }
         OffersChanged?.Invoke();
@@ -112,10 +119,14 @@ public sealed class NearbyService : IDisposable
         try
         {
             int hr = await Task.Run(() => NearbyNative.wpn_bt_connect_audio(address)).ConfigureAwait(false);
+            Log.Info("nearby", $"connect {Mac.Format(address)}: connect audio hr=0x{hr:X8}");
             if (hr >= 0)
             {
                 await link.Task.WaitAsync(ConnectTimeout).ConfigureAwait(false);
-                if (await _connections.ConnectAsync(address).ConfigureAwait(false))
+                Log.Info("nearby", $"connect {Mac.Format(address)}: link up, attaching");
+                bool attached = await _connections.ConnectAsync(address).ConfigureAwait(false);
+                Log.Info("nearby", $"connect {Mac.Format(address)}: ConnectAsync -> {attached}");
+                if (attached)
                 {
                     result = OfferState.Connected;
                 }
@@ -124,10 +135,12 @@ public sealed class NearbyService : IDisposable
         catch (TimeoutException)
         {
             // No link within 10 s.
+            Log.Info("nearby", $"connect {Mac.Format(address)}: no link within 10 s");
         }
         catch (TaskCanceledException)
         {
             // Cancelled or dismissed; the offer was already updated.
+            Log.Info("nearby", $"connect {Mac.Format(address)}: link wait cancelled");
         }
         bool changed;
         lock (_lock)
@@ -139,6 +152,7 @@ public sealed class NearbyService : IDisposable
                 pair.Offer = pair.Offer! with { State = result };
                 Publish();
             }
+            Log.Info("nearby", $"connect {Mac.Format(address)}: result {result}{(changed ? "" : " (offer already changed, not applied)")}");
         }
         if (changed)
         {
@@ -159,6 +173,7 @@ public sealed class NearbyService : IDisposable
                     pair.CancelConnect();
                     pair.Offer = offer with { State = OfferState.Offer };
                     changed = true;
+                    Log.Info("nearby", $"connect {Mac.Format(pair.Address)} cancelled: offer {offer.State} -> Offer");
                 }
             }
             if (changed)
@@ -181,7 +196,8 @@ public sealed class NearbyService : IDisposable
             changed = _pairs.TryGetValue(address, out Pair? pair) && pair.Offer is not null;
             if (changed)
             {
-                pair!.CancelConnect();
+                Log.Info("nearby", $"offer {Mac.Format(address)} dismissed (was {pair!.Offer!.State})");
+                pair.CancelConnect();
                 pair.Offer = null;
                 Publish();
             }
@@ -194,6 +210,7 @@ public sealed class NearbyService : IDisposable
 
     public void Dispose()
     {
+        Log.Info("nearby", "dispose");
         _connections.LinkChanged -= OnLinkChanged;
         _connections.DevicesChanged -= Refresh;
         if (_radioNotify != 0)
@@ -253,7 +270,8 @@ public sealed class NearbyService : IDisposable
                 return;
             }
             NearbyNative.wpn_ble_stop();
-            NearbyNative.wpn_ble_start(&OnAdvert, GCHandle.ToIntPtr(_self));
+            int hr = NearbyNative.wpn_ble_start(&OnAdvert, GCHandle.ToIntPtr(_self));
+            Log.Info("nearby", $"BLE watcher restarted, hr=0x{hr:X8}");
         }
     }
 
@@ -278,6 +296,7 @@ public sealed class NearbyService : IDisposable
             }
             if (pair is null)
             {
+                CountMiss();
                 return;
             }
             bool wasNearby = pair.Nearby;
@@ -295,6 +314,21 @@ public sealed class NearbyService : IDisposable
         if (nearbyChanged)
         {
             NearbyChanged?.Invoke();
+        }
+    }
+
+    // Under _lock.
+    private void CountMiss()
+    {
+        long now = Environment.TickCount64;
+        if (_misses++ == 0)
+        {
+            _missWindowStart = now;
+        }
+        if (now - _missWindowStart >= MissLogIntervalMs)
+        {
+            Log.Info("nearby", $"{_misses} proximity adverts matched no paired AirPods in the last {now - _missWindowStart} ms");
+            _misses = 0;
         }
     }
 
@@ -317,6 +351,7 @@ public sealed class NearbyService : IDisposable
         bool arrived = !pair.Present;
         if (arrived)
         {
+            Log.Info("nearby", $"{Mac.Format(pair.Address)} arrived (adverts seen), linkUp={pair.LinkUp}");
             pair.Present = true;
             // Every other present pair expires earlier, so an armed timer is already due first.
             if (!_expiryArmed)
@@ -327,11 +362,18 @@ public sealed class NearbyService : IDisposable
         }
         bool wasOpen = pair.LidOpen;
         pair.LidOpen = Proximity.IsLidOpen(data);
+        bool budInCase = Proximity.IsBudInCase(data);
+        if (arrived || wasOpen != pair.LidOpen || budInCase != pair.BudInCase)
+        {
+            Log.Info("nearby", $"{Mac.Format(pair.Address)} lid {(pair.LidOpen ? "open" : "closed")}, bud in case={budInCase}, linkUp={pair.LinkUp}");
+        }
+        pair.BudInCase = budInCase;
         if (pair.Offer is { } offer)
         {
             bool single = offer.Model.SingleBattery;
             if (!single && !pair.LidOpen && offer.State != OfferState.Connecting)
             {
+                Log.Info("nearby", $"offer {Mac.Format(pair.Address)} removed: lid closed (was {offer.State})");
                 pair.Offer = null;
                 return true;
             }
@@ -359,6 +401,7 @@ public sealed class NearbyService : IDisposable
             return false;
         }
         pair.Offer = new NearbyOffer(pair.Address, pair.Name, model, Proximity.ReadBatteries(data, pair.EncCipher, singleBattery, default), OfferState.Offer);
+        Log.Info("nearby", $"offer {Mac.Format(pair.Address)} created ({model.Name})");
         return true;
     }
 
@@ -385,6 +428,7 @@ public sealed class NearbyService : IDisposable
                 nearbyChanged |= pair.Nearby;
                 pair.Present = false;
                 pair.LidOpen = false;
+                Log.Info("nearby", $"{Mac.Format(pair.Address)} gone (no adverts for 45 s), offer={pair.Offer?.State.ToString() ?? "none"}");
                 if (pair.Offer is { State: OfferState.Offer or OfferState.Failed })
                 {
                     pair.Offer = null;
@@ -447,14 +491,19 @@ public sealed class NearbyService : IDisposable
     // Under _lock. A link that comes up ends a connect wait; an idle or failed offer disappears (connected to Windows).
     private static bool SetLinkUp(Pair pair, bool up)
     {
+        if (pair.LinkUp != up)
+        {
+            Log.Info("nearby", $"{Mac.Format(pair.Address)} link {(up ? "up" : "down")}, connect waiting={pair.Link is not null}, offer={pair.Offer?.State.ToString() ?? "none"}");
+        }
         pair.LinkUp = up;
         if (!up)
         {
             return false;
         }
         pair.Link?.TrySetResult();
-        if (pair.Offer is { State: OfferState.Offer or OfferState.Failed })
+        if (pair.Offer is { State: OfferState.Offer or OfferState.Failed } offer)
         {
+            Log.Info("nearby", $"offer {Mac.Format(pair.Address)} removed: link up (was {offer.State})");
             pair.Offer = null;
             return true;
         }
@@ -481,6 +530,7 @@ public sealed class NearbyService : IDisposable
                     }
                     if (!_pairs.TryGetValue(device.Address, out Pair? pair))
                     {
+                        Log.Info("nearby", $"pair {Mac.Format(device.Address)} added (has keys), linkUp={device.LinkUp}");
                         pair = new Pair(device.Address);
                         _pairs.Add(device.Address, pair);
                     }
@@ -507,6 +557,7 @@ public sealed class NearbyService : IDisposable
                 {
                     if (pair.Generation != generation)
                     {
+                        Log.Info("nearby", $"pair {Mac.Format(pair.Address)} removed (unpaired or keys gone)");
                         _pairs.Remove(pair.Address);
                         pair.CancelConnect();
                         pair.Dispose();
@@ -571,6 +622,8 @@ public sealed class NearbyService : IDisposable
         public bool LinkUp { get; set; }
         public bool Present { get; set; }
         public bool LidOpen { get; set; }
+        /// <summary>Last advert's bud-in-case flag; only used to log changes.</summary>
+        public bool BudInCase { get; set; }
         public long LastSeen { get; set; }
         public int Generation { get; set; }
         public NearbyOffer? Offer { get; set; }

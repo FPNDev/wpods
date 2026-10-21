@@ -44,6 +44,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
         {
             AddDevice(path, raiseEvents: false);
         }
+        Log.Info("link", $"start: radio notify={_radioClassNotify != 0}, NTAPD notify={_ntapdClassNotify != 0}");
     }
 
     public bool IsUp(ulong address)
@@ -163,10 +164,12 @@ internal sealed unsafe class BluetoothLink : IDisposable
         {
             if (!_devices.TryGetValue(address, out Entry? entry) || entry.Up == connected)
             {
+                Log.Info("link", $"HCI ACL {Mac.Format(address)} {(connected ? "up" : "down")} ({(entry is null ? "not an NTAPD device" : "no change")})");
                 return;
             }
             entry.Up = connected;
         }
+        Log.Info("link", $"HCI ACL {Mac.Format(address)} {(connected ? "up" : "down")}");
         LinkChanged?.Invoke(address, connected);
     }
 
@@ -184,6 +187,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
                 _radioByPath[path] = notify;
                 _radioByNotify[notify] = path;
             }
+            Log.Info("link", $"radio added {path}, HCI notify registered={notify != 0}");
         }
     }
 
@@ -206,6 +210,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
                     down.Add(address);
                 }
             }
+            Log.Info("link", $"radio removed {path}, links now down: {down.Count}");
         }
         Unregister(notify);
         foreach (ulong address in down)
@@ -218,6 +223,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
     {
         if (!Mac.TryParseInterfacePath(path, out ulong address))
         {
+            Log.Warn("link", $"NTAPD interface without an address: {path}");
             return;
         }
         bool up;
@@ -231,6 +237,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
             up = Query(address, out string name);
             _devices[address] = new Entry(path, name) { Up = up };
             _addressByPath[path] = address;
+            Log.Info("link", $"NTAPD {(raiseEvents ? "added" : "present")} {Mac.Format(address)} \"{name}\", link {(up ? "up" : "down")}");
         }
         if (raiseEvents)
         {
@@ -253,6 +260,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
                 return;
             }
         }
+        Log.Info("link", $"NTAPD removed {Mac.Format(address)}, link was {(entry.Up ? "up" : "down")}");
         DevicesChanged?.Invoke();
         if (entry.Up)
         {

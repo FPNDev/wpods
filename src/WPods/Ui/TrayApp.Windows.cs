@@ -48,11 +48,13 @@ internal sealed partial class TrayApp
         _hideTimer.Stop();
         if (_main is not { } window)
         {
+            Log.Info("ui", "main window: create");
             CreateMain();
             return;
         }
         if (!_mainShown)
         {
+            Log.Info("ui", $"main window: show (page ready={window.Pane.Ready})");
             if (window.WindowState == FormWindowState.Normal)
             {
                 window.Bounds = ClampToWorkArea(window.Bounds);
@@ -93,6 +95,7 @@ internal sealed partial class TrayApp
         catch (Exception e) when (e is WebView2RuntimeNotFoundException or COMException or InvalidOperationException or ArgumentException)
         {
             // No usable WebView2 runtime: the window stays empty; the next show tries again.
+            Log.Error("ui", "main window: WebView2 init failed", e);
             _environment = null;
         }
     }
@@ -107,6 +110,7 @@ internal sealed partial class TrayApp
         {
             _mainPosition = window.Location;
         }
+        Log.Info("ui", "main window: hide");
         PostVisibility(window.Pane, false);
         _mainShown = false;
         window.Hide();
@@ -129,6 +133,7 @@ internal sealed partial class TrayApp
             _suspendPending = false;
             _hideTimer.Interval = (int)(DestroyAfter - SuspendAfter).TotalMilliseconds;
             _hideTimer.Start();
+            Log.Info("ui", "main window: suspend page");
             await window.Pane.SuspendAsync();
             return;
         }
@@ -145,6 +150,7 @@ internal sealed partial class TrayApp
         {
             _mainPosition = window.Location;
         }
+        Log.Info("ui", "main window: destroy");
         _main = null;
         _mainShown = false;
         _hideTimer.Stop();
@@ -166,6 +172,7 @@ internal sealed partial class TrayApp
         _ui.Post(static s =>
         {
             var (app, failed) = ((TrayApp, WebPane))s!;
+            Log.Warn("ui", $"WebView2 process failed ({(app._main?.Pane == failed ? "main" : app._popup?.Pane == failed ? "popup" : "stale pane")})");
             if (app._main?.Pane == failed)
             {
                 bool shown = app._mainShown;
@@ -280,6 +287,7 @@ internal sealed partial class TrayApp
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Kept for this session; the next successful save writes it.
+            Log.Warn("ui", $"prefs not saved: {e.Message}");
         }
     }
 
@@ -302,6 +310,7 @@ internal sealed partial class TrayApp
 
     private async void CreatePopup()
     {
+        Log.Info("ui", $"popup: create ({_offers.Count} offers)");
         var pane = new WebPane(OnPopupMessage, OnPaneFailed);
         var window = new PopupWindow(PopupBackground, Dark, pane);
         window.ScaleChanged += PlacePopup;
@@ -326,6 +335,7 @@ internal sealed partial class TrayApp
         }
         catch (Exception e) when (e is WebView2RuntimeNotFoundException or COMException or InvalidOperationException or ArgumentException)
         {
+            Log.Error("ui", "popup: WebView2 init failed", e);
             _environment = null;
         }
     }
@@ -345,6 +355,7 @@ internal sealed partial class TrayApp
         PlacePopup();
         if (!_popupShown)
         {
+            Log.Info("ui", "popup: show");
             _popupShown = true;
             window.Show();
             PostVisibility(window.Pane, true);
@@ -373,6 +384,7 @@ internal sealed partial class TrayApp
         {
             return;
         }
+        Log.Info("ui", "popup: hide");
         _popupShown = false;
         _host.SetHotKey(false);
         PostVisibility(window.Pane, false);
@@ -386,6 +398,7 @@ internal sealed partial class TrayApp
             return;
         }
         HidePopup();
+        Log.Info("ui", "popup: destroy");
         _popup = null;
         window.Destroy();
     }
@@ -434,6 +447,7 @@ internal sealed partial class TrayApp
 
     private void ApplyTheme()
     {
+        Log.Info("ui", $"theme {_prefs.Theme}, dark={Dark}");
         _main?.SetTheme(MainBackground, Dark);
         _popup?.SetTheme(PopupBackground, Dark);
     }

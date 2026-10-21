@@ -84,6 +84,7 @@ public sealed unsafe partial class LowLatencyKeepAlive
         {
             PlaySound(null, 0, SndPurge);
             _playing = false;
+            Log.Info("keepalive", "stopped");
             return;
         }
         _wave ??= CreateWave();
@@ -93,8 +94,11 @@ public sealed unsafe partial class LowLatencyKeepAlive
         }
         if (!_playing)
         {
+            Log.Warn("keepalive", $"PlaySound refused for {Mac.Format(_address)}");
             Failed?.Invoke();
+            return;
         }
+        Log.Info("keepalive", $"started for {Mac.Format(_address)}");
     }
 
     // Built once in the pinned heap: PlaySound reads it asynchronously for as long as it loops.
