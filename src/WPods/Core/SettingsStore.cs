@@ -50,7 +50,7 @@ public sealed record UiPrefs
 public sealed record DeviceModel(string Number, string Name);
 
 /// <summary>
-/// %LOCALAPPDATA%\WPods\settings.json (host settings, model, reported capabilities, stem modes and ear detection per MAC + last-used MAC) and keys.bin (proximity keys,
+/// %LOCALAPPDATA%\WPods\settings.json (host settings, model, reported capabilities, stem modes, ear detection and mic side per MAC + last-used MAC) and keys.bin (proximity keys,
 /// DPAPI CurrentUser). Loaded once; every change is written atomically. Thread-safe.
 /// </summary>
 public sealed class SettingsStore
@@ -70,6 +70,7 @@ public sealed class SettingsStore
     private readonly Dictionary<ulong, DeviceCapabilities> _capabilities = [];
     private readonly Dictionary<ulong, StemModes> _stemModes = [];
     private readonly Dictionary<ulong, bool> _earDetection = [];
+    private readonly Dictionary<ulong, MicSide> _micSide = [];
     private ulong _lastUsed;
     private UiPrefs _ui = UiPrefs.Default;
 
@@ -189,6 +190,15 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>Microphone side (0x01) of the pair as last set by the user or reported by the device; Automatic when never set.</summary>
+    internal MicSide GetMicSide(ulong address)
+    {
+        lock (_lock)
+        {
+            return _micSide.GetValueOrDefault(address, MicSide.Automatic);
+        }
+    }
+
     /// <summary>Capabilities the pair reported on its last attach; None if it was never attached.</summary>
     internal DeviceCapabilities GetCapabilities(ulong address)
     {
@@ -282,6 +292,20 @@ public sealed class SettingsStore
         }
     }
 
+    internal void SetMicSide(ulong address, MicSide side)
+    {
+        lock (_lock)
+        {
+            if (_micSide.TryGetValue(address, out MicSide current) && current == side)
+            {
+                return;
+            }
+            _micSide[address] = side;
+            SaveSettings();
+            Log.Info("settings", $"{Mac.Format(address)}: micSide = {side}");
+        }
+    }
+
     /// <summary>Stores keys; false when identical to the stored ones (nothing written).</summary>
     internal bool SetKeys(ulong address, ProximityKeys keys)
     {
@@ -356,6 +380,21 @@ public sealed class SettingsStore
                 if (Mac.TryParse(mac, out ulong address))
                 {
                     _earDetection[address] = on;
+                }
+            }
+            foreach ((string mac, MicSide side) in file.MicSide)
+            {
+                if (!Mac.TryParse(mac, out ulong address))
+                {
+                    continue;
+                }
+                if (Enum.IsDefined(side))
+                {
+                    _micSide[address] = side;
+                }
+                else
+                {
+                    Log.Warn("settings", $"{mac}: micSide {side} invalid, using Automatic");
                 }
             }
         }
@@ -442,6 +481,10 @@ public sealed class SettingsStore
         {
             file.EarDetection[Mac.Format(address)] = on;
         }
+        foreach ((ulong address, MicSide side) in _micSide)
+        {
+            file.MicSide[Mac.Format(address)] = side;
+        }
         WriteAtomic(_settingsPath, JsonSerializer.SerializeToUtf8Bytes(file, SettingsJson.Default.SettingsFile));
     }
 
@@ -510,6 +553,8 @@ internal sealed class SettingsFile
     public Dictionary<string, StemModes> StemModes { get; set; } = [];
     /// <summary>Ear detection (0x0A) per pair (optional; older files have none, missing = on).</summary>
     public Dictionary<string, bool> EarDetection { get; set; } = [];
+    /// <summary>Microphone side (0x01) per pair (optional; older files have none, missing = Automatic).</summary>
+    public Dictionary<string, MicSide> MicSide { get; set; } = [];
 }
 
 internal sealed class LegacyRecord

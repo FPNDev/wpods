@@ -72,9 +72,10 @@ public sealed class AapSession : IAsyncDisposable
         DeviceCapabilities baseline = Models.FromModelNumber(settings.GetModel(address)?.Number)?.Capabilities ?? DeviceCapabilities.None;
         State = new DeviceState(settings.GetCapabilities(address), baseline);
         _savedReported = State.Reported;
-        // The AirPods never report 0x0A (Round 20), so the stored value is the state from the start and is written
-        // on attach; a device report replaces it (OnPacket).
+        // The AirPods never report 0x0A or 0x01 (per-host settings, Round 20/21 probes), so the stored values are the
+        // state from the start and are written on attach; a device report replaces them (OnPacket).
         State.SetSetting(Aap.EarDetectionId, Aap.Bool(settings.GetEarDetection(address)));
+        State.SetSetting(Aap.MicSideId, (byte)settings.GetMicSide(address));
     }
 
     public ulong Address { get; }
@@ -202,13 +203,19 @@ public sealed class AapSession : IAsyncDisposable
     public ValueTask<bool> SetOneBudAncAsync(bool on, CancellationToken ct = default) =>
         SendSettingAsync(Aap.Setting(Aap.OneBudAncId, Aap.Bool(on)), ct);
 
-    public ValueTask<bool> SetMicSideAsync(MicSide side, CancellationToken ct = default)
+    /// <summary>Writes 0x01 and, when written, stores it for the pair (written again on every attach).</summary>
+    public async ValueTask<bool> SetMicSideAsync(MicSide side, CancellationToken ct = default)
     {
         if (!Enum.IsDefined(side))
         {
             throw new ArgumentOutOfRangeException(nameof(side));
         }
-        return SendSettingAsync(Aap.Setting(Aap.MicSideId, (byte)side), ct);
+        if (!await SendSettingAsync(Aap.Setting(Aap.MicSideId, (byte)side), ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+        SaveMicSide(side);
+        return true;
     }
 
     public ValueTask<bool> SetPressSpeedAsync(PressSpeed speed, CancellationToken ct = default)
@@ -414,6 +421,12 @@ public sealed class AapSession : IAsyncDisposable
             Log.Info("aap", $"device reports ear detection {(packet[7] == 0x01 ? "on" : "off")}; stored");
             SaveEarDetection(packet[7] == 0x01);
         }
+        // Same for mic side (0x01): 00 Automatic, 01 Right, 02 Left.
+        if (Aap.IsSetting(packet) && packet[6] == Aap.MicSideId && packet[7] <= 0x02)
+        {
+            Log.Info("aap", $"device reports mic side {(MicSide)packet[7]}; stored");
+            SaveMicSide((MicSide)packet[7]);
+        }
     }
 
     private DeviceChange OnKeys(ProximityKeys? keys)
@@ -467,7 +480,7 @@ public sealed class AapSession : IAsyncDisposable
     }
 
     // Handshake -> (any reply) -> 100 ms -> feature flags -> notifications (filter carries the stored ear detection)
-    // -> 1 s -> stem modes -> ear detection -> proximity keys (one retry). The initial report ends separately
+    // -> 1 s -> stem modes -> ear detection -> mic side -> proximity keys (one retry). The initial report ends separately
     // (FinishInitialReportAsync).
     private async Task InitializeAsync()
     {
@@ -502,6 +515,12 @@ public sealed class AapSession : IAsyncDisposable
             if (!await SendSettingAsync(Aap.Setting(Aap.EarDetectionId, Aap.Bool(earDetection)), ct).ConfigureAwait(false))
             {
                 Log.Warn("aap", "init: ear detection not written");
+            }
+            MicSide micSide = _settings.GetMicSide(Address);
+            Log.Info("aap", $"init: writing mic side {micSide}");
+            if (!await SendSettingAsync(Aap.Setting(Aap.MicSideId, (byte)micSide), ct).ConfigureAwait(false))
+            {
+                Log.Warn("aap", "init: mic side not written");
             }
             for (int attempt = 0; attempt < 2; attempt++)
             {
@@ -695,6 +714,19 @@ public sealed class AapSession : IAsyncDisposable
         {
             // The device has it; the next attach writes the previously stored value again.
             Log.Warn("aap", $"ear detection not saved: {e.Message}");
+        }
+    }
+
+    private void SaveMicSide(MicSide side)
+    {
+        try
+        {
+            _settings.SetMicSide(Address, side);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // The device has it; the next attach writes the previously stored value again.
+            Log.Warn("aap", $"mic side not saved: {e.Message}");
         }
     }
 
