@@ -37,8 +37,9 @@ public sealed class MicPipeline
     private const int LevelIntervalMs = 100;
     private const float LevelDecay = 0.6f;
     private const int LevelLogIntervalMs = 1000;
-    // Applied to the decoded signal before mode processing. 1.0 until it is set from the logged input levels.
-    private const float MakeUpGain = 1f;
+    // Applied to the decoded signal before mode processing. Measured on AirPods Pro 2: normal speech
+    // -33..-40 dBFS RMS, peaks -20..-26 dBFS; +12 dB puts speech near -25 dBFS RMS, peaks under the limiter knee.
+    private const float MakeUpGain = 4f;
 
     private static readonly byte[] StartMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x01, 0x82, 0x00, 0x00, 0x00, 0x04, 0x96, 0x00];
 
