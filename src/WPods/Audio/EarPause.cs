@@ -1,36 +1,45 @@
 using System.Runtime.InteropServices;
 using WPods.Core;
+using Timer = System.Threading.Timer;
 
 namespace WPods.Audio;
 
 /// <summary>
-/// Automatic ear detection pause/resume on the host, Apple rules (support.apple.com HT207009: "pause and resume
-/// playback when you remove one of your AirPods, or stop playback - and won't resume - when you remove both"),
-/// driven by the number of buds in ear:
-/// - 2 -> 1: pause the current Windows media session if it is playing and remember that WPods paused it;
-/// - back to 2: resume only if WPods paused it;
-/// - any -> 0: pause if playing and forget the resume (no auto-resume); this also covers one-bud use (1 -> 0);
-/// - more buds in ear otherwise (0 -> 1, 1 -> 2 without a WPods pause): nothing.
+/// Automatic ear detection pause/resume on the host (Round 21 rules, Apple texts: support.apple.com 108764, AirPods
+/// User Guide, iPhone User Guide iOS 14 "If you return one to your ear within 15 seconds, play resumes
+/// automatically"), driven by the number of buds in ear:
+/// - fewer buds in ear (2 -> 1, 1 -> 0, 2 -> 0): pause EVERY playing Windows media session (wpn_media_pause_all; the
+///   native helper remembers exactly those sessions);
+/// - more buds in ear while sessions are remembered: resume them (2 -> 1 -> 2 has no time limit);
+/// - in-ear count reaches 0 while sessions are remembered: one 15 s timer starts; a bud back in ear before it fires
+///   resumes, otherwise the sessions are forgotten;
+/// - never Play on a removal; resume only plays sessions that are still paused while nothing else plays, and the
+///   helper forgets them by itself when the user plays one or another app starts playing.
 /// Acts only while the attached pair's Ear detection setting is on and the AirPods are the default Windows render
-/// endpoint (wpods_native wpn_audio_is_default_output: the default console render endpoint's container ID equals the
-/// pair's Bluetooth devnode container ID); a skipped resume also forgets it. The media calls are synchronous WinRT
-/// calls, so the work runs on a thread-pool worker; the latest in-ear count wins (collapsing quick changes gives the
-/// same end state). Create before <see cref="ConnectionManager.Start"/>.
+/// endpoint (wpn_audio_is_default_output); a resume skipped for that reason forgets. Detach, a session change and
+/// turning Ear detection off forget too. The media calls are synchronous WinRT calls, so the work runs on one
+/// thread-pool worker at a time; the latest in-ear count wins (collapsing quick changes gives the same end state).
+/// Create before <see cref="ConnectionManager.Start"/>.
 /// </summary>
 public sealed partial class EarPause
 {
     private const int Unknown = -1;
-    private const int Both = 2;
+    private static readonly TimeSpan ResumeWindow = TimeSpan.FromSeconds(15);
 
     private readonly Lock _lock = new();
     // Under _lock.
     private AapSession? _session;
     private int _latest = Unknown;
+    private bool _earDetectionOn;
     private bool _running;
     private bool _reset;
+    private string? _forget;
+    private Timer? _timer;
+    private int _timerGeneration;
     // Worker only (at most one worker runs, guarded by _running).
     private int _applied = Unknown;
-    private bool _wePaused;
+    // The native helper remembers paused sessions (wpn_media_pause_all paused at least one since the last resume/forget).
+    private bool _pending;
 
     public EarPause(ConnectionManager connections)
     {
@@ -44,7 +53,10 @@ public sealed partial class EarPause
         {
             _session = session;
             _latest = Unknown;
+            _earDetectionOn = session.State.EarDetection == true;
             _reset = true;
+            _forget = "session changed";
+            Kick();
         }
         session.Changed += OnChanged;
     }
@@ -59,13 +71,15 @@ public sealed partial class EarPause
                 _session = null;
                 _latest = Unknown;
                 _reset = true;
+                _forget = "AirPods detached";
+                Kick();
             }
         }
     }
 
     private void OnChanged(DeviceChange change)
     {
-        if ((change & DeviceChange.Ear) == 0)
+        if ((change & (DeviceChange.Ear | DeviceChange.Settings)) == 0)
         {
             return;
         }
@@ -76,12 +90,28 @@ public sealed partial class EarPause
                 return;
             }
             DeviceState state = session.State;
-            _latest = (state.PrimaryEar == EarStatus.InEar ? 1 : 0) + (state.SecondaryEar == EarStatus.InEar ? 1 : 0);
-            if (!_running)
+            bool on = state.EarDetection == true;
+            if (_earDetectionOn && !on)
             {
-                _running = true;
-                ThreadPool.UnsafeQueueUserWorkItem(static p => p.Run(), this, preferLocal: false);
+                _forget = "ear detection turned off";
+                Kick();
             }
+            _earDetectionOn = on;
+            if ((change & DeviceChange.Ear) != 0)
+            {
+                _latest = (state.PrimaryEar == EarStatus.InEar ? 1 : 0) + (state.SecondaryEar == EarStatus.InEar ? 1 : 0);
+                Kick();
+            }
+        }
+    }
+
+    // Under _lock.
+    private void Kick()
+    {
+        if (!_running)
+        {
+            _running = true;
+            ThreadPool.UnsafeQueueUserWorkItem(static p => p.Run(), this, preferLocal: false);
         }
     }
 
@@ -89,30 +119,42 @@ public sealed partial class EarPause
     {
         while (true)
         {
-            AapSession session;
+            AapSession? session;
             int count;
+            bool reset;
+            string? forget;
             lock (_lock)
             {
-                if (_reset)
+                reset = _reset;
+                _reset = false;
+                forget = _forget;
+                _forget = null;
+                session = _session;
+                count = _latest;
+                if (count > 0)
                 {
-                    _reset = false;
-                    if (_wePaused)
-                    {
-                        Log.Info("earpause", "session changed: resume forgotten");
-                    }
-                    _applied = Unknown;
-                    _wePaused = false;
+                    // A bud is in ear: the 15 s window is over either way.
+                    StopTimer();
                 }
-                if (_session is null || _latest == _applied)
+                if (!reset && forget is null && (session is null || count == _applied))
                 {
                     _running = false;
                     return;
                 }
-                session = _session;
-                count = _latest;
             }
-            Apply(session, _applied, count);
-            _applied = count;
+            if (reset)
+            {
+                _applied = Unknown;
+            }
+            if (forget is not null)
+            {
+                Forget(forget);
+            }
+            if (session is not null && count != _applied)
+            {
+                Apply(session, _applied, count);
+                _applied = count;
+            }
         }
     }
 
@@ -124,40 +166,99 @@ public sealed partial class EarPause
             Log.Info("earpause", $"{what}: first report, no action");
             return;
         }
-        if (count == Both)
+        if (count < previous)
         {
-            if (!_wePaused)
-            {
-                Log.Info("earpause", $"{what}: no resume (WPods did not pause)");
-                return;
-            }
-            _wePaused = false;
-            if (CanAct(session, what))
-            {
-                int result = wpn_media_play();
-                Log.Info("earpause", $"{what}: resume -> {Describe(result)}");
-            }
+            OnRemoved(session, what, count);
             return;
         }
-        if (count > previous)
+        if (!_pending)
         {
-            Log.Info("earpause", $"{what}: no action");
+            Log.Info("earpause", $"{what}: no resume (nothing paused by WPods)");
             return;
         }
-        // Fewer buds in ear: 2 -> 1 may resume later; reaching 0 never does.
-        bool resumable = previous == Both && count == 1;
-        if (_wePaused && !resumable)
-        {
-            _wePaused = false;
-            Log.Info("earpause", $"{what}: resume forgotten");
-        }
+        _pending = false;
         if (!CanAct(session, what))
         {
+            wpn_media_forget();
+            Log.Info("earpause", $"{what}: resume skipped, paused sessions forgotten");
             return;
         }
-        int paused = wpn_media_pause_if_playing();
-        _wePaused = paused == 1 && resumable;
-        Log.Info("earpause", $"{what}: pause -> {Describe(paused)}{(paused == 1 ? resumable ? ", resume armed" : ", no auto-resume" : "")}");
+        int resumed = wpn_media_resume_paused();
+        Log.Info("earpause", $"{what}: resume -> {Describe(resumed)}");
+    }
+
+    // Never plays: pauses whatever is playing, and at 0 in ear starts the resume window.
+    private void OnRemoved(AapSession session, string what, int count)
+    {
+        if (CanAct(session, what))
+        {
+            int paused = wpn_media_pause_all();
+            _pending |= paused > 0;
+            Log.Info("earpause", $"{what}: pause all -> {(paused >= 0 ? $"{paused} session(s) paused" : $"error 0x{paused:X8}")}");
+        }
+        if (count != 0)
+        {
+            return;
+        }
+        if (!_pending)
+        {
+            Log.Info("earpause", $"{what}: no bud in ear, nothing to resume");
+            return;
+        }
+        lock (_lock)
+        {
+            StartTimer();
+        }
+        Log.Info("earpause", $"{what}: no bud in ear; resume if one is back within {ResumeWindow.TotalSeconds:0} s");
+    }
+
+    private void Forget(string reason)
+    {
+        lock (_lock)
+        {
+            StopTimer();
+        }
+        if (!_pending)
+        {
+            return;
+        }
+        _pending = false;
+        wpn_media_forget();
+        Log.Info("earpause", $"{reason}: paused sessions forgotten (no resume)");
+    }
+
+    // Under _lock.
+    private void StartTimer()
+    {
+        StopTimer();
+        int generation = _timerGeneration;
+        _timer = new Timer(_ => OnWindowExpired(generation), null, ResumeWindow, Timeout.InfiniteTimeSpan);
+    }
+
+    // Under _lock. A callback already queued sees a newer generation and does nothing.
+    private void StopTimer()
+    {
+        if (_timer is null)
+        {
+            return;
+        }
+        _timer.Dispose();
+        _timer = null;
+        _timerGeneration++;
+    }
+
+    private void OnWindowExpired(int generation)
+    {
+        lock (_lock)
+        {
+            if (generation != _timerGeneration || _timer is null)
+            {
+                return;
+            }
+            StopTimer();
+            _forget = $"no bud back in ear within {ResumeWindow.TotalSeconds:0} s";
+            Kick();
+        }
     }
 
     private static bool CanAct(AapSession session, string what)
@@ -176,16 +277,19 @@ public sealed partial class EarPause
         return true;
     }
 
-    private static string Describe(int result) => result switch
+    private static string Describe(int resumed) => resumed switch
     {
-        1 => "done",
-        0 => "nothing to do",
-        _ => $"error 0x{result:X8}",
+        > 0 => $"{resumed} session(s) resumed",
+        0 => "nothing resumed (forgotten after other playback, something is playing, or no session still paused)",
+        _ => $"error 0x{resumed:X8}",
     };
 
     [LibraryImport("wpods_native.dll")]
-    private static partial int wpn_media_pause_if_playing();
+    private static partial int wpn_media_pause_all();
 
     [LibraryImport("wpods_native.dll")]
-    private static partial int wpn_media_play();
+    private static partial int wpn_media_resume_paused();
+
+    [LibraryImport("wpods_native.dll")]
+    private static partial void wpn_media_forget();
 }

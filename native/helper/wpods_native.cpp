@@ -1,5 +1,5 @@
 // wpods_native.dll: passive BLE Proximity Pairing watcher + BT audio KS one-shot connect/disconnect +
-// media session pause/play (GSMTC) + default-output check.
+// pause/resume of all playing media sessions (GSMTC) + default-output check.
 //
 // Apartments: the DLL never initializes COM on the caller's thread. On first use it calls
 // CoIncrementMTAUsage once (never released), which keeps the process MTA alive so that WinRT/COM
@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <chrono>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <winrt/Windows.Foundation.Collections.h>
@@ -44,9 +46,32 @@ void* g_context;
 void* g_watcher;
 winrt::event_token g_receivedToken;
 
+using PlaybackStatus = GlobalSystemMediaTransportControlsSessionPlaybackStatus;
+
 constexpr std::chrono::seconds kMediaTimeout{ 3 };
-SRWLOCK g_mediaLock = SRWLOCK_INIT; // serializes the media functions and guards g_pausedApp
-std::wstring g_pausedApp;           // SourceAppUserModelId of the session wpn_media_pause_if_playing paused
+
+struct Subscription {
+    GlobalSystemMediaTransportControlsSession session{ nullptr };
+    winrt::event_token token;
+};
+
+// Event subscriptions (SessionsChanged + PlaybackInfoChanged of every session) that notice playback started by the
+// user or another app while sessions are remembered. Created and destroyed only by the exported media functions.
+struct MediaWatch {
+    GlobalSystemMediaTransportControlsSessionManager manager{ nullptr };
+    winrt::event_token sessionsChanged;
+    std::vector<Subscription> sessions;
+};
+
+SRWLOCK g_mediaLock = SRWLOCK_INIT; // serializes the exported media functions; the only writers of g_watch / g_generation
+SRWLOCK g_watchLock = SRWLOCK_INIT; // guards the fields below; never held across a WinRT call
+std::vector<std::wstring> g_pausedApps; // SourceAppUserModelIds of the sessions wpn_media_pause_all paused
+MediaWatch* g_watch;                    // raw pointer: no static destructor releasing COM under the loader lock
+uint32_t g_generation;                  // handlers of an older watch see a different value and do nothing
+int g_fewestPlaying;                    // fewest Playing sessions seen since the last pause; more = someone played
+bool g_dirty;                           // an event arrived since the evaluator last read the sessions
+bool g_resubscribe;                     // SessionsChanged arrived: subscribe the new session list
+bool g_evaluating;                      // an event thread runs evaluate_watch
 
 HRESULT ensure_mta()
 {
@@ -226,6 +251,150 @@ GlobalSystemMediaTransportControlsSessionManager media_manager()
     return wait_result(GlobalSystemMediaTransportControlsSessionManager::RequestAsync());
 }
 
+bool is_playing(GlobalSystemMediaTransportControlsSession const& session)
+{
+    return session.GetPlaybackInfo().PlaybackStatus() == PlaybackStatus::Playing;
+}
+
+// Sessions that cannot be read (closing) count as not playing.
+int count_playing(winrt::Windows::Foundation::Collections::IVectorView<GlobalSystemMediaTransportControlsSession> const& sessions)
+{
+    int playing = 0;
+    for (auto const& session : sessions) {
+        try {
+            playing += is_playing(session) ? 1 : 0;
+        } catch (...) {
+            // Not counted.
+        }
+    }
+    return playing;
+}
+
+void revoke(std::vector<Subscription>& subscriptions) noexcept
+{
+    for (auto& subscription : subscriptions) {
+        try {
+            subscription.session.PlaybackInfoChanged(subscription.token);
+        } catch (...) {
+            // Session already gone.
+        }
+    }
+    subscriptions.clear();
+}
+
+void release_watch(MediaWatch* watch) noexcept
+{
+    if (!watch) {
+        return;
+    }
+    try {
+        watch->manager.SessionsChanged(watch->sessionsChanged);
+    } catch (...) {
+        // Manager already gone.
+    }
+    revoke(watch->sessions);
+    delete watch;
+}
+
+// Under g_watchLock: forgets the remembered sessions and detaches the watch (release it after unlocking).
+MediaWatch* take_watch()
+{
+    MediaWatch* const watch = g_watch;
+    g_watch = nullptr;
+    g_pausedApps.clear();
+    ++g_generation;
+    g_dirty = false;
+    g_resubscribe = false;
+    return watch;
+}
+
+void on_media_event(uint32_t generation, bool sessionsChanged) noexcept;
+
+std::vector<Subscription> subscribe_sessions(
+    winrt::Windows::Foundation::Collections::IVectorView<GlobalSystemMediaTransportControlsSession> const& sessions,
+    uint32_t generation)
+{
+    std::vector<Subscription> subscriptions;
+    try {
+        for (auto const& session : sessions) {
+            subscriptions.push_back({ session, session.PlaybackInfoChanged([generation](auto const&, auto const&) {
+                on_media_event(generation, false);
+            }) });
+        }
+    } catch (...) {
+        revoke(subscriptions);
+        throw;
+    }
+    return subscriptions;
+}
+
+// One event thread at a time: re-reads the sessions after every event (a later event repeats the loop, so reads are
+// in order). A rise of the Playing count above the fewest seen since the pause means the user played a remembered
+// session or another app started playback: the remembered sessions are forgotten (the watch stays until the next
+// exported call replaces or releases it).
+void evaluate_watch() noexcept
+{
+    while (true) {
+        AcquireSRWLockExclusive(&g_watchLock);
+        if (!g_watch || !g_dirty || g_pausedApps.empty()) {
+            g_evaluating = false;
+            ReleaseSRWLockExclusive(&g_watchLock);
+            return;
+        }
+        g_dirty = false;
+        bool const resubscribe = std::exchange(g_resubscribe, false);
+        uint32_t const generation = g_generation;
+        auto const manager = g_watch->manager;
+        ReleaseSRWLockExclusive(&g_watchLock);
+
+        std::vector<Subscription> subscriptions;
+        bool subscribed = false;
+        int playing = -1;
+        try {
+            auto const sessions = manager.GetSessions();
+            if (resubscribe) {
+                subscriptions = subscribe_sessions(sessions, generation);
+                subscribed = true;
+            }
+            playing = count_playing(sessions);
+        } catch (...) {
+            // Unreadable now; the next event reads again.
+        }
+
+        AcquireSRWLockExclusive(&g_watchLock);
+        if (g_watch && g_generation == generation) {
+            if (subscribed) {
+                std::swap(g_watch->sessions, subscriptions); // subscriptions now holds the replaced ones
+            }
+            if (playing > g_fewestPlaying) {
+                g_pausedApps.clear();
+            } else if (playing >= 0) {
+                g_fewestPlaying = playing;
+            }
+        }
+        ReleaseSRWLockExclusive(&g_watchLock);
+        revoke(subscriptions);
+    }
+}
+
+void on_media_event(uint32_t generation, bool sessionsChanged) noexcept
+{
+    AcquireSRWLockExclusive(&g_watchLock);
+    bool const current = g_watch && g_generation == generation && !g_pausedApps.empty();
+    if (current) {
+        g_dirty = true;
+        g_resubscribe |= sessionsChanged;
+    }
+    bool const start = current && !g_evaluating;
+    if (start) {
+        g_evaluating = true;
+    }
+    ReleaseSRWLockExclusive(&g_watchLock);
+    if (start) {
+        evaluate_watch();
+    }
+}
+
 } // namespace
 
 int32_t __stdcall wpn_ble_start(wpn_adv_cb callback, void* ctx)
@@ -287,40 +456,101 @@ int32_t __stdcall wpn_bt_disconnect_audio(uint64_t btAddress)
     return send_oneshot(btAddress, KSPROPERTY_ONESHOT_DISCONNECT);
 }
 
-int32_t __stdcall wpn_media_pause_if_playing(void)
+int32_t __stdcall wpn_media_pause_all(void)
 {
     AcquireSRWLockExclusive(&g_mediaLock);
     int32_t result;
+    MediaWatch* replaced = nullptr;
     try {
-        auto const session = media_manager().GetCurrentSession();
-        if (!session || session.GetPlaybackInfo().PlaybackStatus() !=
-                GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing) {
-            result = 0;
-        } else if (wait_result(session.TryPauseAsync())) {
-            g_pausedApp = session.SourceAppUserModelId();
-            result = 1;
-        } else {
-            result = E_FAIL;
+        auto const manager = media_manager();
+        std::vector<std::wstring> paused;
+        HRESULT failure = S_OK;
+        for (auto const& session : manager.GetSessions()) {
+            try {
+                if (!is_playing(session)) {
+                    continue;
+                }
+                if (wait_result(session.TryPauseAsync())) {
+                    paused.emplace_back(session.SourceAppUserModelId());
+                } else {
+                    failure = E_FAIL;
+                }
+            } catch (...) {
+                failure = winrt::to_hresult();
+            }
         }
+        if (!paused.empty()) {
+            // A fresh watch with a fresh baseline; its handlers stay inert until g_generation reaches theirs.
+            AcquireSRWLockShared(&g_watchLock);
+            uint32_t const generation = g_generation + 1;
+            ReleaseSRWLockShared(&g_watchLock);
+            auto* const watch = new MediaWatch{ manager, {}, {} };
+            try {
+                watch->sessionsChanged = manager.SessionsChanged([generation](auto const&, auto const&) {
+                    on_media_event(generation, true);
+                });
+                auto const sessions = manager.GetSessions();
+                watch->sessions = subscribe_sessions(sessions, generation);
+                int const playing = count_playing(sessions);
+                AcquireSRWLockExclusive(&g_watchLock);
+                replaced = g_watch;
+                g_watch = watch;
+                g_generation = generation;
+                g_pausedApps.insert(g_pausedApps.end(), paused.begin(), paused.end());
+                g_fewestPlaying = playing;
+                g_dirty = false;
+                g_resubscribe = false;
+                ReleaseSRWLockExclusive(&g_watchLock);
+            } catch (...) {
+                release_watch(watch);
+                throw;
+            }
+        }
+        result = paused.empty() && FAILED(failure) ? failure : static_cast<int32_t>(paused.size());
     } catch (...) {
         result = winrt::to_hresult();
     }
+    release_watch(replaced);
     ReleaseSRWLockExclusive(&g_mediaLock);
     return result;
 }
 
-int32_t __stdcall wpn_media_play(void)
+int32_t __stdcall wpn_media_resume_paused(void)
 {
     AcquireSRWLockExclusive(&g_mediaLock);
+    AcquireSRWLockExclusive(&g_watchLock);
+    std::vector<std::wstring> apps = std::move(g_pausedApps);
+    MediaWatch* const watch = take_watch();
+    ReleaseSRWLockExclusive(&g_watchLock);
+    release_watch(watch);
     int32_t result = 0;
     try {
-        if (!g_pausedApp.empty()) {
-            std::wstring const app = std::move(g_pausedApp);
-            g_pausedApp.clear();
-            for (auto const& session : media_manager().GetSessions()) {
-                if (session.SourceAppUserModelId() == app) {
-                    result = wait_result(session.TryPlayAsync()) ? 1 : E_FAIL;
-                    break;
+        if (!apps.empty()) {
+            auto const sessions = media_manager().GetSessions();
+            if (count_playing(sessions) == 0) {
+                HRESULT failure = S_OK;
+                for (auto const& session : sessions) {
+                    try {
+                        if (session.GetPlaybackInfo().PlaybackStatus() != PlaybackStatus::Paused) {
+                            continue;
+                        }
+                        // Each remembered entry resumes at most one session of that app.
+                        auto const app = std::find(apps.begin(), apps.end(), std::wstring_view{ session.SourceAppUserModelId() });
+                        if (app == apps.end()) {
+                            continue;
+                        }
+                        apps.erase(app);
+                        if (wait_result(session.TryPlayAsync())) {
+                            ++result;
+                        } else {
+                            failure = E_FAIL;
+                        }
+                    } catch (...) {
+                        failure = winrt::to_hresult();
+                    }
+                }
+                if (result == 0 && FAILED(failure)) {
+                    result = failure;
                 }
             }
         }
@@ -329,6 +559,16 @@ int32_t __stdcall wpn_media_play(void)
     }
     ReleaseSRWLockExclusive(&g_mediaLock);
     return result;
+}
+
+void __stdcall wpn_media_forget(void)
+{
+    AcquireSRWLockExclusive(&g_mediaLock);
+    AcquireSRWLockExclusive(&g_watchLock);
+    MediaWatch* const watch = take_watch();
+    ReleaseSRWLockExclusive(&g_watchLock);
+    release_watch(watch);
+    ReleaseSRWLockExclusive(&g_mediaLock);
 }
 
 int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress)

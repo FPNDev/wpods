@@ -72,6 +72,9 @@ public sealed class AapSession : IAsyncDisposable
         DeviceCapabilities baseline = Models.FromModelNumber(settings.GetModel(address)?.Number)?.Capabilities ?? DeviceCapabilities.None;
         State = new DeviceState(settings.GetCapabilities(address), baseline);
         _savedReported = State.Reported;
+        // The AirPods never report 0x0A (Round 20), so the stored value is the state from the start and is written
+        // on attach; a device report replaces it (OnPacket).
+        State.SetSetting(Aap.EarDetectionId, Aap.Bool(settings.GetEarDetection(address)));
     }
 
     public ulong Address { get; }
@@ -179,8 +182,16 @@ public sealed class AapSession : IAsyncDisposable
         return true;
     }
 
-    public ValueTask<bool> SetEarDetectionAsync(bool on, CancellationToken ct = default) =>
-        SendSettingAsync(Aap.Setting(Aap.EarDetectionId, Aap.Bool(on)), ct);
+    /// <summary>Writes 0x0A and, when written, stores it for the pair (written again on every attach).</summary>
+    public async ValueTask<bool> SetEarDetectionAsync(bool on, CancellationToken ct = default)
+    {
+        if (!await SendSettingAsync(Aap.Setting(Aap.EarDetectionId, Aap.Bool(on)), ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+        SaveEarDetection(on);
+        return true;
+    }
 
     public ValueTask<bool> SetConversationAwarenessAsync(bool on, CancellationToken ct = default) =>
         SendSettingAsync(Aap.Setting(Aap.ConversationAwarenessId, Aap.Bool(on)), ct);
@@ -397,6 +408,12 @@ public sealed class AapSession : IAsyncDisposable
         {
             SaveCapabilities();
         }
+        // A device-reported ear detection value wins over the stored one (Round 20).
+        if (Aap.IsSetting(packet) && packet[6] == Aap.EarDetectionId && packet[7] is 0x01 or 0x02)
+        {
+            Log.Info("aap", $"device reports ear detection {(packet[7] == 0x01 ? "on" : "off")}; stored");
+            SaveEarDetection(packet[7] == 0x01);
+        }
     }
 
     private DeviceChange OnKeys(ProximityKeys? keys)
@@ -449,8 +466,9 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // Handshake -> (any reply) -> 100 ms -> feature flags -> notifications -> 1 s -> stem modes -> proximity keys
-    // (one retry). The initial report ends separately (FinishInitialReportAsync).
+    // Handshake -> (any reply) -> 100 ms -> feature flags -> notifications (filter carries the stored ear detection)
+    // -> 1 s -> stem modes -> ear detection -> proximity keys (one retry). The initial report ends separately
+    // (FinishInitialReportAsync).
     private async Task InitializeAsync()
     {
         CancellationToken ct = _life.Token;
@@ -470,7 +488,7 @@ public sealed class AapSession : IAsyncDisposable
             }
             await Task.Delay(100, ct).ConfigureAwait(false);
             if (!await WriteAsync(Aap.FeatureFlags, ct).ConfigureAwait(false)
-                || !await WriteAsync(Aap.RequestNotifications, ct).ConfigureAwait(false))
+                || !await WriteAsync(Aap.RequestNotifications(_settings.GetEarDetection(Address)), ct).ConfigureAwait(false))
             {
                 Log.Warn("aap", "init: feature flags / notification request not written; status stays " + State.Status);
                 return;
@@ -479,6 +497,12 @@ public sealed class AapSession : IAsyncDisposable
             _ = FinishInitialReportAsync(firstSetting.Task, ct);
             await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
             await WriteStemModesOnAttachAsync(ct).ConfigureAwait(false);
+            bool earDetection = _settings.GetEarDetection(Address);
+            Log.Info("aap", $"init: writing ear detection {(earDetection ? "on" : "off")}");
+            if (!await SendSettingAsync(Aap.Setting(Aap.EarDetectionId, Aap.Bool(earDetection)), ct).ConfigureAwait(false))
+            {
+                Log.Warn("aap", "init: ear detection not written");
+            }
             for (int attempt = 0; attempt < 2; attempt++)
             {
                 TaskCompletionSource reply = NewSignal();
@@ -659,6 +683,19 @@ public sealed class AapSession : IAsyncDisposable
             }
         }
         return true;
+    }
+
+    private void SaveEarDetection(bool on)
+    {
+        try
+        {
+            _settings.SetEarDetection(Address, on);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // The device has it; the next attach writes the previously stored value again.
+            Log.Warn("aap", $"ear detection not saved: {e.Message}");
+        }
     }
 
     // Refreshes the pair's remembered (reported) capabilities; SettingsStore skips the write when unchanged.

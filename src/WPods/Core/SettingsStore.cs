@@ -50,7 +50,7 @@ public sealed record UiPrefs
 public sealed record DeviceModel(string Number, string Name);
 
 /// <summary>
-/// %LOCALAPPDATA%\WPods\settings.json (host settings, model and reported capabilities per MAC + last-used MAC) and keys.bin (proximity keys,
+/// %LOCALAPPDATA%\WPods\settings.json (host settings, model, reported capabilities, stem modes and ear detection per MAC + last-used MAC) and keys.bin (proximity keys,
 /// DPAPI CurrentUser). Loaded once; every change is written atomically. Thread-safe.
 /// </summary>
 public sealed class SettingsStore
@@ -69,6 +69,7 @@ public sealed class SettingsStore
     private readonly Dictionary<ulong, DeviceModel> _models = [];
     private readonly Dictionary<ulong, DeviceCapabilities> _capabilities = [];
     private readonly Dictionary<ulong, StemModes> _stemModes = [];
+    private readonly Dictionary<ulong, bool> _earDetection = [];
     private ulong _lastUsed;
     private UiPrefs _ui = UiPrefs.Default;
 
@@ -179,6 +180,15 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>Ear detection (0x0A) of the pair as last set by the user or reported by the device; true (Apple default) when never set.</summary>
+    internal bool GetEarDetection(ulong address)
+    {
+        lock (_lock)
+        {
+            return _earDetection.GetValueOrDefault(address, true);
+        }
+    }
+
     /// <summary>Capabilities the pair reported on its last attach; None if it was never attached.</summary>
     internal DeviceCapabilities GetCapabilities(ulong address)
     {
@@ -258,6 +268,20 @@ public sealed class SettingsStore
         }
     }
 
+    internal void SetEarDetection(ulong address, bool on)
+    {
+        lock (_lock)
+        {
+            if (_earDetection.TryGetValue(address, out bool current) && current == on)
+            {
+                return;
+            }
+            _earDetection[address] = on;
+            SaveSettings();
+            Log.Info("settings", $"{Mac.Format(address)}: earDetection = {on}");
+        }
+    }
+
     /// <summary>Stores keys; false when identical to the stored ones (nothing written).</summary>
     internal bool SetKeys(ulong address, ProximityKeys keys)
     {
@@ -325,6 +349,13 @@ public sealed class SettingsStore
                 else
                 {
                     Log.Warn("settings", $"{mac}: stemModes {modes} invalid (needs 2+ of Off, NC, Transparency, Adaptive), using the default");
+                }
+            }
+            foreach ((string mac, bool on) in file.EarDetection)
+            {
+                if (Mac.TryParse(mac, out ulong address))
+                {
+                    _earDetection[address] = on;
                 }
             }
         }
@@ -407,6 +438,10 @@ public sealed class SettingsStore
         {
             file.StemModes[Mac.Format(address)] = modes;
         }
+        foreach ((ulong address, bool on) in _earDetection)
+        {
+            file.EarDetection[Mac.Format(address)] = on;
+        }
         WriteAtomic(_settingsPath, JsonSerializer.SerializeToUtf8Bytes(file, SettingsJson.Default.SettingsFile));
     }
 
@@ -473,6 +508,8 @@ internal sealed class SettingsFile
     public Dictionary<string, DeviceCapabilities> Capabilities { get; set; } = [];
     /// <summary>Stem press-and-hold cycle per pair (optional; older files have none).</summary>
     public Dictionary<string, StemModes> StemModes { get; set; } = [];
+    /// <summary>Ear detection (0x0A) per pair (optional; older files have none, missing = on).</summary>
+    public Dictionary<string, bool> EarDetection { get; set; } = [];
 }
 
 internal sealed class LegacyRecord

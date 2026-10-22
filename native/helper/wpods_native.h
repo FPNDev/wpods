@@ -30,18 +30,22 @@ int32_t __stdcall wpn_bt_connect_audio(uint64_t btAddress);
 int32_t __stdcall wpn_bt_disconnect_audio(uint64_t btAddress);
 
 // Media functions below: synchronous (each WinRT call waits at most 3 s), call off the UI thread;
-// they never initialize COM on the caller's thread (implicit MTA, see wpods_native.cpp).
-// Pauses the current Windows media session (GlobalSystemMediaTransportControlsSessionManager::
-// GetCurrentSession, the one the Windows media flyout shows) if it is playing, and remembers its
-// SourceAppUserModelId for wpn_media_play. Returns 1 = paused, 0 = no current session or it is not
-// playing, negative HRESULT on error (E_FAIL = the app refused the pause, HRESULT_FROM_WIN32(
-// ERROR_TIMEOUT) = no answer within 3 s).
-int32_t __stdcall wpn_media_pause_if_playing(void);
-// Resumes the session remembered by the last successful wpn_media_pause_if_playing (looked up by
-// SourceAppUserModelId among the current sessions) and forgets it. Returns 1 = play requested and
-// accepted, 0 = nothing remembered or that app has no session any more, negative HRESULT on error
-// (same codes as above).
-int32_t __stdcall wpn_media_play(void);
+// they never initialize COM on the caller's thread (implicit MTA, see wpods_native.cpp). They are serialized.
+// Pauses EVERY Windows media session (GlobalSystemMediaTransportControlsSessionManager::GetSessions) whose
+// PlaybackStatus is Playing and adds their SourceAppUserModelIds to the remembered set (earlier entries stay).
+// While the set is not empty the DLL watches SessionsChanged and every session's PlaybackInfoChanged: when the
+// number of Playing sessions rises above the fewest seen since this call (the user played a remembered session,
+// or any app started playback), the set is forgotten. Returns the number of sessions paused (0 = nothing was
+// playing), negative HRESULT when nothing was paused because of an error (E_FAIL = an app refused the pause,
+// HRESULT_FROM_WIN32(ERROR_TIMEOUT) = no answer within 3 s).
+int32_t __stdcall wpn_media_pause_all(void);
+// If no session is Playing, resumes the remembered sessions that still exist and are still Paused (each
+// remembered entry resumes at most one session of that app); always forgets the set and stops watching.
+// Returns the number of sessions resumed (0 = nothing remembered, set forgotten by the watch, a session is
+// playing, or none still paused), negative HRESULT when nothing was resumed because of an error (same codes).
+int32_t __stdcall wpn_media_resume_paused(void);
+// Forgets the remembered sessions without resuming them and stops watching.
+void __stdcall wpn_media_forget(void);
 // Returns 1 if the default eConsole render endpoint (the endpoint Windows plays to) belongs to the
 // paired Classic BT device with this address (its PKEY_Device_ContainerId equals the container ID of
 // the present BTHENUM\DEV_<address> devnode; A2DP and Hands-Free endpoints share it), 0 if not or
