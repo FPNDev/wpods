@@ -17,6 +17,9 @@ const STEM_ORDER: StemMode[] = ['off', 'noiseCancellation', 'transparency', 'ada
 const STEM_MIN = 2;
 const DUCK_MIN = 10;
 const DUCK_MAX = 90;
+/* The AirPods reject tone volumes below 15 % (confirmed live); the host clamps too. */
+const TONE_MIN = 15;
+const TONE_MAX = 100;
 
 const segRow = <V extends string>(icon: IconName, title: LabelKey, desc: LabelKey, seg: Segmented<V>): SegRow<V> => {
   const check = Checking();
@@ -117,7 +120,7 @@ export const createControls = (ctx: Ctx): Page => {
   let lastTone: number | null = null;
 
   const showTone = (value: string): void => {
-    tone.style.setProperty('--v', `${value}%`);
+    tone.style.setProperty('--v', `${((Number(value) - TONE_MIN) * 100) / (TONE_MAX - TONE_MIN)}%`);
     setText(toneValue, value);
   };
 
@@ -167,7 +170,7 @@ export const createControls = (ctx: Ctx): Page => {
             </div>
             <div class="wp-slider" ref={slider}>
               <Icon name="tone" class="wp-slider__icon" />
-              <input class="wp-slider__input" type="range" min="0" max="100" l:aria-label="controls.tone" ref={tone}
+              <input class="wp-slider__input" type="range" min={String(TONE_MIN)} max={String(TONE_MAX)} l:aria-label="controls.tone" ref={tone}
                 oninput={() => showTone(tone.value)}
                 onchange={() => {
                   const value = Number(tone.value);

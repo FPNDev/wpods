@@ -1,6 +1,5 @@
-/* Home: hero (art, switcher, status, batteries, action), noise control, microphone, mic mode, features, More. */
+/* Home: hero (art, switcher, status, batteries, action), noise control, microphone (mic mode, side), features, More. */
 import { createBatteries } from '../components/batteryRing';
-import { createChoiceList } from '../components/choiceList';
 import { Checking, LockRow, NavRow, Note } from '../components/common';
 import { createDeviceMenu } from '../components/deviceMenu';
 import { createSegmented } from '../components/segmented';
@@ -17,7 +16,6 @@ type FeatureKey = ToggleName | 'heartRate' | 'hearingAid';
 type FeatureDef = { key: FeatureKey; title: LabelKey; desc: LabelKey; descMax?: LabelKey };
 type Feature = SwitchRow & { def: FeatureDef };
 type Side = 'left' | 'right';
-type MicModeItem = { value: MicMode; label: LabelKey; desc?: LabelKey };
 
 const STATUS_KIND: Record<Conn, string> = {
   connected: 'connected',
@@ -28,16 +26,6 @@ const STATUS_KIND: Record<Conn, string> = {
   reconnecting: 'busy',
 };
 const EAR_KEY = { inEar: 'ear.inEar', out: 'ear.out', inCase: 'ear.inCase' } as const;
-/* VI 1..VI 4 are a temporary test set (decisions Round 17/18): drop their rows here when the winner is picked. */
-const MIC_MODES: MicModeItem[] = [
-  { value: 'standard', label: 'mic.standard' },
-  { value: 'voiceIsolation', label: 'mic.voiceIsolation' },
-  { value: 'wideSpectrum', label: 'mic.wideSpectrum' },
-  { value: 'voiceIso1', label: 'mic.voiceIso1', desc: 'mic.test' },
-  { value: 'voiceIso2', label: 'mic.voiceIso2', desc: 'mic.test' },
-  { value: 'voiceIso3', label: 'mic.voiceIso3', desc: 'mic.test' },
-  { value: 'voiceIso4', label: 'mic.voiceIso4', desc: 'mic.test' },
-];
 
 const HR_ON = new Set<HeartRate>(['starting', 'streaming', 'noReading']);
 const CONTROLS_CAPS: Capability[] = ['listeningMode', 'pressSpeed', 'holdDuration', 'conversationAwareness', 'toneVolume'];
@@ -113,20 +101,21 @@ export const createHome = (ctx: Ctx): Page => {
   let chipLabel!: HTMLSpanElement;
   let micDesc!: HTMLSpanElement;
   let micSideRow!: HTMLDivElement;
-  let micModeList!: HTMLDivElement;
   const micLocked = LockRow('micLocked');
   const micSideCheck = Checking();
-  const micModeLocked = LockRow('micModeLocked');
-  let micModeShown: MicMode | null = null;
-  const micMode = createChoiceList<MicMode>({
-    role: 'radio',
-    items: MIC_MODES,
-    onPick: (value) => {
+  const micMode = createSegmented<MicMode>({
+    name: 'micMode',
+    legend: 'mic.mode',
+    items: [
+      { value: 'standard', label: 'mic.standard' },
+      { value: 'voiceIsolation', label: 'mic.voiceIsolation' },
+      { value: 'wideSpectrum', label: 'mic.wideSpectrum' },
+    ],
+    onChange: (value) => {
       const d = current();
-      if (d && value !== d.host.micMode) {
+      if (d) {
         d.host.micMode = value;
         post({ type: 'setHostSetting', id: d.id, name: 'micMode', value });
-        ctx.update('mic');
       }
     },
   });
@@ -242,6 +231,11 @@ export const createHome = (ctx: Ctx): Page => {
         <div class="wp-list">
           {micLocked}
           <div class="wp-row"><div class="wp-row__text"><span class="wp-row__desc" ref={micDesc} /></div></div>
+          <div class="wp-row wp-row--stack">
+            <div class="wp-row__head"><div class="wp-row__text"><span class="wp-row__title" l:text="mic.mode" /></div></div>
+            {micMode.el}
+            {Note({ label: 'mic.rnnoiseNote' })}
+          </div>
           <div class="wp-row wp-row--stack" ref={micSideRow}>
             <div class="wp-row__head">
               <div class="wp-row__text"><span class="wp-row__title" l:text="mic.side" /><span class="wp-row__desc" l:text="mic.sideDesc" /></div>
@@ -250,12 +244,6 @@ export const createHome = (ctx: Ctx): Page => {
             {micSide.el}
           </div>
         </div>
-      </section>
-
-      <section class="wp-group">
-        <h2 class="wp-group__title" id="micModeTitle" l:text="mic.mode" />
-        <div class="wp-list" role="radiogroup" aria-labelledby="micModeTitle" ref={micModeList}>{micModeLocked}</div>
-        <p class="wp-group__foot" l:text="mic.rnnoiseNote" />
       </section>
 
       <section class="wp-group" ref={featGroup}>
@@ -272,7 +260,6 @@ export const createHome = (ctx: Ctx): Page => {
   for (const f of features) {
     featList.append(f.row);
   }
-  micModeList.append(...micMode.rows);
 
   const renderHero = (): void => {
     const d = current();
@@ -358,15 +345,8 @@ export const createHome = (ctx: Ctx): Page => {
     setText(micDesc, t(`mic.desc.${mic}`));
     const st = live(d);
     setHidden(micLocked, !!st);
-    if (d.host.micMode !== micModeShown) {
-      if (micModeShown !== null) {
-        micMode.set(micModeShown, false);
-      }
-      micModeShown = d.host.micMode;
-      micMode.set(micModeShown, true);
-    }
-    setHidden(micModeLocked, !!st);
-    micMode.lock(!st, 'micModeLocked');
+    micMode.set(d.host.micMode);
+    micMode.lock(!st, st ? null : 'micLocked');
     setHidden(micSideRow, !capsOf(d).has('micSide'));
     const checking = !!st && st.checking && st.micSide === null;
     setHidden(micSideCheck, !checking);

@@ -1,7 +1,7 @@
 namespace WPods.Audio;
 
 /// <summary>
-/// Mutes a denoised mic signal between words (Voice Isolation test modes 2 and 4). Driven per 480-sample frame by
+/// Mutes a denoised mic signal between words (Standard and Voice Isolation mic modes). Driven per 480-sample frame by
 /// RNNoise's voice probability: opens at <see cref="OpenThreshold"/>, stays open for <see cref="HangoverFrames"/>
 /// frames after the last voiced frame, and moves the gain per sample (5 ms attack, 50 ms release) so it never clicks.
 /// Values (tuning to verify by ear):

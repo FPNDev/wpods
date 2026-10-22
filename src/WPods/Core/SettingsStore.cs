@@ -6,14 +6,12 @@ namespace WPods.Core;
 
 public enum MicMode
 {
+    /// <summary>RNNoise + speech gate.</summary>
     Standard,
+    /// <summary>DeepFilterNet 3 + speech gate.</summary>
     VoiceIsolation,
+    /// <summary>Raw.</summary>
     WideSpectrum,
-    // Test modes for the mic pipeline; appended so persisted names above stay unchanged.
-    VoiceIso1,
-    VoiceIso2,
-    VoiceIso3,
-    VoiceIso4,
 }
 
 /// <summary>Host-side settings of one device; editable while it is disconnected.</summary>
@@ -23,6 +21,7 @@ public sealed record HostSettings
 
     public bool DisableHandsFree { get; init; } = true;
     public bool LowLatency { get; init; }
+    [JsonConverter(typeof(MicModeJsonConverter))]
     public MicMode MicMode { get; init; }
     /// <summary>Media volume during a conversation, percent of the previous volume; 10..90 (clamped on load).</summary>
     public int DuckPercent { get; init; } = DefaultDuckPercent;
@@ -482,6 +481,36 @@ internal sealed class LegacyRecord
     public bool? DisableHandsFreeMode { get; set; }
     public bool? LowLatencyMode { get; set; }
     public string? MicMode { get; set; }
+}
+
+/// <summary>
+/// MicMode as its member name; on read also migrates the removed test modes (Round 19): VoiceIso1/VoiceIso2 ->
+/// Standard, VoiceIso3/VoiceIso4 -> VoiceIsolation. The migrated value is written back on the next save.
+/// </summary>
+internal sealed class MicModeJsonConverter : JsonConverter<MicMode>
+{
+    public override MicMode Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        string? text = reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
+        MicMode? legacy = text?.ToLowerInvariant() switch
+        {
+            "voiceiso1" or "voiceiso2" => MicMode.Standard,
+            "voiceiso3" or "voiceiso4" => MicMode.VoiceIsolation,
+            _ => null,
+        };
+        if (legacy is { } migrated)
+        {
+            Log.Info("settings", $"stored micMode {text} migrated to {migrated}");
+            return migrated;
+        }
+        if (text is null || !Enum.TryParse(text, ignoreCase: true, out MicMode mode) || !Enum.IsDefined(mode) || char.IsAsciiDigit(text[0]))
+        {
+            throw new JsonException($"Unknown micMode {text ?? reader.TokenType.ToString()}.");
+        }
+        return mode;
+    }
+
+    public override void Write(Utf8JsonWriter writer, MicMode value, JsonSerializerOptions options) => writer.WriteStringValue(value.ToString());
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UseStringEnumConverter = true, WriteIndented = true)]

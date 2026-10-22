@@ -10,7 +10,7 @@ export type Capability = 'listeningMode' | 'adaptive' | 'earDetection' | 'conver
   | 'personalizedVolume' | 'allowOff' | 'micSide' | 'pressSpeed' | 'holdDuration' | 'toneVolume' | 'hearingAid' | 'heartRate'
   | 'singleBattery';
 export type Conn = 'connected' | 'connecting' | 'reconnecting' | 'notConnected' | 'elsewhere' | 'attachFailed';
-export type MicMode = 'standard' | 'voiceIsolation' | 'wideSpectrum' | 'voiceIso1' | 'voiceIso2' | 'voiceIso3' | 'voiceIso4';
+export type MicMode = 'standard' | 'voiceIsolation' | 'wideSpectrum';
 type HostSettings = { disableHandsFree: boolean; lowLatency: boolean; micMode: MicMode; duckPercent: number };
 export type StemMode = 'off' | 'noiseCancellation' | 'transparency' | 'adaptive';
 export type Device = {

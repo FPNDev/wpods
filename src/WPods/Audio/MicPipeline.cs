@@ -20,8 +20,10 @@ public enum MicStatus
 
 /// <summary>
 /// AirPods mic -> \\.\NTA2DPVM. Starts the AirPods mic stream the first time an app captures in a session and
-/// never stops it; 0x58 packets are dropped unread while nothing captures. Decodes on the session read loop:
-/// AAC-ELD -> 48 kHz mono s16 -> mode processing -> WriteFile. Create before <see cref="ConnectionManager.Start"/>.
+/// never stops it; 0x58 packets are dropped unread while nothing captures. Decodes on the session read loop, in float
+/// until the end: AAC-ELD -> 48 kHz mono float -> make-up gain -> mode processing -> soft limiter + the only 16-bit
+/// conversion -> WriteFile. While capturing it logs the input (decoded, before gain) and output levels once per second.
+/// Create before <see cref="ConnectionManager.Start"/>.
 /// </summary>
 public sealed class MicPipeline
 {
@@ -34,6 +36,9 @@ public sealed class MicPipeline
     private const int MaxConsecutiveErrors = 8;
     private const int LevelIntervalMs = 100;
     private const float LevelDecay = 0.6f;
+    private const int LevelLogIntervalMs = 1000;
+    // Applied to the decoded signal before mode processing. 1.0 until it is set from the logged input levels.
+    private const float MakeUpGain = 1f;
 
     private static readonly byte[] StartMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x01, 0x82, 0x00, 0x00, 0x00, 0x04, 0x96, 0x00];
 
@@ -43,14 +48,18 @@ public sealed class MicPipeline
     private readonly Timer _timer;
 
     // Read-loop state (one session at a time; reset on detach after its read loop ended).
-    private readonly short[] _pcm = GC.AllocateArray<short>(PcmCapacity, pinned: true);
+    private readonly float[] _pcm = GC.AllocateArray<float>(PcmCapacity, pinned: true);
+    private readonly short[] _output = GC.AllocateArray<short>(PcmCapacity, pinned: true);
     private AacDecoder? _decoder;
     private VoiceProcessor? _voice;
     private bool _nativeFailed;
     private int _fill;
     private int _errors;
-    private int _peak;
+    private float _peak;
     private long _levelTick;
+    private LevelMeter _inputMeter;
+    private LevelMeter _outputMeter;
+    private long _levelLogTick;
     private long _lastDecoderFlushLog;
 
     // Shared state; written under _lock.
@@ -219,6 +228,9 @@ public sealed class MicPipeline
             _decoder?.Flush();
             _fill = 0;
             _errors = 0;
+            _inputMeter = default;
+            _outputMeter = default;
+            _levelLogTick = Environment.TickCount64;
         }
         if (_decoder is null && !TryCreateNative())
         {
@@ -304,6 +316,11 @@ public sealed class MicPipeline
         {
             return false;
         }
+        foreach (ref float sample in _pcm.AsSpan(_fill, samples))
+        {
+            _inputMeter.Add(sample);
+            sample *= MakeUpGain;
+        }
         _fill += samples;
         Emit(now);
         return true;
@@ -329,20 +346,28 @@ public sealed class MicPipeline
                 return;
             }
         }
-        ReadOnlySpan<short> output = _pcm.AsSpan(0, ready);
-        UpdateLevel(output, now);
-        _mic.Write(output);
+        float peak = _peak;
+        for (int i = 0; i < ready; i++)
+        {
+            short sample = SoftLimiter.ToPcm16(_pcm[i]);
+            _output[i] = sample;
+            float level = sample / 32768f;
+            _outputMeter.Add(level);
+            peak = MathF.Max(peak, MathF.Abs(level));
+        }
+        UpdateLevel(peak, now);
+        _mic.Write(_output.AsSpan(0, ready));
         _fill -= ready;
         _pcm.AsSpan(ready, _fill).CopyTo(_pcm);
+        if (now - _levelLogTick >= LevelLogIntervalMs)
+        {
+            _levelLogTick = now;
+            Log.Info("mic", $"level in {_inputMeter.Take()} | out {_outputMeter.Take()} | mode {mode}, gain {MakeUpGain:0.00}");
+        }
     }
 
-    private void UpdateLevel(ReadOnlySpan<short> output, long now)
+    private void UpdateLevel(float peak, long now)
     {
-        int peak = _peak;
-        foreach (short sample in output)
-        {
-            peak = Math.Max(peak, Math.Abs((int)sample));
-        }
         if (now - _levelTick < LevelIntervalMs)
         {
             _peak = peak;
@@ -350,7 +375,7 @@ public sealed class MicPipeline
         }
         _levelTick = now;
         _peak = 0;
-        Volatile.Write(ref _level, Math.Max(peak / 32768f, Volatile.Read(ref _level) * LevelDecay));
+        Volatile.Write(ref _level, MathF.Max(peak, Volatile.Read(ref _level) * LevelDecay));
     }
 
     private void BeginWaitLocked(long now, string reason)
@@ -395,4 +420,29 @@ public sealed class MicPipeline
     }
 
     private static bool IsReady(AapSession session) => session.State.Status == SessionStatus.Ready;
+
+    /// <summary>RMS and peak of the samples added since the last <see cref="Take"/>, in dBFS (full scale = 1).</summary>
+    private struct LevelMeter
+    {
+        private double _sum;
+        private float _peak;
+        private int _count;
+
+        public void Add(float sample)
+        {
+            _sum += sample * sample;
+            _peak = MathF.Max(_peak, MathF.Abs(sample));
+            _count++;
+        }
+
+        public string Take()
+        {
+            string text = _count == 0 ? "no samples" : $"rms {Dbfs(Math.Sqrt(_sum / _count)):0.0} dBFS, peak {Dbfs(_peak):0.0} dBFS";
+            this = default;
+            return text;
+        }
+
+        // Silence floors at -120 dBFS instead of -infinity.
+        private static double Dbfs(double value) => 20 * Math.Log10(Math.Max(value, 1e-6));
+    }
 }

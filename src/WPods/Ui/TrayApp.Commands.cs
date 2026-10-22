@@ -81,7 +81,8 @@ internal sealed partial class TrayApp
                 break;
             case "setToneVolume" when m.Value.ValueKind == JsonValueKind.Number:
             {
-                byte volume = (byte)Math.Clamp(Math.Round(m.Value.GetDouble()), 0, 100);
+                // The AirPods reject tone volumes below 15 % (confirmed live), so the range is 15..100.
+                byte volume = (byte)Math.Clamp(Math.Round(m.Value.GetDouble()), 15, 100);
                 RunCommand((s, ct) => s.SetToneVolumeAsync(volume, ct), Dirty.Settings);
                 break;
             }

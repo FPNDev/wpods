@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 namespace WPods.Audio;
 
 /// <summary>
-/// AirPods mic AAC-ELD decoder (FFmpeg "aac") plus the 64 -> 48 kHz mono s16 resampler. Not thread-safe: one
-/// caller (the session read loop). Constructor throws when FFmpeg is missing or rejects the stream config.
+/// AirPods mic AAC-ELD decoder (FFmpeg "aac", float planar output) plus the 64 -> 48 kHz resampler to mono float
+/// (-1..1 full scale, not clipped). Not thread-safe: one caller (the session read loop). Constructor throws when FFmpeg is missing or rejects the stream config.
 /// </summary>
 internal sealed unsafe partial class AacDecoder : IDisposable
 {
@@ -16,7 +16,7 @@ internal sealed unsafe partial class AacDecoder : IDisposable
     private const int PaddingSize = 64; // AV_INPUT_BUFFER_PADDING_SIZE
     private const int ErrorAgain = -11; // AVERROR(EAGAIN)
     private const int LogLevelError = 16;
-    private const int SampleFormatS16 = 1;
+    private const int SampleFormatFloat = 3; // AV_SAMPLE_FMT_FLT (packed; mono, so one plane)
     private const int OutputRate = 48_000;
     // The ASC declares 48 kHz, but the AirPods send 480-sample frames at 64 kHz (measured 133.3 AU/s), so the
     // decoded frames are resampled as 64 kHz audio.
@@ -87,7 +87,7 @@ internal sealed unsafe partial class AacDecoder : IDisposable
     /// Decodes one access unit (1..255 bytes) and appends the resampled samples to <paramref name="output"/>.
     /// Returns the sample count, or -1 when FFmpeg rejected the unit (the decoder stays usable).
     /// </summary>
-    public int Decode(ReadOnlySpan<byte> au, Span<short> output)
+    public int Decode(ReadOnlySpan<byte> au, Span<float> output)
     {
         au.CopyTo(new Span<byte>(_au, MaxAuLength));
         new Span<byte>(_au + au.Length, PaddingSize).Clear();
@@ -98,7 +98,7 @@ internal sealed unsafe partial class AacDecoder : IDisposable
             return -1;
         }
         int total = 0;
-        fixed (short* start = output)
+        fixed (float* start = output)
         {
             while (true)
             {
@@ -153,7 +153,7 @@ internal sealed unsafe partial class AacDecoder : IDisposable
         // Default native-order layout: nothing to uninit.
         av_channel_layout_default(mono, 1);
         void* resampler = null;
-        if (swr_alloc_set_opts2(&resampler, mono, SampleFormatS16, OutputRate, _frame + FrameChannelLayout, *(int*)(_frame + FrameFormat), StreamRate, 0, null) < 0)
+        if (swr_alloc_set_opts2(&resampler, mono, SampleFormatFloat, OutputRate, _frame + FrameChannelLayout, *(int*)(_frame + FrameFormat), StreamRate, 0, null) < 0)
         {
             return false;
         }
