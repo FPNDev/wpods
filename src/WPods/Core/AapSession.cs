@@ -28,9 +28,11 @@ public sealed class AapSession : IAsyncDisposable
     private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan KeysTimeout = TimeSpan.FromSeconds(3);
-    // Live (AirPods Pro 2): the full 0x09 settings report arrives within ~90 ms of the handshake reply and the
-    // re-report after the notification request within ~25 ms; no end marker exists. 1 s after the request covers both.
+    // Live (AirPods Pro 2): the full 0x09 settings report (~17 settings in ~90 ms, no end marker) arrives within
+    // ~90 ms of the handshake reply on some attaches, but 4-31 s later on others (log 2026-10-22). The initial
+    // report ends 1 s after the first 0x09 (never before 1 s after the notification request), or after the timeout.
     private static readonly TimeSpan InitialReportWindow = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan InitialReportTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan HeartRateFirstReadingTimeout = TimeSpan.FromSeconds(12);
     // After a listening-mode request, device reports of other modes (echoes of earlier requests) are ignored until
     // the device reports the requested mode or this passes (Round 17: ~1.5 s; observed resync after 200-300 ms).
@@ -49,6 +51,7 @@ public sealed class AapSession : IAsyncDisposable
     private readonly Lock _stateLock = new();
     private CancellationTokenSource _writeTimeout = new();
     private TaskCompletionSource? _firstPacket;
+    private TaskCompletionSource? _firstSetting;
     private TaskCompletionSource? _keysReply;
     private TaskCompletionSource? _heartRateReading;
     private CancellationTokenSource? _heartRateCts;
@@ -372,6 +375,11 @@ public sealed class AapSession : IAsyncDisposable
             _firstPacket = null;
             first.TrySetResult();
         }
+        if (_firstSetting is { } setting && Aap.IsSetting(packet))
+        {
+            _firstSetting = null;
+            setting.TrySetResult();
+        }
         DeviceChange change = Aap.TryParseKeys(packet, out ProximityKeys? keys) ? OnKeys(keys) : DeviceChange.None;
         lock (_stateLock)
         {
@@ -441,7 +449,8 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // Handshake -> (any reply) -> 100 ms -> feature flags -> notifications -> 1 s -> capabilities final -> proximity keys (one retry).
+    // Handshake -> (any reply) -> 100 ms -> feature flags -> notifications -> 1 s -> stem modes -> proximity keys
+    // (one retry). The initial report ends separately (FinishInitialReportAsync).
     private async Task InitializeAsync()
     {
         CancellationToken ct = _life.Token;
@@ -450,6 +459,8 @@ public sealed class AapSession : IAsyncDisposable
             Log.Info("aap", $"init {Mac.Format(Address)}: handshake");
             TaskCompletionSource first = NewSignal();
             _firstPacket = first;
+            TaskCompletionSource firstSetting = NewSignal();
+            _firstSetting = firstSetting;
             if (!await WriteAsync(Aap.Handshake, ct).ConfigureAwait(false)
                 || !await WaitAsync(first.Task, HandshakeTimeout, ct).ConfigureAwait(false))
             {
@@ -465,12 +476,8 @@ public sealed class AapSession : IAsyncDisposable
                 return;
             }
             SetStatus(SessionStatus.Ready);
+            _ = FinishInitialReportAsync(firstSetting.Task, ct);
             await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
-            lock (_stateLock)
-            {
-                Changed?.Invoke(State.FinishInitialReport() | DeviceChange.InitialReport);
-            }
-            SaveCapabilities();
             await WriteStemModesOnAttachAsync(ct).ConfigureAwait(false);
             for (int attempt = 0; attempt < 2; attempt++)
             {
@@ -488,6 +495,34 @@ public sealed class AapSession : IAsyncDisposable
         {
             // Session closed.
             Log.Info("aap", "init: stopped, session closed");
+        }
+    }
+
+    // Ends the initial report (capabilities final, "checking" off) InitialReportWindow after the device's first 0x09
+    // setting, counted from Ready when it came earlier; without one within InitialReportTimeout, ends it then.
+    private async Task FinishInitialReportAsync(Task firstSetting, CancellationToken ct)
+    {
+        try
+        {
+            long start = Environment.TickCount64;
+            if (await WaitAsync(firstSetting, InitialReportTimeout, ct).ConfigureAwait(false))
+            {
+                Log.Info("aap", $"init: first 0x09 setting {Environment.TickCount64 - start} ms after Ready");
+                await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                Log.Warn("aap", $"init: no 0x09 setting within {InitialReportTimeout.TotalSeconds:0} s; initial report ends without one");
+            }
+            lock (_stateLock)
+            {
+                Changed?.Invoke(State.FinishInitialReport() | DeviceChange.InitialReport);
+            }
+            SaveCapabilities();
+        }
+        catch (OperationCanceledException)
+        {
+            // Session closed.
         }
     }
 
@@ -568,7 +603,7 @@ public sealed class AapSession : IAsyncDisposable
     }
 
     // iOS writes 0x1A on every reconnect and the AirPods never report it on attach (research-r17 section 2), so
-    // the stored mask is written after the initial report. Adaptive is dropped for a pair without Adaptive.
+    // the stored mask is written 1 s after the notification request. Adaptive is dropped for a pair without Adaptive.
     private async Task WriteStemModesOnAttachAsync(CancellationToken ct)
     {
         DeviceCapabilities capabilities = State.Capabilities;

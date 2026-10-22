@@ -73,6 +73,10 @@ internal static class Aap
         (byte)periodUs, (byte)(periodUs >> 8), (byte)(periodUs >> 16), (byte)(periodUs >> 24),
     ];
 
+    /// <summary>True for a 0x09 control-setting packet.</summary>
+    public static bool IsSetting(ReadOnlySpan<byte> p) =>
+        p.Length >= 8 && BinaryPrimitives.ReadUInt32LittleEndian(p) == Header && p[4] == 0x09 && p[5] == 0x00;
+
     /// <summary>Applies one inbound packet to <paramref name="state"/>; returns what changed.</summary>
     public static DeviceChange Apply(ReadOnlySpan<byte> p, DeviceState state)
     {

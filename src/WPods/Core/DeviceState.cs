@@ -182,7 +182,7 @@ public sealed class DeviceState
     /// </summary>
     internal DeviceCapabilities Reported { get; private set; }
 
-    /// <summary>The 1 s window after attach in which the device reports its state has ended.</summary>
+    /// <summary>The initial report has ended: 1 s after the device's first 0x09 setting, or its timeout.</summary>
     public bool InitialReportDone { get; private set; }
 
     public string? Name { get; internal set; }
