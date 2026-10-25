@@ -8,3 +8,5 @@ EXPORTS
     wpn_media_resume_paused
     wpn_media_forget
     wpn_audio_is_default_output
+    wpn_fp_set_ftz_daz
+    wpn_fp_restore

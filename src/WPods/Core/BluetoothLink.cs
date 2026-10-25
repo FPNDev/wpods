@@ -137,45 +137,66 @@ internal sealed unsafe class BluetoothLink : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
     private static uint OnNotify(nint notify, nint context, int action, byte* data, uint size)
     {
-        var self = (BluetoothLink)GCHandle.FromIntPtr(context).Target!;
-        switch (action)
+        try
         {
-            case Native.CmNotifyActionDeviceCustomEvent:
-                if (Unsafe.ReadUnaligned<Guid>(data + Native.EventGuidOffset) == Native.HciEvent
-                    && Unsafe.ReadUnaligned<uint>(data + Native.EventDataSizeOffset) >= 10)
-                {
-                    // BTH_HCI_EVENT_INFO: address u64 @0, connectionType @8 (1 = ACL), connected @9.
-                    byte* hci = data + Native.EventDataOffset;
-                    if (hci[8] == 1)
+            var self = (BluetoothLink)GCHandle.FromIntPtr(context).Target!;
+            switch (action)
+            {
+                case Native.CmNotifyActionDeviceCustomEvent:
+                    if (Unsafe.ReadUnaligned<Guid>(data + Native.EventGuidOffset) == Native.HciEvent
+                        && Unsafe.ReadUnaligned<uint>(data + Native.EventDataSizeOffset) >= 10)
                     {
-                        self.OnAcl(Unsafe.ReadUnaligned<ulong>(hci), hci[9] != 0);
+                        // BTH_HCI_EVENT_INFO: address u64 @0, connectionType @8 (1 = ACL), connected @9.
+                        byte* hci = data + Native.EventDataOffset;
+                        if (hci[8] == 1)
+                        {
+                            self.OnAcl(Unsafe.ReadUnaligned<ulong>(hci), hci[9] != 0);
+                        }
                     }
-                }
-                break;
-            case Native.CmNotifyActionInterfaceArrival or Native.CmNotifyActionInterfaceRemoval:
-                bool radio = Unsafe.ReadUnaligned<Guid>(data + Native.EventGuidOffset) == Native.RadioInterface;
-                string path = new((char*)(data + Native.SymbolicLinkOffset));
-                bool arrival = action == Native.CmNotifyActionInterfaceArrival;
-                // Device queries and registrations are blocking: keep them off the notification thread.
-                if (radio && arrival)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => self.AddRadio(path));
-                }
-                else if (!radio && arrival)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => self.AddDevice(path, raiseEvents: true));
-                }
-                else if (!radio)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => self.RemoveDevice(path));
-                }
-                break;
-            case Native.CmNotifyActionDeviceRemoveComplete:
-                ThreadPool.QueueUserWorkItem(_ => self.RemoveRadio(notify));
-                break;
+                    break;
+                case Native.CmNotifyActionInterfaceArrival or Native.CmNotifyActionInterfaceRemoval:
+                    bool radio = Unsafe.ReadUnaligned<Guid>(data + Native.EventGuidOffset) == Native.RadioInterface;
+                    string path = new((char*)(data + Native.SymbolicLinkOffset));
+                    bool arrival = action == Native.CmNotifyActionInterfaceArrival;
+                    // Device queries and registrations are blocking: keep them off the notification thread.
+                    if (radio && arrival)
+                    {
+                        QueueWork(() => self.AddRadio(path));
+                    }
+                    else if (!radio && arrival)
+                    {
+                        QueueWork(() => self.AddDevice(path, raiseEvents: true));
+                    }
+                    else if (!radio)
+                    {
+                        QueueWork(() => self.RemoveDevice(path));
+                    }
+                    break;
+                case Native.CmNotifyActionDeviceRemoveComplete:
+                    QueueWork(() => self.RemoveRadio(notify));
+                    break;
+            }
+        }
+        catch (Exception e)
+        {
+            // An exception escaping an unmanaged callback ends the process unlogged.
+            Log.Error("link", "device notification failed", e);
         }
         return 0;
     }
+
+    // An unhandled exception in a thread-pool work item ends the process.
+    private static void QueueWork(Action work) => ThreadPool.QueueUserWorkItem(_ =>
+    {
+        try
+        {
+            work();
+        }
+        catch (Exception e)
+        {
+            Log.Error("link", "device notification work failed", e);
+        }
+    });
 
     private void OnAcl(ulong address, bool connected)
     {

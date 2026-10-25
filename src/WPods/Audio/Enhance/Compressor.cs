@@ -6,6 +6,10 @@ namespace WPods.Audio.Enhance;
 /// </summary>
 internal sealed class Compressor : IMicStage
 {
+    // dB of a power from its log2 (10 * log10(2)); log2 of a gain from its dB (log2(10) / 20).
+    private const float PowerDbPerLog2 = 3.01029996f;
+    private const float Log2PerDb = 0.166096404f;
+
     private readonly float _thresholdDb;
     private readonly float _slope;
     private readonly float _kneeDb;
@@ -14,6 +18,8 @@ internal sealed class Compressor : IMicStage
     private readonly float _detect = Level.Coefficient(10f);
     private readonly float _attack;
     private readonly float _release;
+    // Detector power at the start of the knee; at or below it the target gain is 0 dB.
+    private readonly float _kneeStartPower;
     private float _power;
     private float _gainDb;
 
@@ -26,6 +32,7 @@ internal sealed class Compressor : IMicStage
         _mix = mix;
         _attack = Level.Coefficient(attackMs);
         _release = Level.Coefficient(releaseMs);
+        _kneeStartPower = MathF.Pow(10f, (thresholdDb - kneeDb / 2f) / 10f);
     }
 
     public void Process(Span<float> frame)
@@ -40,10 +47,10 @@ internal sealed class Compressor : IMicStage
     public float Process(float x)
     {
         _power = x * x + _detect * (_power - x * x);
-        float targetDb = GainDb(Level.PowerToDb(_power));
+        float targetDb = _power <= _kneeStartPower ? 0f : GainDb(PowerDbPerLog2 * MathF.Log2(_power + 1e-12f));
         float coefficient = targetDb < _gainDb ? _attack : _release;
         _gainDb = targetDb + coefficient * (_gainDb - targetDb);
-        float wet = x * Level.DbToGain(_gainDb) * _makeUp;
+        float wet = x * float.Exp2(_gainDb * Log2PerDb) * _makeUp;
         return x + _mix * (wet - x);
     }
 

@@ -64,10 +64,11 @@ internal static class Proximity
     }
 
     /// <summary>
-    /// Exact levels from the encrypted payload when they agree with the clear nibbles (x10, within 10 %), else the
-    /// nibbles. A decrypted level that is neither valid nor 0xFF (absent) keeps the matching value of <paramref name="previous"/>.
+    /// Exact levels from the encrypted payload when they confirm the clear nibbles (x10, within 10 %): no level
+    /// disagrees and at least one agrees. Else null (tampered or not from this pair). A decrypted level that is neither
+    /// valid nor 0xFF (absent) keeps the matching value of <paramref name="previous"/>.
     /// </summary>
-    public static PodBatteries ReadBatteries(ReadOnlySpan<byte> data, Aes encKey, bool single, in PodBatteries previous)
+    public static PodBatteries? ReadBatteries(ReadOnlySpan<byte> data, Aes encKey, bool single, in PodBatteries previous)
     {
         bool leftFirst = (data[5] & 0x20) != 0;
         int low = data[6] & 0x0F;
@@ -88,7 +89,7 @@ internal static class Proximity
                     break;
                 }
             }
-            return new PodBatteries(default, default, default, Agree(clearHeadphone, headphone) == true ? headphone : clearHeadphone);
+            return Agree(clearHeadphone, headphone) == true ? new PodBatteries(default, default, default, headphone) : null;
         }
 
         Battery clearLeft = FromNibble(leftFirst ? low : high, (flags & (leftFirst ? 1 : 2)) != 0);
@@ -101,7 +102,7 @@ internal static class Proximity
         bool? r = Agree(clearRight, right);
         bool? c = Agree(clearCase, @case);
         bool decrypted = l != false && r != false && c != false && (l == true || r == true || c == true);
-        return decrypted ? new PodBatteries(left, right, @case, default) : new PodBatteries(clearLeft, clearRight, clearCase, default);
+        return decrypted ?new PodBatteries(left, right, @case, default) : null;
     }
 
     private static Battery FromNibble(int nibble, bool charging) =>

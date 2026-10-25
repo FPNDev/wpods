@@ -22,6 +22,8 @@ const ACTIONS: Record<ToastId, ToastAction | null> = {
   handsFreeFailed: null,
   disconnectFailed: null,
   micModelFailed: null,
+  micModeStopped: null,
+  settingsReset: null,
 };
 
 export const createToast = (onAction: (action: ToastAction) => void): Toast => {

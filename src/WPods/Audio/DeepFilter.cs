@@ -15,15 +15,23 @@ internal sealed unsafe partial class DeepFilter : IDisposable
     // >= 100 dB = no limit in libDF (full suppression).
     private const float AttenuationLimitDb = 100f;
 
+    // Length of models/DeepFilterNet3_onnx.tar.gz in the libDF v0.5.6 source tarball (native/build-deepfilter.ps1).
+    // No SHA-256 is pinned for the model alone (only for the whole tarball), so the length is checked instead.
+    private const long ModelLength = 7983136;
+
     private void* _state;
 
     public DeepFilter()
     {
         string path = Path.Combine(AppContext.BaseDirectory, ModelFile);
-        // df_create aborts the process (Rust panic) when the model cannot be loaded, so a missing file is caught here.
-        if (!File.Exists(path))
+        // df_create aborts the process (Rust panic) when the model cannot be loaded, so a missing (FileNotFoundException),
+        // unreadable (IOException, UnauthorizedAccessException) or truncated file is caught here.
+        using (FileStream model = File.OpenRead(path))
         {
-            throw new InvalidOperationException($"DeepFilterNet model not found: {path}");
+            if (model.Length != ModelLength)
+            {
+                throw new InvalidDataException($"DeepFilterNet model is {model.Length} bytes, expected {ModelLength}: {path}");
+            }
         }
         _state = df_create(path, AttenuationLimitDb);
         if (_state is null)

@@ -75,10 +75,11 @@ public sealed unsafe partial class ConversationDucker : IDisposable
     /// <summary>Restores the volume synchronously (call on exit).</summary>
     public void Dispose()
     {
-        _quiet.Dispose();
         Volatile.Write(ref _pending, RestoreRequest);
         // Waited on a thread-pool thread: the COM objects were created in the MTA.
         Task.Run(Run).Wait();
+        // Last: the restore ends the episode through _quiet. A later OnQuiet only queues a Run that finds nothing active.
+        _quiet.Dispose();
     }
 
     private void OnAttached(AapSession session)

@@ -8,6 +8,7 @@
 #include <ks.h>
 #include <mmsystem.h>
 #include <ksmedia.h>
+#include <ntstrsafe.h>
 #include "..\Public.h"
 
 namespace {
@@ -19,11 +20,15 @@ constexpr ULONG RingSamples = 8192; // power of two
 constexpr ULONG MaxBacklogSamples = 4096;
 constexpr size_t MaxWriteBytes = 65536;
 constexpr ULONG MaxPackets = 2;
+// RT packet size comes from the client: cap it at 1 s of audio.
+constexpr ULONG MaxPacketBytes = SampleRate * sizeof(SHORT);
 
 static_assert((RingSamples & (RingSamples - 1)) == 0, "ring size must be a power of two");
 static_assert(MaxBacklogSamples * 2 <= RingSamples, "a write must never overwrite unread samples");
 
+// The app's control device is separate from the audio device so only it carries this ACL.
 DECLARE_CONST_UNICODE_STRING(ControlLink, L"\\DosDevices\\Global\\NTA2DPVM");
+DECLARE_CONST_UNICODE_STRING(ControlSddl, L"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)");
 DECLARE_CONST_UNICODE_STRING(CircuitName, L"Nta2dpvm0"); // INF interface reference string
 
 // {5c57b105-5ecf-4e87-a448-b83f20739d61}
@@ -50,17 +55,25 @@ KSDATAFORMAT_WAVEFORMATEXTENSIBLE Pcm48000Mono = {
 };
 
 LONGLONG QpcFrequency;
+LONG ControlCount; // numbers control device names
 
 struct DEVICE_CONTEXT {
     KSPIN_LOCK Lock; // guards the ring, RunningStreams and every stream's position fields
     ULONG ReadPos;   // free-running sample counters
     ULONG WritePos;
     ULONG RunningStreams;
-    WDFQUEUE WaitQueue;
+    WDFDEVICE Control;  // null when another instance owns the control device
+    WDFQUEUE WaitQueue; // on Control
     ACXCIRCUIT Circuit;
     SHORT Ring[RingSamples];
 };
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, GetDeviceContext)
+
+struct CONTROL_CONTEXT {
+    KSPIN_LOCK Lock;        // held while Device is used, so the audio device's cleanup waits for it
+    DEVICE_CONTEXT* Device; // null once the audio device is gone
+};
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(CONTROL_CONTEXT, GetControlContext)
 
 struct STREAM_CONTEXT {
     DEVICE_CONTEXT* Device;
@@ -153,6 +166,9 @@ void CompleteWait(WDFREQUEST Request, ULONG State)
 
 void CompleteWaiters(DEVICE_CONTEXT* D, ULONG State)
 {
+    if (D->WaitQueue == nullptr) {
+        return;
+    }
     WDFREQUEST request;
     while (NT_SUCCESS(WdfIoQueueRetrieveNextRequest(D->WaitQueue, &request))) {
         CompleteWait(request, State);
@@ -197,6 +213,7 @@ void FreePackets(PACX_RTPACKET Packets, ULONG Count)
 extern "C" DRIVER_INITIALIZE DriverEntry;
 EVT_WDF_DRIVER_DEVICE_ADD EvtDeviceAdd;
 EVT_WDF_DEVICE_PREPARE_HARDWARE EvtDevicePrepareHardware;
+EVT_WDF_OBJECT_CONTEXT_CLEANUP EvtDeviceCleanup;
 EVT_WDF_FILE_CLEANUP EvtFileCleanup;
 EVT_WDF_IO_QUEUE_IO_WRITE EvtIoWrite;
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL EvtIoDeviceControl;
@@ -307,6 +324,75 @@ static NTSTATUS CreateCaptureCircuit(WDFDEVICE Device, ACXCIRCUIT* Circuit)
     return AcxCircuitAddPins(circuit, pins, RTL_NUMBER_OF(pins));
 }
 
+// Serves \\.\NTA2DPVM for the app. Lives until the audio device's cleanup deletes it.
+static NTSTATUS CreateControlDevice(WDFDRIVER Driver, WDFDEVICE Device)
+{
+    PAGED_CODE();
+
+    PWDFDEVICE_INIT init = WdfControlDeviceInitAllocate(Driver, &ControlSddl);
+    if (init == nullptr) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    WdfDeviceInitSetIoType(init, WdfDeviceIoBuffered);
+    // Unique per creation: a deleted control device lingers while the app still holds a handle.
+    WCHAR nameBuffer[32];
+    UNICODE_STRING name;
+    RtlInitEmptyUnicodeString(&name, nameBuffer, sizeof(nameBuffer));
+    NTSTATUS status = RtlUnicodeStringPrintf(&name, L"\\Device\\NTA2DPVM%ld", InterlockedIncrement(&ControlCount));
+    if (NT_SUCCESS(status)) {
+        status = WdfDeviceInitAssignName(init, &name);
+    }
+    if (!NT_SUCCESS(status)) {
+        WdfDeviceInitFree(init);
+        return status;
+    }
+
+    WDF_FILEOBJECT_CONFIG fileConfig;
+    WDF_FILEOBJECT_CONFIG_INIT(&fileConfig, WDF_NO_EVENT_CALLBACK, WDF_NO_EVENT_CALLBACK, EvtFileCleanup);
+    WdfDeviceInitSetFileObjectConfig(init, &fileConfig, WDF_NO_OBJECT_ATTRIBUTES);
+
+    WDF_OBJECT_ATTRIBUTES attributes;
+    WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, CONTROL_CONTEXT);
+    WDFDEVICE control;
+    status = WdfDeviceCreate(&init, &attributes, &control);
+    if (!NT_SUCCESS(status)) {
+        WdfDeviceInitFree(init);
+        return status;
+    }
+    CONTROL_CONTEXT* c = GetControlContext(control);
+    KeInitializeSpinLock(&c->Lock);
+    DEVICE_CONTEXT* d = GetDeviceContext(Device);
+    c->Device = d;
+
+    // Control device queues cannot be power-managed.
+    WDF_IO_QUEUE_CONFIG queueConfig;
+    WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchParallel);
+    queueConfig.PowerManaged = WdfFalse;
+    queueConfig.EvtIoWrite = EvtIoWrite;
+    queueConfig.EvtIoDeviceControl = EvtIoDeviceControl;
+    status = WdfIoQueueCreate(control, &queueConfig, WDF_NO_OBJECT_ATTRIBUTES, WDF_NO_HANDLE);
+    WDFQUEUE waitQueue = nullptr;
+    if (NT_SUCCESS(status)) {
+        WDF_IO_QUEUE_CONFIG_INIT(&queueConfig, WdfIoQueueDispatchManual);
+        queueConfig.PowerManaged = WdfFalse;
+        status = WdfIoQueueCreate(control, &queueConfig, WDF_NO_OBJECT_ATTRIBUTES, &waitQueue);
+    }
+    // Not WdfDeviceCreateSymbolicLink: WDF removes that link only once the last handle closes,
+    // which would block the next instance's link. EvtDeviceCleanup removes this one.
+    if (NT_SUCCESS(status)) {
+        status = IoCreateSymbolicLink(const_cast<PUNICODE_STRING>(&ControlLink), &name);
+    }
+    if (!NT_SUCCESS(status)) {
+        WdfObjectDelete(control);
+        // Root-enumerated, so normally one instance: any further instance runs without a control device.
+        return status == STATUS_OBJECT_NAME_COLLISION ? STATUS_SUCCESS : status;
+    }
+    d->WaitQueue = waitQueue;
+    d->Control = control;
+    WdfControlFinishInitializing(control);
+    return STATUS_SUCCESS;
+}
+
 _Use_decl_annotations_
 extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
@@ -330,27 +416,21 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING Reg
 _Use_decl_annotations_
 NTSTATUS EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
 {
-    UNREFERENCED_PARAMETER(Driver);
-
     ACX_DEVICEINIT_CONFIG acxInit;
     ACX_DEVICEINIT_CONFIG_INIT(&acxInit);
     NTSTATUS status = AcxDeviceInitInitialize(DeviceInit, &acxInit);
     if (!NT_SUCCESS(status)) {
         return status;
     }
-    WdfDeviceInitSetIoType(DeviceInit, WdfDeviceIoBuffered);
 
     WDF_PNPPOWER_EVENT_CALLBACKS pnpCallbacks;
     WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpCallbacks);
     pnpCallbacks.EvtDevicePrepareHardware = EvtDevicePrepareHardware;
     WdfDeviceInitSetPnpPowerEventCallbacks(DeviceInit, &pnpCallbacks);
 
-    WDF_FILEOBJECT_CONFIG fileConfig;
-    WDF_FILEOBJECT_CONFIG_INIT(&fileConfig, WDF_NO_EVENT_CALLBACK, WDF_NO_EVENT_CALLBACK, EvtFileCleanup);
-    WdfDeviceInitSetFileObjectConfig(DeviceInit, &fileConfig, WDF_NO_OBJECT_ATTRIBUTES);
-
     WDF_OBJECT_ATTRIBUTES attributes;
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, DEVICE_CONTEXT);
+    attributes.EvtCleanupCallback = EvtDeviceCleanup;
     WDFDEVICE device;
     status = WdfDeviceCreate(&DeviceInit, &attributes, &device);
     if (!NT_SUCCESS(status)) {
@@ -366,23 +446,28 @@ NTSTATUS EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
         return status;
     }
 
-    status = WdfDeviceCreateSymbolicLink(device, &ControlLink);
-    if (!NT_SUCCESS(status)) {
-        return status;
-    }
+    return CreateControlDevice(Driver, device);
+}
 
-    WDF_IO_QUEUE_CONFIG queueConfig;
-    WDF_IO_QUEUE_CONFIG_INIT_DEFAULT_QUEUE(&queueConfig, WdfIoQueueDispatchParallel);
-    queueConfig.EvtIoWrite = EvtIoWrite;
-    queueConfig.EvtIoDeviceControl = EvtIoDeviceControl;
-    status = WdfIoQueueCreate(device, &queueConfig, WDF_NO_OBJECT_ATTRIBUTES, WDF_NO_HANDLE);
-    if (!NT_SUCCESS(status)) {
-        return status;
-    }
+// Detaches and deletes the control device. Runs at PASSIVE_LEVEL after the streams, its children, are gone.
+_Use_decl_annotations_
+VOID EvtDeviceCleanup(WDFOBJECT Object)
+{
+    PAGED_CODE();
 
-    WDF_IO_QUEUE_CONFIG_INIT(&queueConfig, WdfIoQueueDispatchManual);
-    queueConfig.PowerManaged = WdfFalse;
-    return WdfIoQueueCreate(device, &queueConfig, WDF_NO_OBJECT_ATTRIBUTES, &d->WaitQueue);
+    DEVICE_CONTEXT* d = GetDeviceContext(Object);
+    if (d->Control == nullptr) {
+        return;
+    }
+    CONTROL_CONTEXT* c = GetControlContext(d->Control);
+    KIRQL irql;
+    // Waits out any handler using d; later ones see null and fail.
+    KeAcquireSpinLock(&c->Lock, &irql);
+    c->Device = nullptr;
+    KeReleaseSpinLock(&c->Lock, irql);
+    (VOID)IoDeleteSymbolicLink(const_cast<PUNICODE_STRING>(&ControlLink));
+    WdfIoQueuePurgeSynchronously(d->WaitQueue);
+    WdfObjectDelete(d->Control);
 }
 
 // The static circuit is created and added on the first start and stays for the device's lifetime.
@@ -410,9 +495,20 @@ NTSTATUS EvtDevicePrepareHardware(WDFDEVICE Device, WDFCMRESLIST ResourcesRaw, W
 _Use_decl_annotations_
 VOID EvtFileCleanup(WDFFILEOBJECT FileObject)
 {
-    DEVICE_CONTEXT* d = GetDeviceContext(WdfFileObjectGetDevice(FileObject));
-    WDFREQUEST request;
-    while (NT_SUCCESS(WdfIoQueueRetrieveRequestByFileObject(d->WaitQueue, FileObject, &request))) {
+    CONTROL_CONTEXT* c = GetControlContext(WdfFileObjectGetDevice(FileObject));
+    for (;;) {
+        // Once detached, the audio device's cleanup has purged the wait queue.
+        NTSTATUS status = STATUS_DEVICE_NOT_CONNECTED;
+        WDFREQUEST request = nullptr;
+        KIRQL irql;
+        KeAcquireSpinLock(&c->Lock, &irql);
+        if (c->Device != nullptr) {
+            status = WdfIoQueueRetrieveRequestByFileObject(c->Device->WaitQueue, FileObject, &request);
+        }
+        KeReleaseSpinLock(&c->Lock, irql);
+        if (!NT_SUCCESS(status)) {
+            break;
+        }
         WdfRequestComplete(request, STATUS_CANCELLED);
     }
 }
@@ -425,8 +521,15 @@ VOID EvtIoWrite(WDFQUEUE Queue, WDFREQUEST Request, size_t Length)
         PVOID buffer;
         status = WdfRequestRetrieveInputBuffer(Request, Length, &buffer, nullptr);
         if (NT_SUCCESS(status)) {
-            WriteRing(GetDeviceContext(WdfIoQueueGetDevice(Queue)), static_cast<const SHORT*>(buffer),
-                static_cast<ULONG>(Length / sizeof(SHORT)));
+            CONTROL_CONTEXT* c = GetControlContext(WdfIoQueueGetDevice(Queue));
+            KIRQL irql;
+            KeAcquireSpinLock(&c->Lock, &irql);
+            if (c->Device != nullptr) {
+                WriteRing(c->Device, static_cast<const SHORT*>(buffer), static_cast<ULONG>(Length / sizeof(SHORT)));
+            } else {
+                status = STATUS_DEVICE_NOT_CONNECTED;
+            }
+            KeReleaseSpinLock(&c->Lock, irql);
         }
     }
     WdfRequestCompleteWithInformation(Request, status, NT_SUCCESS(status) ? Length : 0);
@@ -455,16 +558,24 @@ VOID EvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputBufferL
         return;
     }
 
-    DEVICE_CONTEXT* d = GetDeviceContext(WdfIoQueueGetDevice(Queue));
+    CONTROL_CONTEXT* c = GetControlContext(WdfIoQueueGetDevice(Queue));
     ULONG lastKnown = *static_cast<PULONG>(in);
+    ULONG state = lastKnown;
     KIRQL irql;
-    // Checked and queued under the lock that guards state changes, so no change is missed.
-    KeAcquireSpinLock(&d->Lock, &irql);
-    ULONG state = d->RunningStreams != 0 ? 1 : 0;
-    if (state == lastKnown) {
-        status = WdfRequestForwardToIoQueue(Request, d->WaitQueue);
+    KeAcquireSpinLock(&c->Lock, &irql);
+    DEVICE_CONTEXT* d = c->Device;
+    if (d == nullptr) {
+        status = STATUS_DEVICE_NOT_CONNECTED;
+    } else {
+        // Checked and queued under the lock that guards state changes, so no change is missed.
+        KeAcquireSpinLockAtDpcLevel(&d->Lock);
+        state = d->RunningStreams != 0 ? 1 : 0;
+        if (state == lastKnown) {
+            status = WdfRequestForwardToIoQueue(Request, d->WaitQueue);
+        }
+        KeReleaseSpinLockFromDpcLevel(&d->Lock);
     }
-    KeReleaseSpinLock(&d->Lock, irql);
+    KeReleaseSpinLock(&c->Lock, irql);
 
     if (state != lastKnown) {
         CompleteWait(Request, state);
@@ -620,7 +731,8 @@ NTSTATUS EvtStreamGetHwLatency(ACXSTREAM Stream, PULONG FifoSize, PULONG Delay)
 _Use_decl_annotations_
 NTSTATUS EvtStreamAllocateRtPackets(ACXSTREAM Stream, ULONG PacketCount, ULONG PacketSize, PACX_RTPACKET* Packets)
 {
-    if (PacketCount == 0 || PacketCount > MaxPackets || PacketSize == 0 || PacketSize % sizeof(SHORT) != 0) {
+    if (PacketCount == 0 || PacketCount > MaxPackets || PacketSize == 0 || PacketSize > MaxPacketBytes ||
+        PacketSize % sizeof(SHORT) != 0) {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -631,7 +743,7 @@ NTSTATUS EvtStreamAllocateRtPackets(ACXSTREAM Stream, ULONG PacketCount, ULONG P
     }
 
     STREAM_CONTEXT* s = GetStreamContext(Stream);
-    ULONG allocationSize = ROUND_TO_PAGES(PacketSize);
+    SIZE_T allocationSize = ROUND_TO_PAGES(static_cast<SIZE_T>(PacketSize));
     PHYSICAL_ADDRESS low = {};
     PHYSICAL_ADDRESS high;
     high.QuadPart = MAXLONGLONG;
@@ -644,14 +756,14 @@ NTSTATUS EvtStreamAllocateRtPackets(ACXSTREAM Stream, ULONG PacketCount, ULONG P
             FreePackets(packets, i);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
-        WDF_MEMORY_DESCRIPTOR_INIT_MDL(&packets[i].RtPacketBuffer, mdl, allocationSize);
+        WDF_MEMORY_DESCRIPTOR_INIT_MDL(&packets[i].RtPacketBuffer, mdl, static_cast<ULONG>(allocationSize));
         auto va = static_cast<PUCHAR>(MmGetSystemAddressForMdlSafe(mdl, NormalPagePriority | MdlMappingNoExecute));
         if (va == nullptr) {
             FreePackets(packets, i + 1);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
         // With two packets, packet 0 ends at its page boundary so both are contiguous in the client mapping.
-        packets[i].RtPacketOffset = (PacketCount == 2 && i == 0) ? allocationSize - PacketSize : 0;
+        packets[i].RtPacketOffset = (PacketCount == 2 && i == 0) ? static_cast<ULONG>(allocationSize) - PacketSize : 0;
         packets[i].RtPacketSize = PacketSize;
         s->Packet[i] = reinterpret_cast<PSHORT>(va + packets[i].RtPacketOffset);
     }

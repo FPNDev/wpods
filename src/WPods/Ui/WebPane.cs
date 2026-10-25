@@ -14,13 +14,13 @@ internal sealed class WebPane : IDisposable
     private const string HostName = "app.wpods";
 
     private readonly Action<WebPane, PageMessage> _onMessage;
-    private readonly Action<WebPane> _onFailed;
+    private readonly Action<WebPane, CoreWebView2ProcessFailedKind> _onFailed;
     private CoreWebView2Controller? _controller;
     private Rectangle _bounds;
     private bool _visible = true;
     private bool _disposed;
 
-    public WebPane(Action<WebPane, PageMessage> onMessage, Action<WebPane> onFailed)
+    public WebPane(Action<WebPane, PageMessage> onMessage, Action<WebPane, CoreWebView2ProcessFailedKind> onFailed)
     {
         _onMessage = onMessage;
         _onFailed = onFailed;
@@ -76,7 +76,9 @@ internal sealed class WebPane : IDisposable
             Log.Warn("ui", $"WebView2 {page} process failed: {e.ProcessFailedKind} {e.Reason}");
             if (e.ProcessFailedKind is CoreWebView2ProcessFailedKind.BrowserProcessExited or CoreWebView2ProcessFailedKind.RenderProcessExited)
             {
-                _onFailed(this);
+                // Before the host's posted rebuild: nothing queued earlier may post to the dead webview.
+                Ready = false;
+                _onFailed(this, e.ProcessFailedKind);
             }
         };
         core.Navigate($"https://{HostName}/{page}");

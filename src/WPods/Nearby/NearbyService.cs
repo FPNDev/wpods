@@ -53,6 +53,9 @@ public sealed class NearbyService : IDisposable
     // Under _lock: valid proximity adverts that resolve to no paired AirPods, logged as one count per 10 s.
     private int _misses;
     private long _missWindowStart;
+    // Under _lock: adverts of a paired AirPods dropped because the encrypted block does not confirm them, same logging.
+    private int _drops;
+    private long _dropWindowStart;
 
     public NearbyService(ConnectionManager connections)
     {
@@ -117,6 +120,11 @@ public sealed class NearbyService : IDisposable
                 return;
             }
             pair.Link = link;
+            // SetLinkUp completes the wait only when the link comes up; a Retry after a failed attach finds it up already.
+            if (pair.LinkUp)
+            {
+                link.TrySetResult();
+            }
             pair.Offer = offer with { State = OfferState.Connecting };
             Log.Info("nearby", $"connect {Mac.Format(address)}: offer {offer.State} -> Connecting, linkUp={pair.LinkUp}");
             Publish();
@@ -149,6 +157,11 @@ public sealed class NearbyService : IDisposable
         {
             // Cancelled or dismissed; the offer was already updated.
             Log.Info("nearby", $"connect {Mac.Format(address)}: link wait cancelled");
+        }
+        catch (Exception e)
+        {
+            // Anything else (e.g. detaching the old session) fails the connect; the offer must not stay Connecting.
+            Log.Error("nearby", $"connect {Mac.Format(address)} failed", e);
         }
         bool changed;
         lock (_lock)
@@ -285,9 +298,17 @@ public sealed class NearbyService : IDisposable
     {
         // Windows reports a device it stopped hearing (~60 s after its last advert) with RSSI -127 and that advert's old
         // payload: not an advert.
-        if (rssi != LostRssi && GCHandle.FromIntPtr(context).Target is NearbyService self)
+        try
         {
-            self.HandleAdvert(address, addressType, new ReadOnlySpan<byte>(data, (int)length));
+            if (rssi != LostRssi && GCHandle.FromIntPtr(context).Target is NearbyService self)
+            {
+                self.HandleAdvert(address, addressType, new ReadOnlySpan<byte>(data, (int)length));
+            }
+        }
+        catch (Exception e)
+        {
+            // An exception escaping an unmanaged callback ends the process unlogged.
+            Log.Error("nearby", "advert handler failed", e);
         }
     }
 
@@ -342,10 +363,18 @@ public sealed class NearbyService : IDisposable
                 CountMiss();
                 return;
             }
+            // The resolved address never expires and bytes 5-8 are clear: an advert counts only when its encrypted
+            // levels confirm the clear ones, so a captured advert with flipped bits does nothing.
+            AirPodsModel model = pair.Offer?.Model ?? Models.FromProximityId(Proximity.ModelId(data)) ?? Models.FromModelNumber(pair.ModelNumber) ?? Models.Unknown;
+            if (Proximity.ReadBatteries(data, pair.EncCipher, model.SingleBattery, pair.Offer?.Batteries ?? default) is not { } batteries)
+            {
+                CountDrop();
+                return;
+            }
             bool wasNearby = pair.Nearby;
             bool wasOpen = pair.LidOpen;
             bool wasBudInCase = pair.BudInCase;
-            changed = Update(pair, data);
+            changed = Update(pair, data, model, batteries);
             nearbyChanged = pair.Nearby != wasNearby;
             if (((!wasOpen && pair.LidOpen) || (wasBudInCase && !pair.BudInCase)) && Models.FromModelNumber(pair.ModelNumber)?.SingleBattery != true)
             {
@@ -385,6 +414,21 @@ public sealed class NearbyService : IDisposable
         }
     }
 
+    // Under _lock.
+    private void CountDrop()
+    {
+        long now = Environment.TickCount64;
+        if (_drops++ == 0)
+        {
+            _dropWindowStart = now;
+        }
+        if (now - _dropWindowStart >= MissLogIntervalMs)
+        {
+            Log.Info("nearby", $"{_drops} proximity adverts dropped (encrypted levels do not confirm the clear ones) in the last {now - _dropWindowStart} ms");
+            _drops = 0;
+        }
+    }
+
     private Pair? Resolve(ulong address)
     {
         foreach (Pair pair in _pairs.Values)
@@ -397,8 +441,8 @@ public sealed class NearbyService : IDisposable
         return null;
     }
 
-    // Under _lock.
-    private bool Update(Pair pair, ReadOnlySpan<byte> data)
+    // Under _lock. model and batteries come from HandleAdvert's check of the advert.
+    private bool Update(Pair pair, ReadOnlySpan<byte> data, AirPodsModel model, PodBatteries batteries)
     {
         pair.LastSeen = Environment.TickCount64;
         bool arrived = !pair.Present;
@@ -435,7 +479,6 @@ public sealed class NearbyService : IDisposable
             {
                 return false;
             }
-            PodBatteries batteries = Proximity.ReadBatteries(data, pair.EncCipher, single, offer.Batteries);
             if (batteries == offer.Batteries)
             {
                 return false;
@@ -447,14 +490,12 @@ public sealed class NearbyService : IDisposable
         {
             return false;
         }
-        AirPodsModel model = Models.FromProximityId(Proximity.ModelId(data)) ?? Models.FromModelNumber(pair.ModelNumber) ?? Models.Unknown;
-        bool singleBattery = model.SingleBattery;
         // AirPods Max have no lid or case signal: offered on arrival (after 45 s unseen). Others: lid opening with a bud in the case.
-        if (singleBattery ? !arrived : (!pair.LidOpen || wasOpen || !Proximity.IsBudInCase(data)))
+        if (model.SingleBattery ? !arrived : (!pair.LidOpen || wasOpen || !Proximity.IsBudInCase(data)))
         {
             return false;
         }
-        pair.Offer = new NearbyOffer(pair.Address, pair.Name, model, Proximity.ReadBatteries(data, pair.EncCipher, singleBattery, default), OfferState.Offer);
+        pair.Offer = new NearbyOffer(pair.Address, pair.Name, model, batteries, OfferState.Offer);
         Log.Info("nearby", $"offer {Mac.Format(pair.Address)} created ({model.Name})");
         return true;
     }

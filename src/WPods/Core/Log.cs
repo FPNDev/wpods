@@ -6,8 +6,9 @@ namespace WPods.Core;
 
 /// <summary>
 /// Always-on diagnostic log: %LOCALAPPDATA%\WPods\logs\wpods.log, one line per entry
-/// ("yyyy-MM-dd HH:mm:ss.fff [tid] LEVEL category: message", local time, UTF-8). Callers only enqueue (lock-free);
-/// a background thread writes every 500 ms. Above 2 MB the file is renamed to wpods.1.log (one old file kept).
+/// ("yyyy-MM-dd HH:mm:ss.fff [tid] LEVEL category: message", local time, UTF-8). Callers only enqueue and signal;
+/// a background thread wakes on the signal, waits 500 ms to batch, then writes (idle: no wakeups). Above 2 MB the file
+/// is renamed to wpods.1.log (one old file kept).
 /// Logging never throws: an unwritable file drops the entries.
 /// </summary>
 internal static class Log
@@ -27,6 +28,8 @@ internal static class Log
     private const int WriteIntervalMs = 500;
 
     private static readonly ConcurrentQueue<Entry> Queue = new();
+    // Set after every enqueue; an entry added during a drain leaves it set, so the next round writes it.
+    private static readonly AutoResetEvent Pending = new(initialState: false);
     private static readonly Lock WriteLock = new();
     private static readonly string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WPods", "logs");
     private static readonly string FilePath = Path.Combine(Folder, "wpods.log");
@@ -61,13 +64,17 @@ internal static class Log
         }
     }
 
-    private static void Add(Level level, string category, string message) =>
+    private static void Add(Level level, string category, string message)
+    {
         Queue.Enqueue(new Entry(DateTime.UtcNow.Ticks, Environment.CurrentManagedThreadId, level, category, message));
+        Pending.Set();
+    }
 
     private static void WriteLoop()
     {
         while (true)
         {
+            Pending.WaitOne();
             Thread.Sleep(WriteIntervalMs);
             if (!Queue.IsEmpty)
             {

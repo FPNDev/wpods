@@ -1,5 +1,5 @@
 // wpods_native.dll: passive BLE Proximity Pairing watcher + BT audio KS one-shot connect/disconnect +
-// pause/resume of all playing media sessions (GSMTC) + default-output check.
+// pause/resume of all playing media sessions (GSMTC) + default-output check + FTZ/DAZ for the mic stages.
 //
 // Apartments: the DLL never initializes COM on the caller's thread. On first use it calls
 // CoIncrementMTAUsage once (never released), which keeps the process MTA alive so that WinRT/COM
@@ -14,6 +14,7 @@
 #include <initguid.h>
 #include <devpkey.h>
 #include <functiondiscoverykeys_devpkey.h>
+#include <xmmintrin.h>
 
 #include <algorithm>
 #include <chrono>
@@ -315,15 +316,14 @@ std::vector<Subscription> subscribe_sessions(
     uint32_t generation)
 {
     std::vector<Subscription> subscriptions;
-    try {
-        for (auto const& session : sessions) {
+    for (auto const& session : sessions) {
+        try {
             subscriptions.push_back({ session, session.PlaybackInfoChanged([generation](auto const&, auto const&) {
                 on_media_event(generation, false);
             }) });
+        } catch (...) {
+            // Closing session: not watched, as in count_playing.
         }
-    } catch (...) {
-        revoke(subscriptions);
-        throw;
     }
     return subscriptions;
 }
@@ -365,6 +365,8 @@ void evaluate_watch() noexcept
         if (g_watch && g_generation == generation) {
             if (subscribed) {
                 std::swap(g_watch->sessions, subscriptions); // subscriptions now holds the replaced ones
+            } else if (resubscribe) {
+                g_resubscribe = true; // GetSessions failed: the next event subscribes again
             }
             if (playing > g_fewestPlaying) {
                 g_pausedApps.clear();
@@ -484,26 +486,34 @@ int32_t __stdcall wpn_media_pause_all(void)
             AcquireSRWLockShared(&g_watchLock);
             uint32_t const generation = g_generation + 1;
             ReleaseSRWLockShared(&g_watchLock);
-            auto* const watch = new MediaWatch{ manager, {}, {} };
+            auto* watch = new MediaWatch{ manager, {}, {} };
+            int playing = 0;
             try {
                 watch->sessionsChanged = manager.SessionsChanged([generation](auto const&, auto const&) {
                     on_media_event(generation, true);
                 });
                 auto const sessions = manager.GetSessions();
                 watch->sessions = subscribe_sessions(sessions, generation);
-                int const playing = count_playing(sessions);
-                AcquireSRWLockExclusive(&g_watchLock);
-                replaced = g_watch;
-                g_watch = watch;
-                g_generation = generation;
-                g_pausedApps.insert(g_pausedApps.end(), paused.begin(), paused.end());
-                g_fewestPlaying = playing;
-                g_dirty = false;
-                g_resubscribe = false;
-                ReleaseSRWLockExclusive(&g_watchLock);
+                playing = count_playing(sessions);
             } catch (...) {
+                // No watch: the paused sessions are still remembered for resume, only never forgotten early.
                 release_watch(watch);
-                throw;
+                watch = nullptr;
+            }
+            AcquireSRWLockExclusive(&g_watchLock);
+            replaced = g_watch;
+            g_watch = watch;
+            g_generation = generation;
+            g_pausedApps.insert(g_pausedApps.end(), paused.begin(), paused.end());
+            g_fewestPlaying = playing;
+            g_dirty = false;
+            g_resubscribe = false;
+            ReleaseSRWLockExclusive(&g_watchLock);
+            if (watch) {
+                // Replays an event dropped before the commit (e.g. a paused session leaving Playing after the
+                // baseline read). After unlocking: on_media_event takes g_watchLock. g_mediaLock stays held, so the
+                // watch cannot change before it runs.
+                on_media_event(generation, false);
             }
         }
         result = paused.empty() && FAILED(failure) ? failure : static_cast<int32_t>(paused.size());
@@ -595,4 +605,16 @@ int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress)
     } catch (...) {
         return winrt::to_hresult();
     }
+}
+
+uint32_t __stdcall wpn_fp_set_ftz_daz(void)
+{
+    unsigned int const previous = _mm_getcsr();
+    _mm_setcsr(previous | 0x8040);
+    return previous;
+}
+
+void __stdcall wpn_fp_restore(uint32_t mxcsr)
+{
+    _mm_setcsr(mxcsr);
 }

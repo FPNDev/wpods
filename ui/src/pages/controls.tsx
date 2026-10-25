@@ -5,7 +5,7 @@ import { type Busy, createBusy } from '../components/common';
 import { createSegmented, type Segmented } from '../components/segmented';
 import { setDisabled, setHidden, setText } from '../dom';
 import { post } from '../host';
-import { t, type LabelKey } from '../i18n';
+import { labelsVersion, t, type LabelKey } from '../i18n';
 import { Icon, type IconName } from '../icons';
 import type { HoldDuration, PressSpeed, StemMode } from '../protocol';
 import { capsOf, current, live, store } from '../state';
@@ -104,6 +104,7 @@ export const createControls = (ctx: Ctx): Page => {
   let duck!: HTMLInputElement;
   let duckValue!: HTMLSpanElement;
   let lastDuck: number | null = null;
+  let duckVersion = -1;
   const showDuck = (value: number): void => {
     duck.style.setProperty('--v', `${((value - DUCK_MIN) * 100) / (DUCK_MAX - DUCK_MIN)}%`);
     setText(duckValue, t('battery.pct', { pct: value }));
@@ -230,8 +231,9 @@ export const createControls = (ctx: Ctx): Page => {
 
     setHidden(duckGroup, !caps.has('conversationAwareness'));
     setDisabled(duck, !st);
-    if (d.host.duckPercent !== lastDuck) {
+    if (d.host.duckPercent !== lastDuck || duckVersion !== labelsVersion) {
       lastDuck = d.host.duckPercent;
+      duckVersion = labelsVersion;
       duck.value = String(lastDuck);
       showDuck(lastDuck);
     }

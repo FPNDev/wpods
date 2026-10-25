@@ -12,8 +12,8 @@ $hardwareId = 'WPods\NTA2DPVM'
 # Hardware ID of NTA2DPVM devnodes created by older builds: the current package no longer matches it.
 $legacyHardwareId = 'Root\NTA2DPVM'
 $record = Join-Path $PSScriptRoot 'installed.txt' # published names (oemNN.inf) of the packages this install owns
-$cer = Join-Path $PSScriptRoot 'NTAPD\WPods-TestSigning.cer'
-$thumbprint = [Security.Cryptography.X509Certificates.X509Certificate2]::new($cer).Thumbprint
+# Every build signs with a new certificate (tools\sign.ps1), all with this subject.
+$certSubject = 'CN=WPods Test Signing'
 $certStores = 'Root', 'TrustedPublisher'
 
 # Driver-store packages whose original INF name is one of ours, keyed by published name. DISM objects: locale-safe.
@@ -27,8 +27,10 @@ function Get-StorePackages {
     $packages
 }
 
+# NTA2DPVM devnodes (current and legacy) are created in class MEDIA. Ignore: Get-PnpDevice errors when the class
+# has no device at all.
 function Get-Nta2dpvm([string]$Id = $hardwareId) {
-    Get-PnpDevice | Where-Object { $_.HardwareID -contains $Id }
+    Get-PnpDevice -Class MEDIA -ErrorAction Ignore | Where-Object { $_.HardwareID -contains $Id }
 }
 
 if ($Uninstall) {
@@ -51,7 +53,11 @@ if ($Uninstall) {
         }
     } finally {
         foreach ($certStore in $certStores) {
-            Remove-Item "Cert:\LocalMachine\$certStore\$thumbprint" -ErrorAction Ignore
+            foreach ($trusted in Get-ChildItem "Cert:\LocalMachine\$certStore") {
+                if ($trusted.Subject -eq $certSubject) {
+                    Remove-Item $trusted.PSPath
+                }
+            }
         }
     }
     if ($failed) {
@@ -75,10 +81,11 @@ function Test-Current($Package) {
     [version]$Package.Version -eq $current[(Split-Path $Package.OriginalFileName -Leaf)]
 }
 
-# Owned = this build's packages + packages recorded by earlier installs that are still in the store.
-function Save-Record {
+# Owned = this build's packages + packages recorded by earlier installs that are still in the store ($Store: the
+# Get-StorePackages result).
+function Save-Record($Store) {
     $previous = @(Get-Content $record -ErrorAction Ignore)
-    $owned = foreach ($package in (Get-StorePackages).Values) {
+    $owned = foreach ($package in $Store.Values) {
         if ($package.Driver -in $previous -or (Test-Current $package)) {
             $package.Driver
         }
@@ -153,11 +160,20 @@ function Install-Nta2dpvm {
     Add-DriverPackage NTA2DPVM
 }
 
+$cer = Join-Path $PSScriptRoot 'NTAPD\WPods-TestSigning.cer'
+$thumbprint = [Security.Cryptography.X509Certificates.X509Certificate2]::new($cer).Thumbprint
+# Certificates of earlier builds stay trusted otherwise.
 foreach ($certStore in $certStores) {
+    foreach ($trusted in Get-ChildItem "Cert:\LocalMachine\$certStore") {
+        if ($trusted.Subject -eq $certSubject -and $trusted.Thumbprint -ne $thumbprint) {
+            Remove-Item $trusted.PSPath
+        }
+    }
     if (-not (Test-Path "Cert:\LocalMachine\$certStore\$thumbprint")) {
         Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\$certStore" | Out-Null
     }
 }
+$store = $null
 try {
     $ntapd = Add-DriverPackage NTAPD
     foreach ($device in Get-Nta2dpvm $legacyHardwareId) {
@@ -180,13 +196,22 @@ try {
         $nta2dpvm = Install-Nta2dpvm
     }
     # Drop superseded packages; pnputil refuses (and we ignore) any package still in use by a device.
-    foreach ($package in (Get-StorePackages).Values) {
+    # Deleted ones leave $store, so Save-Record works on the same single DISM enumeration.
+    $store = Get-StorePackages
+    foreach ($package in @($store.Values)) {
         if (-not (Test-Current $package)) {
             pnputil /delete-driver $package.Driver | Out-Host
+            if ($LASTEXITCODE -eq 0) {
+                $store.Remove($package.Driver)
+            }
         }
     }
 } finally {
-    Save-Record
+    # Failed before the store was read: read it now.
+    if ($null -eq $store) {
+        $store = Get-StorePackages
+    }
+    Save-Record $store
 }
 if (3010 -in $ntapd, $nta2dpvm) {
     exit 3010

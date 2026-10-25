@@ -122,6 +122,7 @@ const applyBattery = (battery: Batteries): void => {
   store.state.battery = battery;
   store.lastBattery.set(store.attached, battery);
   const name = store.byId.get(store.attached)?.name ?? '';
+  let said = '';
   for (const [part, ring] of Object.entries(BATTERY_PARTS)) {
     const b = battery[part as keyof Batteries];
     if (!b) {
@@ -131,8 +132,11 @@ const applyBattery = (battery: Batteries): void => {
       store.lowSaid.delete(part);
     } else if (!store.lowSaid.has(part)) {
       store.lowSaid.add(part);
-      store.announce = t('battery.low', { name, part: t(`battery.${ring}`), pct: b.pct });
+      said += (said ? '. ' : '') + t('battery.low', { name, part: t(`battery.${ring}`), pct: b.pct });
     }
+  }
+  if (said) {
+    store.announce = said;
   }
   mark('hero');
 };
@@ -229,7 +233,7 @@ export const apply = (msg: HostToMain): void => {
       const d = store.byId.get(msg.id);
       if (d) {
         d.host = msg.host;
-        mark('mic', 'windows');
+        mark('mic', 'windows', 'controls');
       }
       break;
     }

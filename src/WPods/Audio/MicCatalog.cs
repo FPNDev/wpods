@@ -41,12 +41,12 @@ internal static class MicCatalog
         new("dpdfnet8", "DPDFNet-8 48k", Heavy, 1, 0.33f, 50, () => new DpdfNetStage(DpdfNetStage.Dpdf8File)),
         new("dpdfnet2", "DPDFNet-2 48k", Medium, 1, 0.12f, 50, () => new DpdfNetStage(DpdfNetStage.Dpdf2File)),
         new("nsnet2", "NSNet2 48k", NotMeasured, 1, 0, 19.3f, () => new NsNet2Stage(NsNet2Stage.File48k)),
-        new("fastenhancer-l", "FastEnhancer-L 48k", VeryHeavy, 1, 0.62f, 20.5f, () => new FastEnhancerStage(FastEnhancerStage.L48kFile)),
+        new("fastenhancer-l", "FastEnhancer-L 48k", Heavy, 1, 0.62f, 20.5f, () => new FastEnhancerStage(FastEnhancerStage.L48kFile)),
         new("fastenhancer-m", "FastEnhancer-M 48k", Medium, 1, 0.187f, 18, () => new FastEnhancerStage(FastEnhancerStage.M48kFile)),
         new("fastenhancer-s", "FastEnhancer-S 48k", Medium, 1, 0.059f, 20.7f, () => new FastEnhancerStage(FastEnhancerStage.S48kFile)),
         new("fastenhancer-b", "FastEnhancer-B 48k", Light, 1, 0.039f, 20.7f, () => new FastEnhancerStage(FastEnhancerStage.B48kFile)),
         new("fastenhancer-t", "FastEnhancer-T 48k", Light, 1, 0.025f, 20.7f, () => new FastEnhancerStage(FastEnhancerStage.T48kFile)),
-        new("dfn3-residual", "DFN3 + residual filter", Medium, 1, 0.043f, 40, () => new ResidualFilterStage(new DfnStage(postFilterBeta: 0.02f), DfnStage.StandardLatencySamples)),
+        new("dfn3-residual", "DFN3 + residual filter", Light, 1, 0.043f, 40, () => new ResidualFilterStage(new DfnStage(postFilterBeta: 0.02f), DfnStage.StandardLatencySamples)),
     ];
 
     public static readonly MicOption[] WideSpectrum =

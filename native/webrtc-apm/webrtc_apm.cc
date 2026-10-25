@@ -9,6 +9,14 @@ struct Apm {
   rtc::scoped_refptr<webrtc::AudioProcessing> apm;
 };
 
+// Every stream: 48 kHz mono.
+const webrtc::StreamConfig kStream(48000, 1);
+
+// Initializes for kStream up front, so the first ProcessStream does not reinitialize on the audio thread.
+void initialize(webrtc::AudioProcessing& apm) {
+  apm.Initialize(webrtc::ProcessingConfig{{kStream, kStream, kStream, kStream}});
+}
+
 }  // namespace
 
 // noise_level: 0 = low, 1 = moderate, 2 = high, 3 = very high, -1 = noise suppression off.
@@ -28,6 +36,7 @@ extern "C" __declspec(dllexport) void* wapm_create(int noise_level, int high_pas
     config.noise_suppression.level = static_cast<webrtc::AudioProcessing::Config::NoiseSuppression::Level>(noise_level);
   }
   apm->ApplyConfig(config);
+  initialize(*apm);
   return new Apm{apm};
 }
 
@@ -56,14 +65,14 @@ extern "C" __declspec(dllexport) void* wapm_create_agc2(int high_pass, int adapt
   if (apm->GetConfig().gain_controller2 != config.gain_controller2) {
     return nullptr;
   }
+  initialize(*apm);
   return new Apm{apm};
 }
 
 // frame: 480 samples, 48 kHz mono, -1..1, processed in place. Returns 0 on success (webrtc::AudioProcessing::kNoError).
 extern "C" __declspec(dllexport) int wapm_process(void* state, float* frame) {
-  const webrtc::StreamConfig config(48000, 1);
   float* channels[1] = {frame};
-  return static_cast<Apm*>(state)->apm->ProcessStream(channels, config, config, channels);
+  return static_cast<Apm*>(state)->apm->ProcessStream(channels, kStream, kStream, channels);
 }
 
 extern "C" __declspec(dllexport) void wapm_destroy(void* state) {

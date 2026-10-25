@@ -3,6 +3,8 @@
 # Models without a download are exported by native\export-models.ps1.
 # Output: .build\native\bin\onnxruntime.dll and .build\native\bin\models\*.onnx
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
+$ProgressPreference = 'SilentlyContinue'
 
 $OrtVersion = '1.31.0'
 $OrtUrl = "https://github.com/microsoft/onnxruntime/releases/download/v$OrtVersion/onnxruntime-win-x64-$OrtVersion.zip"

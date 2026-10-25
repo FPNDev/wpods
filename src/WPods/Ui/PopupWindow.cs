@@ -28,6 +28,9 @@ internal sealed class PopupWindow : Form
     /// <summary>The window moved to a monitor with another DPI; the host places it again.</summary>
     public event Action? ScaleChanged;
 
+    /// <summary>Alt+F4 or an outside WM_CLOSE: the app hides the window instead.</summary>
+    public event Action? CloseRequested;
+
     protected override bool ShowWithoutActivation => true;
 
     protected override CreateParams CreateParams
@@ -64,6 +67,16 @@ internal sealed class PopupWindow : Form
         base.OnHandleCreated(e);
         NativeUi.SetWindowInt(Handle, NativeUi.DwmwaWindowCornerPreference, NativeUi.DwmwcpRound);
         NativeUi.SetWindowInt(Handle, NativeUi.DwmwaUseImmersiveDarkMode, _dark ? 1 : 0);
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (e.CloseReason is CloseReason.UserClosing or CloseReason.TaskManagerClosing)
+        {
+            e.Cancel = true;
+            CloseRequested?.Invoke();
+        }
+        base.OnFormClosing(e);
     }
 
     protected override void OnResize(EventArgs e)

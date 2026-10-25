@@ -1,5 +1,6 @@
 # Builds everything and produces dist\WPods-Setup.exe:
-# native DLLs (only when an output is missing) -> driver packages -> web UI -> dotnet publish -> Inno Setup 6.
+# native DLLs (only when an output is missing) -> driver packages (only when their sources changed) -> web UI ->
+# dotnet publish -> Inno Setup 6.
 param(
     [switch]$SkipNative, # never build the native DLLs (use .build\native\bin as is)
     [switch]$SkipDrivers # use the driver packages already in .build\drivers
@@ -46,14 +47,38 @@ if (-not $SkipNative) {
 }
 
 if (-not $SkipDrivers) {
-    Invoke-Script 'drivers\build.ps1'
+    # Rebuilt only when a driver source or the signing script changed: a rebuild restamps DriverVer, and a new
+    # DriverVer makes every app update reinstall (and restart) both drivers.
+    $sourceHash = Join-Path $build 'drivers\source.hash'
+    $sources = @(Get-ChildItem (Join-Path $root 'drivers\NTAPD'), (Join-Path $root 'drivers\NTA2DPVM') -File) +
+        @(Get-Item (Join-Path $root 'drivers\Public.h'), (Join-Path $root 'drivers\build.ps1'), (Join-Path $root 'tools\sign.ps1'))
+    $hash = @(foreach ($file in Get-FileHash -LiteralPath $sources.FullName -Algorithm SHA256) {
+        "$($file.Hash) $($file.Path.Substring($root.Length + 1))"
+    }) -join "`r`n"
+    $missing = $false
+    foreach ($name in 'NTAPD', 'NTA2DPVM') {
+        foreach ($file in "$name.inf", "$name.sys", "$name.cat", 'WPods-TestSigning.cer') {
+            if (-not (Test-Path (Join-Path $build "drivers\$name\$file"))) {
+                $missing = $true
+            }
+        }
+    }
+    if ($missing -or (Get-Content $sourceHash -Raw -ErrorAction Ignore) -ne $hash) {
+        # A failed build leaves no hash behind, so the next run builds again.
+        Remove-Item $sourceHash -ErrorAction Ignore
+        Invoke-Script 'drivers\build.ps1'
+        Set-Content $sourceHash $hash -NoNewline
+    }
 }
 
 # Web UI: ui\ (TypeScript + JSX via our build-time transform) -> src\WPods\web (generated, not committed).
 $ui = Join-Path $root 'ui'
 Push-Location $ui
 try {
-    if (-not (Test-Path (Join-Path $ui 'node_modules'))) {
+    # npm writes node_modules\.package-lock.json on install: missing or older than package-lock.json (e.g. after a
+    # pull) means the installed dependencies are stale.
+    $installed = Get-Item (Join-Path $ui 'node_modules\.package-lock.json') -ErrorAction Ignore
+    if (-not $installed -or (Get-Item (Join-Path $ui 'package-lock.json')).LastWriteTimeUtc -gt $installed.LastWriteTimeUtc) {
         npm ci
         if ($LASTEXITCODE -ne 0) {
             throw "npm ci failed ($LASTEXITCODE)"

@@ -98,10 +98,22 @@ if ($device.Problem -eq 'CM_PROB_NEED_RESTART') {
     Install-Nta2dpvm
 }
 
-# Drop superseded packages; pnputil refuses (and we ignore) any package still installed on a device.
+# This build's packages are identified in the store by the version stampinf wrote into DriverVer (date,version).
+function Get-InfVersion([string]$Name) {
+    $line = Select-String -Path (Join-Path $packages "$Name\$Name.inf") -Pattern '^\s*DriverVer\s*=\s*[^,]+,\s*([\d.]+)' |
+        Select-Object -First 1
+    [version]$line.Matches[0].Groups[1].Value
+}
+$current = @{ 'ntapd.inf' = Get-InfVersion NTAPD; 'nta2dpvm.inf' = Get-InfVersion NTA2DPVM }
+
+# Drop superseded packages; pnputil refuses (and we ignore) any package still installed on a device. This build's
+# packages are kept explicitly: without paired AirPods no device uses NTAPD, so pnputil would delete it.
 $store = [xml](pnputil /enum-drivers /format xml)
 foreach ($package in $store.PnpUtil.Driver | Where-Object { $_.OriginalName -in 'ntapd.inf', 'nta2dpvm.inf' }) {
-    pnputil /delete-driver $package.DriverName | Out-Null
+    # DriverVersion is "date version".
+    if ([version]($package.DriverVersion -split ' ')[-1] -ne $current[$package.OriginalName]) {
+        pnputil /delete-driver $package.DriverName | Out-Null
+    }
 }
 
 Get-PnpDevice | Where-Object { $_.Service -in 'NTAPD', 'NTA2DPVM' -or $_.HardwareID -contains $hardwareId } |

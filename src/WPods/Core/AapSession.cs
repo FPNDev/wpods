@@ -13,14 +13,17 @@ internal enum SessionEnd
     LinkLost,
     /// <summary>Any other read error or end of stream while the session was open.</summary>
     Failed,
-    /// <summary>Closed by the session itself: no 0x09 setting within InitialReportTimeout (the initial report never came).</summary>
+    /// <summary>
+    /// Closed by the session itself: no handshake reply, the feature flags or notification request not written, or no
+    /// 0x09 setting within InitialReportTimeout (the initial report never came).
+    /// </summary>
     NoInitialReport,
 }
 
 /// <summary>
 /// One open NTAPD channel. Threading: <see cref="PacketReceived"/> fires on the read loop (a thread-pool thread,
-/// one packet at a time). <see cref="Changed"/> fires on a thread-pool thread (read loop, command or heart-rate
-/// completion), serialized under the state lock. Handlers must not block (marshal to the UI with BeginInvoke).
+/// one packet at a time). <see cref="Changed"/> fires on a thread-pool thread (read loop, command, heart-rate
+/// completion or settings save), serialized under the state lock. Handlers must not block (marshal to the UI with BeginInvoke).
 /// </summary>
 public sealed class AapSession : IAsyncDisposable
 {
@@ -63,11 +66,19 @@ public sealed class AapSession : IAsyncDisposable
     private Task _heartRateTask = Task.CompletedTask;
     private Task<SessionEnd> _readLoop = Task.FromResult(SessionEnd.Closed);
     private byte _streamSequence;
-    // Reported capability set last written to settings (read loop and initialization).
+    // Reported capability set last queued for settings (read loop and initialization).
     private DeviceCapabilities _savedReported;
-    // Pod-saved settings last written to settings; guarded by _stateLock.
+    // Pod-saved settings last queued for settings; guarded by _stateLock.
     private PodSettings _savedPodSettings;
-    // Set before _life is cancelled when no initial report came; the read loop then ends with NoInitialReport.
+    // Settings writes run on the save task (RunSaves), never on the read loop (which also delivers mic audio) or under
+    // _stateLock. One pending save per kind: a newer one replaces it, so a burst is one write and the last value wins.
+    // Guarded by _saveLock; _saveRunning is true from the first queued save until RunSaves finds nothing left.
+    private readonly Lock _saveLock = new();
+    private Dictionary<string, Action> _pendingSaves = [];
+    private bool _saveRunning;
+    private Task _saves = Task.CompletedTask;
+    // Set before _life is cancelled when initialization failed or no initial report came; the read loop then ends with
+    // NoInitialReport.
     private bool _noInitialReport;
     // Heart rate ran in the session this one replaced (CarryOver): started again once Ready.
     private bool _resumeHeartRate;
@@ -398,16 +409,44 @@ public sealed class AapSession : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Log.Info("aap", $"close session {Mac.Format(Address)}");
-        await _life.CancelAsync().ConfigureAwait(false);
-        await _readLoop.ConfigureAwait(false);
-        if (_audioCount > 0)
+        try
         {
-            Log.Info("aap", $"RX 0x58 audio x{_audioCount} in the last {Environment.TickCount64 - _audioWindowStart} ms");
-            _audioCount = 0;
+            await _life.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await _readLoop.ConfigureAwait(false);
+            }
+            catch (Exception e)
+            {
+                Log.Error("aap", "read loop failed", e);
+            }
+            if (_audioCount > 0)
+            {
+                Log.Info("aap", $"RX 0x58 audio x{_audioCount} in the last {Environment.TickCount64 - _audioWindowStart} ms");
+                _audioCount = 0;
+            }
+            try
+            {
+                await _heartRateTask.ConfigureAwait(false);
+            }
+            catch (Exception e)
+            {
+                Log.Error("aap", "heart rate task failed", e);
+            }
+            // Queued settings writes finish before the session is gone (RunSaves logs its own errors).
+            Task saves;
+            lock (_saveLock)
+            {
+                saves = _saves;
+            }
+            await saves.ConfigureAwait(false);
         }
-        await _heartRateTask.ConfigureAwait(false);
-        _heartRateCts?.Dispose();
-        await _stream.DisposeAsync().ConfigureAwait(false);
+        finally
+        {
+            // Always: the NTAPD handle is exclusive, a leaked one fails every re-attach.
+            _heartRateCts?.Dispose();
+            await _stream.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
     private async Task<SessionEnd> ReadLoopAsync()
@@ -423,7 +462,15 @@ public sealed class AapSession : IAsyncDisposable
                     Log.Warn("aap", "read: end of stream");
                     return SessionEnd.Failed;
                 }
-                OnPacket(new ReadOnlySpan<byte>(_readBuffer, 0, count));
+                try
+                {
+                    OnPacket(new ReadOnlySpan<byte>(_readBuffer, 0, count));
+                }
+                catch (Exception e)
+                {
+                    // A throwing handler must not end the session with its stream still open.
+                    Log.Error("aap", "packet handler failed", e);
+                }
             }
         }
         catch (Exception) when (ct.IsCancellationRequested)
@@ -456,10 +503,14 @@ public sealed class AapSession : IAsyncDisposable
             _firstSetting = null;
             setting.TrySetResult();
         }
-        DeviceChange change = Aap.TryParseKeys(packet, out ProximityKeys? keys) ? OnKeys(keys) : DeviceChange.None;
+        if (Aap.TryParseKeys(packet, out ProximityKeys? keys))
+        {
+            OnKeys(keys);
+        }
+        DeviceChange change;
         lock (_stateLock)
         {
-            change |= Aap.Apply(packet, State);
+            change = Aap.Apply(packet, State);
             if (change != DeviceChange.None)
             {
                 Changed?.Invoke(change);
@@ -488,25 +539,27 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    private DeviceChange OnKeys(ProximityKeys? keys)
+    // DeviceChange.Keys is raised by the save, once the store has the keys.
+    private void OnKeys(ProximityKeys? keys)
     {
         _keysReply?.TrySetResult();
-        try
+        if (keys is null)
         {
-            if (keys is null)
-            {
-                Log.Warn("aap", "keys reply without IRK and ENC_KEY");
-                return DeviceChange.None;
-            }
+            Log.Warn("aap", "keys reply without IRK and ENC_KEY");
+            return;
+        }
+        QueueSave("keys", () =>
+        {
             bool stored = _settings.SetKeys(Address, keys);
             Log.Info("aap", stored ? "keys reply: stored (new or changed)" : "keys reply: same as stored");
-            return stored ? DeviceChange.Keys : DeviceChange.None;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            Log.Error("aap", "keys not saved", e);
-            return DeviceChange.None;
-        }
+            if (stored)
+            {
+                lock (_stateLock)
+                {
+                    Changed?.Invoke(DeviceChange.Keys);
+                }
+            }
+        });
     }
 
     // Every inbound packet as hex, except 0x58 mic audio (count per second) and the 0x31 keys reply (length only).
@@ -554,15 +607,17 @@ public sealed class AapSession : IAsyncDisposable
             if (!await WriteAsync(Aap.Handshake, ct).ConfigureAwait(false)
                 || !await WaitAsync(first.Task, HandshakeTimeout, ct).ConfigureAwait(false))
             {
-                Log.Warn("aap", "init: handshake not written or no packet within 10 s");
+                Log.Warn("aap", "init: handshake not written or no packet within 10 s; closing the session");
                 SetStatus(SessionStatus.NoResponse);
+                await CloseWithoutInitialReportAsync(ct).ConfigureAwait(false);
                 return;
             }
             await Task.Delay(100, ct).ConfigureAwait(false);
             if (!await WriteAsync(Aap.FeatureFlags, ct).ConfigureAwait(false)
                 || !await WriteAsync(Aap.RequestNotifications(_settings.GetEarDetection(Address)), ct).ConfigureAwait(false))
             {
-                Log.Warn("aap", "init: feature flags / notification request not written; status stays " + State.Status);
+                Log.Warn("aap", "init: feature flags / notification request not written; closing the session");
+                await CloseWithoutInitialReportAsync(ct).ConfigureAwait(false);
                 return;
             }
             SetStatus(SessionStatus.Ready);
@@ -631,8 +686,7 @@ public sealed class AapSession : IAsyncDisposable
             if (!await WaitAsync(firstSetting, InitialReportTimeout, ct).ConfigureAwait(false))
             {
                 Log.Warn("aap", $"init: no 0x09 setting within {InitialReportTimeout.TotalSeconds:0} s; closing the session");
-                _noInitialReport = true;
-                await _life.CancelAsync().ConfigureAwait(false);
+                await CloseWithoutInitialReportAsync(ct).ConfigureAwait(false);
                 return;
             }
             Log.Info("aap", $"init: first 0x09 setting {Environment.TickCount64 - start} ms after Ready");
@@ -649,6 +703,15 @@ public sealed class AapSession : IAsyncDisposable
         {
             // Session closed.
         }
+    }
+
+    // The read loop then ends with NoInitialReport and ConnectionManager reopens the session. A session already closing
+    // (a write skipped because _life was cancelled) stays Closed.
+    private async Task CloseWithoutInitialReportAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        _noInitialReport = true;
+        await _life.CancelAsync().ConfigureAwait(false);
     }
 
     private async Task RunHeartRateAsync(CancellationToken ct)
@@ -841,18 +904,7 @@ public sealed class AapSession : IAsyncDisposable
         return true;
     }
 
-    private void SaveEarDetection(bool on)
-    {
-        try
-        {
-            _settings.SetEarDetection(Address, on);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            // The device has it; the next attach writes the previously stored value again.
-            Log.Warn("aap", $"ear detection not saved: {e.Message}");
-        }
-    }
+    private void SaveEarDetection(bool on) => QueueSave("ear detection", () => _settings.SetEarDetection(Address, on));
 
     private void SaveAllowOff(bool on)
     {
@@ -867,18 +919,7 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    private void SaveMicSide(MicSide side)
-    {
-        try
-        {
-            _settings.SetMicSide(Address, side);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            // The device has it; the next attach writes the previously stored value again.
-            Log.Warn("aap", $"mic side not saved: {e.Message}");
-        }
-    }
+    private void SaveMicSide(MicSide side) => QueueSave("mic side", () => _settings.SetMicSide(Address, side));
 
     // Stores a cycle the session changed on its own and raises DeviceChange.StemModes.
     private void SaveStemModes(StemModes modes)
@@ -901,7 +942,7 @@ public sealed class AapSession : IAsyncDisposable
 
     // Under _stateLock, after a change was raised. Once the initial report ended (values before it may be partial),
     // remembers the pod-saved settings for display while the next attach waits for its report; a setting this session
-    // never reported keeps its remembered value. Written only when changed.
+    // never reported keeps its remembered value. Queued only when changed.
     private void SavePodSettings(DeviceChange change)
     {
         if (!State.InitialReportDone || (change & (DeviceChange.ListeningMode | DeviceChange.Settings | DeviceChange.InitialReport)) == 0)
@@ -913,31 +954,64 @@ public sealed class AapSession : IAsyncDisposable
         {
             return;
         }
-        try
-        {
-            _settings.SetPodSettings(Address, settings);
-            _savedPodSettings = settings;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            // Retried on the next change.
-            Log.Warn("aap", $"pod settings not saved: {e.Message}");
-        }
+        _savedPodSettings = settings;
+        QueueSave("pod settings", () => _settings.SetPodSettings(Address, settings));
     }
 
     // Refreshes the pair's remembered (reported) capabilities; SettingsStore skips the write when unchanged.
     private void SaveCapabilities()
     {
         DeviceCapabilities reported = State.Reported;
-        try
+        _savedReported = reported;
+        QueueSave("capabilities", () => _settings.SetCapabilities(Address, reported));
+    }
+
+    // Replaces the pending save of this kind and starts RunSaves unless it is running.
+    private void QueueSave(string what, Action save)
+    {
+        lock (_saveLock)
         {
-            _settings.SetCapabilities(Address, reported);
-            _savedReported = reported;
+            _pendingSaves[what] = save;
+            if (!_saveRunning)
+            {
+                _saveRunning = true;
+                _saves = Task.Run(RunSaves);
+            }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+    }
+
+    // One run at a time, so saves of one kind are written in queue order; never throws (DisposeAsync awaits it). A
+    // failed write is logged; SettingsStore keeps the value in memory, so its next file write (any setting) includes it.
+    private void RunSaves()
+    {
+        while (true)
         {
-            // Retried on the next change or attach.
-            Log.Warn("aap", $"capabilities not saved: {e.Message}");
+            Dictionary<string, Action> saves;
+            lock (_saveLock)
+            {
+                if (_pendingSaves.Count == 0)
+                {
+                    _saveRunning = false;
+                    return;
+                }
+                saves = _pendingSaves;
+                _pendingSaves = [];
+            }
+            foreach ((string what, Action save) in saves)
+            {
+                try
+                {
+                    save();
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    Log.Warn("aap", $"{what} not saved: {e.Message}");
+                }
+                catch (Exception e)
+                {
+                    Log.Error("aap", $"{what} not saved", e);
+                }
+            }
         }
     }
 

@@ -75,7 +75,7 @@ internal sealed unsafe partial class OnnxModel : IDisposable
         string path = Path.Combine(AppContext.BaseDirectory, ModelFolder, fileName);
         if (!File.Exists(path))
         {
-            throw new InvalidOperationException($"ONNX model not found: {path}");
+            throw new FileNotFoundException($"ONNX model not found: {path}", path);
         }
         lock (CreateLock)
         {

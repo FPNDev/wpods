@@ -168,6 +168,9 @@ public sealed class SettingsStore
     /// <summary>Raised on the caller's thread of <see cref="SetMic"/>, outside the store's lock.</summary>
     public event Action<MicConfig>? MicConfigChanged;
 
+    /// <summary>settings.json existed but could not be loaded; every setting is the default. A missing file is not a failure.</summary>
+    public bool LoadFailed { get; private set; }
+
     /// <summary>Last successfully attached device; 0 = none.</summary>
     public ulong LastUsed
     {
@@ -336,18 +339,33 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>
+    /// Stores <paramref name="settings"/> and raises <see cref="HostSettingsChanged"/> when they differ from the stored
+    /// ones, also when settings.json could not be written (the write's exception is rethrown after).
+    /// </summary>
     internal void Set(ulong address, HostSettings settings)
     {
-        lock (_lock)
+        bool changed = false;
+        try
         {
-            if (_devices.TryGetValue(address, out HostSettings? current) && current == settings)
+            lock (_lock)
             {
-                return;
+                if (_devices.TryGetValue(address, out HostSettings? current) && current == settings)
+                {
+                    return;
+                }
+                _devices[address] = settings;
+                changed = true;
+                SaveSettings();
             }
-            _devices[address] = settings;
-            SaveSettings();
         }
-        HostSettingsChanged?.Invoke(address, settings);
+        finally
+        {
+            if (changed)
+            {
+                HostSettingsChanged?.Invoke(address, settings);
+            }
+        }
     }
 
     internal void SetModel(ulong address, DeviceModel model)
@@ -499,36 +517,40 @@ public sealed class SettingsStore
             SettingsFile? file = JsonSerializer.Deserialize(stream, SettingsJson.Default.SettingsFile);
             if (file is null)
             {
+                Log.Error("settings", "settings.json is null, using defaults");
+                LoadFailed = true;
                 return;
             }
-            _ui = file.Ui ?? UiPrefs.Default;
+            // A JSON null bypasses the nullable annotations: every collection, entry and UI string is checked here.
+            UiPrefs ui = file.Ui ?? UiPrefs.Default;
+            _ui = ui with { Theme = ui.Theme ?? UiPrefs.Default.Theme, Language = ui.Language ?? UiPrefs.Default.Language };
             _mic = file.Mic is { } mic ? LoadMic(mic) : MicConfig.Default;
             if (file.LastUsed is { } last && Mac.TryParse(last, out ulong lastUsed))
             {
                 _lastUsed = lastUsed;
             }
-            foreach ((string mac, HostSettings settings) in file.Devices)
+            foreach ((string mac, HostSettings? settings) in file.Devices ?? [])
             {
-                if (Mac.TryParse(mac, out ulong address))
+                if (settings is not null && Mac.TryParse(mac, out ulong address))
                 {
                     _devices[address] = Normalize(address, settings);
                 }
             }
-            foreach ((string mac, DeviceModel model) in file.Models)
+            foreach ((string mac, DeviceModel? model) in file.Models ?? [])
             {
-                if (Mac.TryParse(mac, out ulong address))
+                if (model is { Number: not null, Name: not null } && Mac.TryParse(mac, out ulong address))
                 {
                     _models[address] = model;
                 }
             }
-            foreach ((string mac, DeviceCapabilities capabilities) in file.Capabilities)
+            foreach ((string mac, DeviceCapabilities capabilities) in file.Capabilities ?? [])
             {
                 if (Mac.TryParse(mac, out ulong address))
                 {
                     _capabilities[address] = capabilities;
                 }
             }
-            foreach ((string mac, StemModes modes) in file.StemModes)
+            foreach ((string mac, StemModes modes) in file.StemModes ?? [])
             {
                 if (!Mac.TryParse(mac, out ulong address))
                 {
@@ -543,21 +565,21 @@ public sealed class SettingsStore
                     Log.Warn("settings", $"{mac}: stemModes {modes} invalid (needs 2+ of Off, NC, Transparency, Adaptive), using the default");
                 }
             }
-            foreach ((string mac, bool on) in file.EarDetection)
+            foreach ((string mac, bool on) in file.EarDetection ?? [])
             {
                 if (Mac.TryParse(mac, out ulong address))
                 {
                     _earDetection[address] = on;
                 }
             }
-            foreach ((string mac, bool on) in file.AllowOff)
+            foreach ((string mac, bool on) in file.AllowOff ?? [])
             {
                 if (Mac.TryParse(mac, out ulong address))
                 {
                     _allowOff[address] = on;
                 }
             }
-            foreach ((string mac, MicSide side) in file.MicSide)
+            foreach ((string mac, MicSide side) in file.MicSide ?? [])
             {
                 if (!Mac.TryParse(mac, out ulong address))
                 {
@@ -572,14 +594,14 @@ public sealed class SettingsStore
                     Log.Warn("settings", $"{mac}: micSide {side} invalid, using Automatic");
                 }
             }
-            foreach ((string mac, PodSettings settings) in file.PodSettings)
+            foreach ((string mac, PodSettings? settings) in file.PodSettings ?? [])
             {
-                if (Mac.TryParse(mac, out ulong address))
+                if (settings is not null && Mac.TryParse(mac, out ulong address))
                 {
                     _podSettings[address] = settings;
                 }
             }
-            foreach ((string mac, DateTime date) in file.PairingDates)
+            foreach ((string mac, DateTime date) in file.PairingDates ?? [])
             {
                 if (Mac.TryParse(mac, out ulong address))
                 {
@@ -587,10 +609,23 @@ public sealed class SettingsStore
                 }
             }
         }
-        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception e)
         {
-            // Unreadable file: start from defaults; the next change rewrites it.
+            // Unreadable or malformed file: start from defaults, never from a partial load; the next change rewrites it.
             Log.Error("settings", "settings.json unreadable, using defaults", e);
+            LoadFailed = true;
+            _lastUsed = 0;
+            _ui = UiPrefs.Default;
+            _mic = MicConfig.Default;
+            _devices.Clear();
+            _models.Clear();
+            _capabilities.Clear();
+            _stemModes.Clear();
+            _earDetection.Clear();
+            _allowOff.Clear();
+            _micSide.Clear();
+            _podSettings.Clear();
+            _pairingDates.Clear();
         }
     }
 
@@ -745,7 +780,7 @@ public sealed class SettingsStore
         {
             plain = Native.Dpapi(File.ReadAllBytes(_keysPath), protect: false);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception e)
         {
             Log.Error("settings", "keys.bin unreadable", e);
             return;
@@ -786,7 +821,12 @@ public sealed class SettingsStore
     {
         Directory.CreateDirectory(_directory);
         string temp = path + ".tmp";
-        File.WriteAllBytes(temp, data);
+        // Data on disk before the rename: after a power loss NTFS can keep the rename but lose unflushed data.
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+        {
+            stream.Write(data);
+            stream.Flush(flushToDisk: true);
+        }
         File.Move(temp, path, overwrite: true);
     }
 }

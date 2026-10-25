@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -69,6 +70,8 @@ internal sealed partial class TrayApp : ApplicationContext
     private readonly HashSet<ulong> _hostSettingsDirty = [];
     private readonly bool[] _lowNotified = new bool[4];
     private readonly Dictionary<ulong, NearbyOffer> _offerByAddress = [];
+    // Toasts raised together (e.g. on attach) are all shown, in order.
+    private readonly ConcurrentQueue<ToastRequest> _toasts = new();
 
     private UiPrefs _prefs;
     private ResolvedLocale _locale;
@@ -78,10 +81,11 @@ internal sealed partial class TrayApp : ApplicationContext
     private uint _trayDpi;
 
     private int _dirty;
-    private ToastRequest? _pendingToast;
     private MicStatus _micSeen;
     private int _lowLatencyFailures;
     private ulong _lastAttached;
+    // settings.json could not be loaded: the S1 toast waits for the first page init (UI thread).
+    private bool _settingsResetPending;
 
     // UI-thread state, refreshed by Flush.
     private AapSession? _session;
@@ -119,6 +123,7 @@ internal sealed partial class TrayApp : ApplicationContext
         _appIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!)!;
         _host = new HostWindow(OnColorsChanged, OnDisplayChanged, OnHotKey);
         _hideTimer.Tick += OnHideTimer;
+        _popupTimer.Tick += OnPopupTimer;
         _tray = new NotifyIcon();
         _tray.MouseClick += OnTrayClick;
 
@@ -130,10 +135,12 @@ internal sealed partial class TrayApp : ApplicationContext
         settings.HostSettingsChanged += OnHostSettingsChanged;
         mic.StatusChanged += OnMicStatus;
         mic.StageChanged += OnMicStage;
+        mic.StageStopped += address => QueueToast("micModeStopped", address, "M3");
         keepAlive.Failed += OnLowLatencyFailed;
         nearby.OffersChanged += () => MarkDirty(Dirty.Offers);
         nearby.NearbyChanged += () => MarkDirty(Dirty.Devices);
         Program.ActivationRequested += () => _ui.Post(static s => ((TrayApp)s!).ShowMain(), this);
+        _settingsResetPending = settings.LoadFailed;
 
         _devices = connections.GetDevices();
         UpdateTray();
@@ -160,7 +167,7 @@ internal sealed partial class TrayApp : ApplicationContext
     {
         string codeTag = code is null ? "" : $" code={code}";
         Log.Info("ui", $"toast queued: {id} device={Mac.Format(device)}{codeTag}");
-        Volatile.Write(ref _pendingToast, new ToastRequest(id, device, code));
+        _toasts.Enqueue(new ToastRequest(id, device, code));
         MarkDirty(Dirty.Toast);
     }
 
@@ -346,9 +353,12 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             UpdatePopup();
         }
-        if ((dirty & Dirty.Toast) != 0 && Interlocked.Exchange(ref _pendingToast, null) is { } toast)
+        if ((dirty & Dirty.Toast) != 0)
         {
-            SendToast(toast.Id, toast.Device, toast.Code);
+            while (_toasts.TryDequeue(out ToastRequest? toast))
+            {
+                SendToast(toast.Id, toast.Device, toast.Code);
+            }
         }
         if ((dirty & (Dirty.Devices | Dirty.Offers | Dirty.Session | Dirty.Status)) != 0)
         {
@@ -791,6 +801,13 @@ internal sealed partial class TrayApp : ApplicationContext
             .Replace("{name}", state.Name ?? DeviceName(_session!.Address), StringComparison.Ordinal)
             .Replace("{part}", part, StringComparison.Ordinal)
             .Replace("{pct}", lowestPct.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        _tray.ShowBalloonTip(10_000, "", text, ToolTipIcon.None);
+    }
+
+    // WebView2 could not start, so no page can show a toast: tell the user from the tray (U1).
+    private void ShowWebViewFailed()
+    {
+        string text = Text("toast.webviewFailed").Replace("{code}", "U1", StringComparison.Ordinal);
         _tray.ShowBalloonTip(10_000, "", text, ToolTipIcon.None);
     }
 

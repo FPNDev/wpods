@@ -13,6 +13,7 @@ internal sealed class MainWindow : Form
     private const int ResizeStripDip = 4;
 
     private bool _dark;
+    private bool _destroying;
 
     public MainWindow(Rectangle bounds, Color background, bool dark, string title, Icon icon, WebPane pane)
     {
@@ -30,7 +31,7 @@ internal sealed class MainWindow : Form
 
     public WebPane Pane { get; }
 
-    /// <summary>Close button, Alt+F4 or the taskbar's Close: the app hides the window instead.</summary>
+    /// <summary>Close button, Alt+F4, the taskbar's Close or an outside WM_CLOSE: the app hides the window instead.</summary>
     public event Action? CloseRequested;
 
     /// <summary>The user finished resizing; new height in DIPs.</summary>
@@ -52,6 +53,7 @@ internal sealed class MainWindow : Form
     /// <summary>Destroys the window for real (exit, language switch, hidden too long).</summary>
     public void Destroy()
     {
+        _destroying = true;
         Pane.Dispose();
         Dispose();
     }
@@ -72,7 +74,8 @@ internal sealed class MainWindow : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (e.CloseReason == CloseReason.UserClosing)
+        // Only Destroy, Windows shutdown or Application.Exit really close it; TrayApp keeps using the window otherwise.
+        if (!_destroying && e.CloseReason is not (CloseReason.WindowsShutDown or CloseReason.ApplicationExitCall))
         {
             e.Cancel = true;
             CloseRequested?.Invoke();

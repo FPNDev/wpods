@@ -108,6 +108,8 @@ span.wp-menu__glyph { display: grid; place-items: center; }
 .wp-slider .wp-slider__input[aria-disabled="true"]::-webkit-slider-thumb { transform: none; }
 /* The busy spinner: hidden, it still keeps its space, so showing it never moves the layout. */
 .wp-busy:not(.is-busy) { visibility: hidden; }
+/* !important: the reduced-motion rule in bundle.css forces the spin with !important. */
+.wp-busy:not(.is-busy) > .wp-spinner { animation: none !important; }
 /* Mic lists (enhancement, mic modes): the row whose stage loads shows the spinner in its check slot. */
 .wp-choice.is-loading .wp-row__check { display: none; }
 .wp-choice > .wp-spinner { color: var(--accent-text); }

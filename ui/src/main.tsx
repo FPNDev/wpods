@@ -70,6 +70,7 @@ let pageTitle!: HTMLSpanElement;
 let appTitle!: HTMLDivElement;
 let body!: HTMLDivElement;
 let announce!: HTMLDivElement;
+let announceFrame = 0;
 const toast = createToast((action) => {
   if (action === 'openSettings') {
     post({ type: 'openBluetoothSettings' });
@@ -164,8 +165,12 @@ const renderPage = (): void => {
 
 const render = (): void => {
   if (store.announce) {
-    setText(announce, store.announce);
+    /* Cleared now, set next frame, so a repeated identical text is still spoken; a newer one cancels the pending one. */
+    const text = store.announce;
     store.announce = '';
+    cancelAnimationFrame(announceFrame);
+    setText(announce, '');
+    announceFrame = requestAnimationFrame(() => setText(announce, text));
   }
   if (store.toast) {
     toast.show(store.toast, store.toastCode);

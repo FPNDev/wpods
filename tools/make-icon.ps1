@@ -9,6 +9,13 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# The files are written through .NET, which resolves relative paths against the process cwd, not the PowerShell
+# location: resolve them here.
+$Out = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Out)
+if ($PngDir) {
+    $PngDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($PngDir)
+}
+
 $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
 $work = Join-Path ([IO.Path]::GetTempPath()) "wpods-icon-$PID"
 New-Item -ItemType Directory -Force $work | Out-Null
@@ -60,7 +67,7 @@ try {
         $w.Write($img.Png)
     }
     $w.Flush()
-    [IO.File]::WriteAllBytes([IO.Path]::GetFullPath($Out), $ms.ToArray())
+    [IO.File]::WriteAllBytes($Out, $ms.ToArray())
     Write-Host "Wrote $Out ($($ms.Length) bytes, sizes $(($images.Size) -join ', '))"
 }
 finally {

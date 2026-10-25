@@ -73,7 +73,7 @@ export type AccentRamp = { accent: string; dark1: string; dark2: string; dark3: 
 export type Language = { code: string; originalName: string; engName: string };
 export type MicStatus = 'notActive' | 'starting' | 'live' | 'problem';
 export type ToastId = 'noResponse' | 'connectFailed' | 'bluetoothOff' | 'micFailed' | 'lowLatencyFailed' | 'handsFreeFailed' | 'disconnectFailed'
-  | 'micModelFailed';
+  | 'micModelFailed' | 'micModeStopped' | 'settingsReset';
 type OfferState = 'offer' | 'connecting' | 'connected' | 'failed';
 export type Offer = { id: DeviceId; name: string; art: Art; batteries: Batteries; state: OfferState };
 

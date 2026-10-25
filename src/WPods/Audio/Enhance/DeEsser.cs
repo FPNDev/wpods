@@ -10,12 +10,18 @@ namespace WPods.Audio.Enhance;
 /// </summary>
 internal sealed class DeEsser : IMicStage
 {
+    // dB of a power from its log2 (10 * log10(2)); log2 of a gain from its dB (log2(10) / 20).
+    private const float PowerDbPerLog2 = 3.01029996f;
+    private const float Log2PerDb = 0.166096404f;
+
     private readonly Biquad _split = Biquad.LowPass(Level.SampleRate, 5000f, 0.7071f);
     private readonly Biquad _sideHighPass = Biquad.HighPass(Level.SampleRate, 5000f, 0.7071f);
     private readonly Biquad _sideLowPass = Biquad.LowPass(Level.SampleRate, 9000f, 0.7071f);
     private readonly float[] _low = new float[Denoiser.FrameSize];
     private readonly float[] _side = new float[Denoiser.FrameSize];
     private readonly float _thresholdDb;
+    // Envelope (amplitude) at the threshold; at or below it nothing is reduced.
+    private readonly float _thresholdLin;
     private readonly float _slope;
     private readonly float _maxReductionDb;
     private readonly float _attack = Level.Coefficient(1f);
@@ -25,6 +31,7 @@ internal sealed class DeEsser : IMicStage
     public DeEsser(float thresholdDb, float ratio = 4f, float maxReductionDb = 6f)
     {
         _thresholdDb = thresholdDb;
+        _thresholdLin = Level.DbToGain(thresholdDb);
         _slope = 1f - 1f / ratio;
         _maxReductionDb = maxReductionDb;
     }
@@ -42,10 +49,14 @@ internal sealed class DeEsser : IMicStage
         {
             float magnitude = MathF.Abs(side[i]);
             _envelope = magnitude + (magnitude > _envelope ? _attack : _release) * (_envelope - magnitude);
-            float overDb = Level.PowerToDb(_envelope * _envelope) - _thresholdDb;
+            if (_envelope <= _thresholdLin)
+            {
+                continue;
+            }
+            float overDb = PowerDbPerLog2 * MathF.Log2(_envelope * _envelope + 1e-12f) - _thresholdDb;
             if (overDb > 0f)
             {
-                float gain = Level.DbToGain(-MathF.Min(overDb * _slope, _maxReductionDb));
+                float gain = float.Exp2(-MathF.Min(overDb * _slope, _maxReductionDb) * Log2PerDb);
                 frame[i] = low[i] + (frame[i] - low[i]) * gain;
             }
         }

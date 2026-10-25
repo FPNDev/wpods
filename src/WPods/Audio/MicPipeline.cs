@@ -58,8 +58,6 @@ public sealed class MicPipeline
     private const int StallAfterMs = 8000;
     private const int RestartEveryMs = 5000;
     private const int MaxConsecutiveErrors = 8;
-    private const int LevelIntervalMs = 100;
-    private const float LevelDecay = 0.6f;
     private const int LevelLogIntervalMs = 1000;
     // Applied to the decoded signal before mode processing. Measured on AirPods Pro 2: normal speech
     // -33..-40 dBFS RMS, peaks -20..-26 dBFS; +12 dB puts speech near -25 dBFS RMS, peaks under the limiter knee.
@@ -83,8 +81,6 @@ public sealed class MicPipeline
     private bool _nativeFailed;
     private int _fill;
     private int _errors;
-    private float _peak;
-    private long _levelTick;
     private LevelMeter _inputMeter;
     private LevelMeter _outputMeter;
     private long _levelLogTick;
@@ -109,14 +105,13 @@ public sealed class MicPipeline
     // Saved mic mode of the attached pair.
     private MicMode _mode;
     private volatile MicStatus _status;
-    private float _level;
 
     public MicPipeline(ConnectionManager connections)
     {
         _connections = connections;
         _settings = connections.Settings;
-        _model = new StageSlot("mode model", (id, load) => ReportLocked(MicSlot.Mode, id, load));
-        _enhancement = new StageSlot("enhancement", (id, load) => ReportLocked(MicSlot.Enhancement, id, load));
+        _model = new StageSlot("mode model", (id, load, code) => ReportLocked(MicSlot.Mode, id, load, code));
+        _enhancement = new StageSlot("enhancement", (id, load, code) => ReportLocked(MicSlot.Enhancement, id, load, code));
         _timer = new Timer(static s => ((MicPipeline)s!).OnTimer(), this, Timeout.Infinite, Timeout.Infinite);
         _mic = new VirtualMic(OnCaptureChanged);
         connections.Attached += OnAttached;
@@ -141,8 +136,16 @@ public sealed class MicPipeline
     /// <summary>
     /// Load state of a slot's newest request (address of the attached pair, 0 after detach; option id or null = none).
     /// Raised in request order under the internal lock, on the thread that caused it: handlers must not block.
+    /// The last argument is why a load failed: "M4" the model file is missing, unreadable or damaged, "M0" anything
+    /// else; null otherwise (and for a load dropped by a detach).
     /// </summary>
-    public event Action<ulong, MicSlot, string?, StageLoad>? StageChanged;
+    public event Action<ulong, MicSlot, string?, StageLoad, string?>? StageChanged;
+
+    /// <summary>
+    /// A running stage threw and was dropped (address of the attached pair); its slot passes audio through until the
+    /// next request. Raised on the read loop under the internal lock: handlers must not block.
+    /// </summary>
+    public event Action<ulong>? StageStopped;
 
     public MicStatus Status => _status;
 
@@ -155,9 +158,6 @@ public sealed class MicPipeline
 
     /// <summary>An app captures from the virtual mic.</summary>
     public bool Capturing => _capturing;
-
-    /// <summary>Smoothed output peak 0..1, updated at most every 100 ms while <see cref="MicStatus.Live"/>; 0 otherwise.</summary>
-    public float Level => Volatile.Read(ref _level);
 
     /// <summary>
     /// Stops the AirPods mic stream (0x58 STOP) when a START was sent in the attached session. Completes when the
@@ -445,27 +445,33 @@ public sealed class MicPipeline
         }
         else
         {
-            for (; _fill - ready >= Denoiser.FrameSize; ready += Denoiser.FrameSize)
+            // Subnormals in the models' states take the slow path. The read loop runs on pool threads, so FTZ/DAZ is
+            // set only around the stages and the previous MXCSR is restored.
+            uint mxcsr = Native.wpn_fp_set_ftz_daz();
+            try
             {
-                Span<float> frame = _pcm.AsSpan(ready, Denoiser.FrameSize);
-                model?.Process(frame);
-                enhancement?.Process(frame);
+                for (; _fill - ready >= Denoiser.FrameSize; ready += Denoiser.FrameSize)
+                {
+                    Span<float> frame = _pcm.AsSpan(ready, Denoiser.FrameSize);
+                    model = RunStage(_model, model, frame);
+                    enhancement = RunStage(_enhancement, enhancement, frame);
+                }
+            }
+            finally
+            {
+                Native.wpn_fp_restore(mxcsr);
             }
             if (ready == 0)
             {
                 return;
             }
         }
-        float peak = _peak;
         for (int i = 0; i < ready; i++)
         {
             short sample = SoftLimiter.ToPcm16(_pcm[i]);
             _output[i] = sample;
-            float level = sample / 32768f;
-            _outputMeter.Add(level);
-            peak = MathF.Max(peak, MathF.Abs(level));
+            _outputMeter.Add(sample / 32768f);
         }
-        UpdateLevel(peak, now);
         _mic.Write(_output.AsSpan(0, ready));
         _fill -= ready;
         _pcm.AsSpan(ready, _fill).CopyTo(_pcm);
@@ -476,16 +482,28 @@ public sealed class MicPipeline
         }
     }
 
-    private void UpdateLevel(float peak, long now)
+    // Read loop. A stage that throws is dropped and the frame passes through as it is; returns the stage to keep running.
+    private IMicStage? RunStage(StageSlot slot, IMicStage? stage, Span<float> frame)
     {
-        if (now - _levelTick < LevelIntervalMs)
+        if (stage is null)
         {
-            _peak = peak;
-            return;
+            return null;
         }
-        _levelTick = now;
-        _peak = 0;
-        Volatile.Write(ref _level, MathF.Max(peak, Volatile.Read(ref _level) * LevelDecay));
+        try
+        {
+            stage.Process(frame);
+            return stage;
+        }
+        catch (Exception e)
+        {
+            string? id = slot.FailActive(e);
+            lock (_lock)
+            {
+                slot.ForgetLocked(id);
+                StageStopped?.Invoke(_session?.Address ?? 0);
+            }
+            return null;
+        }
     }
 
     // The config holds only listed ids (checked on load and by the page commands).
@@ -496,7 +514,7 @@ public sealed class MicPipeline
         _enhancement.RequestLocked(config.Enhancement is { } id ? MicCatalog.FindEnhancement(id) : null, _lock);
     }
 
-    private void ReportLocked(MicSlot slot, string? id, StageLoad load) => StageChanged?.Invoke(_session?.Address ?? 0, slot, id, load);
+    private void ReportLocked(MicSlot slot, string? id, StageLoad load, string? code) => StageChanged?.Invoke(_session?.Address ?? 0, slot, id, load, code);
 
     private void BeginWaitLocked(long now, string reason)
     {
@@ -580,10 +598,6 @@ public sealed class MicPipeline
         }
         Log.Info("mic", $"status {_status} -> {status} ({reason})");
         _status = status;
-        if (status != MicStatus.Live)
-        {
-            Volatile.Write(ref _level, 0f);
-        }
         StatusChanged?.Invoke(status);
     }
 
@@ -596,7 +610,7 @@ public sealed class MicPipeline
     /// request is reported (loading, then ready or failed; a stale creation reports nothing) under the pipeline lock.
     /// The *Locked methods run under the pipeline lock; TakeSwap on the read loop (ResetLocked after it ended).
     /// </summary>
-    private sealed class StageSlot(string kind, Action<string?, StageLoad> report)
+    private sealed class StageSlot(string kind, Action<string?, StageLoad, string?> report)
     {
         // Under the pipeline lock.
         private string? _requested;
@@ -626,11 +640,11 @@ public sealed class MicPipeline
             if (option?.Create is null)
             {
                 DisposeLater(PublishLocked(new Swap(option, null)));
-                report(id, StageLoad.Ready);
+                report(id, StageLoad.Ready, null);
                 return;
             }
             Log.Info("mic", $"{kind} {id} loading");
-            report(id, StageLoad.Loading);
+            report(id, StageLoad.Loading, null);
             _ = Task.Run(() => Create(option, generation, gate));
         }
 
@@ -640,7 +654,7 @@ public sealed class MicPipeline
             if (_requested != _published)
             {
                 Log.Info("mic", $"{kind} {_requested} load dropped (detached)");
-                report(_requested, StageLoad.Failed);
+                report(_requested, StageLoad.Failed, null);
             }
             _generation++;
             _requested = null;
@@ -665,6 +679,30 @@ public sealed class MicPipeline
             return _active;
         }
 
+        /// <summary>Read loop: the active stage threw; disposes it and runs none until the next swap. Returns its option id.</summary>
+        public string? FailActive(Exception e)
+        {
+            string? id = ActiveOption?.Id;
+            Log.Error("mic", $"{kind} {id} failed while running, dropped", e);
+            DisposeLater(_active);
+            _active = null;
+            ActiveOption = null;
+            return id;
+        }
+
+        /// <summary>After <see cref="FailActive"/>: a later request for the dropped option creates it again.</summary>
+        public void ForgetLocked(string? id)
+        {
+            if (_requested == id)
+            {
+                _requested = null;
+            }
+            if (_published == id)
+            {
+                _published = null;
+            }
+        }
+
         private void Create(MicOption option, int generation, Lock gate)
         {
             IMicStage stage;
@@ -681,7 +719,9 @@ public sealed class MicPipeline
                     if (generation == _generation)
                     {
                         _requested = _published;
-                        report(option.Id, StageLoad.Failed);
+                        // M4: the model file is missing, unreadable or damaged; M0: any other failure.
+                        bool file = e is IOException or UnauthorizedAccessException or InvalidDataException;
+                        report(option.Id, StageLoad.Failed, file ? "M4" : "M0");
                     }
                 }
                 return;
@@ -693,7 +733,7 @@ public sealed class MicPipeline
                 if (generation == _generation)
                 {
                     unused = PublishLocked(new Swap(option, stage));
-                    report(option.Id, StageLoad.Ready);
+                    report(option.Id, StageLoad.Ready, null);
                 }
                 else
                 {

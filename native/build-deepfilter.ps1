@@ -5,6 +5,8 @@
 # feature is never referenced and the linker drops it.
 # Output: .build\native\bin\deepfilter.dll, .build\native\bin\DeepFilterNet3_onnx.tar.gz
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
+$ProgressPreference = 'SilentlyContinue'
 
 $Tag = 'v0.5.6'
 $Commit = '978576aa8400552a4ce9730838c635aa30db5e61'

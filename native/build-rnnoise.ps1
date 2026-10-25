@@ -1,7 +1,9 @@
-# Builds rnnoise.dll (x64, MSVC /O2, hybrid CRT: static vcruntime + system UCRT) from the pinned RNNoise release.
+# Builds rnnoise.dll (x64, MSVC /O2 /guard:cf, hybrid CRT: static vcruntime + system UCRT) from the pinned RNNoise release.
 # SIMD: SSE2 baseline + SSE4.1/AVX2 kernels selected at runtime by RNNoise's own x86 RTCD (cpuid).
 # Output: .build\native\bin\rnnoise.dll
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
+$ProgressPreference = 'SilentlyContinue'
 
 $Version = '0.2'
 $Url = "https://github.com/xiph/rnnoise/releases/download/v$Version/rnnoise-$Version.tar.gz"
@@ -48,7 +50,7 @@ foreach ($line in (cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul 2>nul &&
 }
 
 # __SSE2__ selects the SSE code path in vec.h exactly like gcc/clang on x64 (MSVC does not define it).
-$cflags = @('/nologo', '/c', '/O2', '/MT', '/Gy', '/Gw', '/Brepro', "/I$s\include", "/I$s\src",
+$cflags = @('/nologo', '/c', '/O2', '/MT', '/Gy', '/Gw', '/guard:cf', '/Brepro', "/I$s\include", "/I$s\src",
     '/DWIN32', '/DRNNOISE_BUILD', '/DDLL_EXPORT', '/DRNN_ENABLE_X86_RTCD', '/D__SSE2__', "/Fo$obj\")
 $base = 'denoise', 'rnn', 'pitch', 'kiss_fft', 'celt_lpc', 'nnet', 'nnet_default', 'parse_lpcnet_weights', 'rnnoise_data', 'rnnoise_tables'
 $files = @(foreach ($f in $base) { "$s\src\$f.c" }) + "$s\src\x86\x86_dnn_map.c", "$s\src\x86\x86cpu.c"
@@ -66,7 +68,7 @@ if ($LASTEXITCODE) {
     throw 'cl failed (avx2)'
 }
 
-link /nologo /DLL /Brepro /OPT:REF /OPT:ICF /NODEFAULTLIB:libucrt.lib ucrt.lib "/OUT:$bin\rnnoise.dll" "/IMPLIB:$obj\rnnoise.lib" (Get-ChildItem "$obj\*.obj").FullName
+link /nologo /DLL /guard:cf /Brepro /OPT:REF /OPT:ICF /NODEFAULTLIB:libucrt.lib ucrt.lib "/OUT:$bin\rnnoise.dll" "/IMPLIB:$obj\rnnoise.lib" (Get-ChildItem "$obj\*.obj").FullName
 if ($LASTEXITCODE) {
     throw 'link failed'
 }

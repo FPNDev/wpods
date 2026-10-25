@@ -13,7 +13,7 @@ if (-not $msbuild) {
 }
 
 $now = Get-Date
-$date = $now.ToString('MM/dd/yyyy')
+$date = $now.ToString('MM/dd/yyyy', [cultureinfo]::InvariantCulture)
 $version = '{0}.{1}.{2}.{3}' -f $now.Year, ($now.Month * 100 + $now.Day), ($now.Hour * 100 + $now.Minute), $now.Second
 
 $drivers = @(

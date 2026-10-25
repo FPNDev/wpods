@@ -5,8 +5,9 @@
 # (shape [1, 1, hidden]), the nodes that only built the zero state are removed, and all shapes are made static for one
 # frame per call (input / output [1, 1, bins]). Weights and every other node are unchanged.
 # Check: the streamed model (one frame per call, state fed back) reproduces the upstream model run on the whole
-# sequence.
+# sequence (max abs difference above 1e-4 fails the export; out .onnx is written only after the check passed).
 # Usage: python export_nsnet2.py <upstream .onnx> <out .onnx>
+import os
 import sys
 
 import numpy as np
@@ -57,23 +58,32 @@ def main():
         graph.initializer.remove(init)
     del graph.value_info[:]
     onnx.checker.check_model(model)
-    onnx.save(model, out_path)
-
-    # Check against the upstream model on a 200-frame log-power feature sequence.
-    rng = np.random.default_rng(0)
-    frames = 200
-    feat = np.log10(np.maximum((rng.standard_normal((1, frames, bins)) * 0.1) ** 2, 1e-12)).astype(np.float32)
-    feat[:, 50:150, :bins // 4] += 4
-    full = ort.InferenceSession(src).run(None, {"input": feat})[0]
-    stream = ort.InferenceSession(out_path)
-    state = [np.zeros(s.shape, np.float32) for s in stream.get_inputs()[1:]]
-    names = [s.name for s in stream.get_inputs()]
-    worst = 0.0
-    for t in range(frames):
-        result = stream.run(None, dict(zip(names, [feat[:, t:t + 1, :]] + state)))
-        state = result[1:]
-        worst = max(worst, float(np.abs(result[0][0, 0] - full[0, t]).max()))
-    print(f"{out_path}: {bins} bins, GRU states {[s.shape for s in state]}, max |stream - upstream| {worst:.2e}")
+    # Saved under a temporary name and renamed only after the check passed: export-models.ps1 skips the export when
+    # out_path exists, so out_path must never hold an unchecked model.
+    tmp_path = out_path + ".tmp"
+    onnx.save(model, tmp_path)
+    try:
+        # Check against the upstream model on a 200-frame log-power feature sequence.
+        rng = np.random.default_rng(0)
+        frames = 200
+        feat = np.log10(np.maximum((rng.standard_normal((1, frames, bins)) * 0.1) ** 2, 1e-12)).astype(np.float32)
+        feat[:, 50:150, :bins // 4] += 4
+        full = ort.InferenceSession(src).run(None, {"input": feat})[0]
+        stream = ort.InferenceSession(tmp_path)
+        state = [np.zeros(s.shape, np.float32) for s in stream.get_inputs()[1:]]
+        names = [s.name for s in stream.get_inputs()]
+        worst = 0.0
+        for t in range(frames):
+            result = stream.run(None, dict(zip(names, [feat[:, t:t + 1, :]] + state)))
+            state = result[1:]
+            worst = max(worst, float(np.abs(result[0][0, 0] - full[0, t]).max()))
+        print(f"{out_path}: {bins} bins, GRU states {[s.shape for s in state]}, max |stream - upstream| {worst:.2e}")
+        if worst > 1e-4:
+            sys.exit(f"{out_path}: streamed model does not match upstream, mismatch {worst:.2e}")
+        os.replace(tmp_path, out_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 if __name__ == "__main__":

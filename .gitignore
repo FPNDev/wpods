@@ -9,3 +9,5 @@ dist/
 ui/node_modules/
 src/WPods/web/
 *.code-workspace
+ERRORS.md
+REVIEW.md

@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using WPods.Core;
@@ -20,14 +19,22 @@ internal sealed partial class TrayApp
 
     private readonly Icon _appIcon;
     private readonly System.Windows.Forms.Timer _hideTimer = new();
+    private readonly System.Windows.Forms.Timer _popupTimer = new();
     private Task<CoreWebView2Environment>? _environment;
     private MainWindow? _main;
     private bool _mainShown;
     private bool _suspendPending;
+    // The main page got its init: a re-show sends only what can change while hidden.
+    private bool _mainInitSent;
     private Point? _mainPosition;
     private PopupWindow? _popup;
     private bool _popupShown;
     private double _popupHeight;
+    // No offers: the popup is hidden and kept for the next case open (see ParkPopup).
+    private bool _popupParked;
+    private bool _popupSuspendPending;
+    // Popups open on their own (case open): their WebView2 failure balloon shows once per run.
+    private bool _popupFailureShown;
 
     private bool Dark => _prefs.Theme == "dark" || (_prefs.Theme == "auto" && !_appsLight);
 
@@ -64,7 +71,14 @@ internal sealed partial class TrayApp
             window.Show();
             if (window.Pane.Ready)
             {
-                SendMainInit();
+                if (_mainInitSent)
+                {
+                    SendMainRefresh(window.Pane);
+                }
+                else
+                {
+                    SendMainInit();
+                }
             }
         }
         if (window.WindowState == FormWindowState.Minimized)
@@ -92,11 +106,16 @@ internal sealed partial class TrayApp
                 await pane.InitializeAsync(environment, window.Handle, "index.html", MainBackground);
             }
         }
-        catch (Exception e) when (e is WebView2RuntimeNotFoundException or COMException or InvalidOperationException or ArgumentException)
+        catch (Exception e)
         {
-            // No usable WebView2 runtime: the window stays empty; the next show tries again.
+            // No usable WebView2: drop the empty window so the next show tries again.
             Log.Error("ui", "main window: WebView2 init failed", e);
             _environment = null;
+            if (_main == window)
+            {
+                DestroyMain();
+                ShowWebViewFailed();
+            }
         }
     }
 
@@ -153,6 +172,7 @@ internal sealed partial class TrayApp
         Log.Info("ui", "main window: destroy");
         _main = null;
         _mainShown = false;
+        _mainInitSent = false;
         _hideTimer.Stop();
         window.Destroy();
     }
@@ -166,9 +186,14 @@ internal sealed partial class TrayApp
         }
     }
 
-    // A WebView2 process died: rebuild that window's page.
-    private void OnPaneFailed(WebPane pane)
+    // A WebView2 process died (UI thread; the pane is no longer Ready): rebuild that window's page.
+    private void OnPaneFailed(WebPane pane, CoreWebView2ProcessFailedKind kind)
     {
+        if (kind == CoreWebView2ProcessFailedKind.BrowserProcessExited)
+        {
+            // The cached environment's browser process is gone: the rebuild creates a new one.
+            _environment = null;
+        }
         _ui.Post(static s =>
         {
             var (app, failed) = ((TrayApp, WebPane))s!;
@@ -244,6 +269,40 @@ internal sealed partial class TrayApp
         MessageWriter.WriteMicConfig(w, "micConfig", _settings.Mic);
         w.WriteBoolean("visible", _mainShown);
         PostMain(_writer.End());
+        _mainInitSent = true;
+        if (_settingsResetPending)
+        {
+            _settingsResetPending = false;
+            QueueToast("settingsReset", 0, "S1");
+        }
+    }
+
+    // Re-show of a page that has its init: what can change while it is hidden (sends to a hidden page are dropped).
+    private void SendMainRefresh(WebPane pane)
+    {
+        Array.Clear(_lastSent);
+        PostVisibility(pane, true);
+        SendDevices();
+        Utf8JsonWriter w = _writer.Begin("state");
+        MessageWriter.WriteState(w, _session?.State);
+        PostMain(_writer.End());
+        w = _writer.Begin("mic");
+        w.WriteString("status", MessageWriter.Camel(_micStatus));
+        SendMain(Sent.Mic, _writer.End(), force: false);
+        SendStartupPref();
+        w = _writer.Begin("accent");
+        MessageWriter.WriteAccent(w, _accent);
+        PostMain(_writer.End());
+        w = _writer.Begin("micConfig");
+        MessageWriter.WriteMicConfig(w, "config", _settings.Mic);
+        PostMain(_writer.End());
+        foreach (string? stage in _micStages)
+        {
+            if (stage is not null)
+            {
+                PostMain(stage);
+            }
+        }
     }
 
     // attached ?? last used ?? first device.
@@ -299,15 +358,70 @@ internal sealed partial class TrayApp
     {
         if (_offers.Count == 0)
         {
-            DestroyPopup();
+            ParkPopup();
             return;
         }
-        if (_popup is null)
+        if (_popup is not { } window)
         {
             CreatePopup();
             return;
         }
-        _popup.Pane.Post(OffersMessage("offers"));
+        if (!_popupParked)
+        {
+            window.Pane.Post(OffersMessage("offers"));
+            return;
+        }
+        Log.Info("ui", $"popup: reuse ({_offers.Count} offers)");
+        _popupParked = false;
+        _popupTimer.Stop();
+        window.Pane.SetVisible(true);
+        // Full init: a suspended page may have missed labels, prefs or accent sent while parked.
+        if (window.Pane.Ready)
+        {
+            SendPopupInit();
+        }
+        // Card height unchanged since its last report: the page reports no new size, so show at that height.
+        if (_popupHeight > 0)
+        {
+            OnPopupSize(_popupHeight);
+        }
+    }
+
+    // No offers: hide the popup and keep its page, so the next case open skips the WebView2 cold start.
+    // The empty offers make the page hide its card and report height 0. 30 s parked: suspend; 10 min: destroy.
+    private void ParkPopup()
+    {
+        if (_popup is not { } window || _popupParked)
+        {
+            return;
+        }
+        Log.Info("ui", "popup: park");
+        HidePopup();
+        window.Pane.Post(OffersMessage("offers"));
+        _popupParked = true;
+        _popupSuspendPending = true;
+        _popupTimer.Interval = (int)SuspendAfter.TotalMilliseconds;
+        _popupTimer.Start();
+    }
+
+    private async void OnPopupTimer(object? sender, EventArgs e)
+    {
+        _popupTimer.Stop();
+        if (_popup is not { } window || !_popupParked)
+        {
+            return;
+        }
+        if (_popupSuspendPending)
+        {
+            _popupSuspendPending = false;
+            _popupTimer.Interval = (int)(DestroyAfter - SuspendAfter).TotalMilliseconds;
+            _popupTimer.Start();
+            Log.Info("ui", "popup: suspend page");
+            window.Pane.SetVisible(false);
+            await window.Pane.SuspendAsync();
+            return;
+        }
+        DestroyPopup();
     }
 
     private async void CreatePopup()
@@ -316,6 +430,7 @@ internal sealed partial class TrayApp
         var pane = new WebPane(OnPopupMessage, OnPaneFailed);
         var window = new PopupWindow(PopupBackground, Dark, pane);
         window.ScaleChanged += PlacePopup;
+        window.CloseRequested += HidePopup;
         _popup = window;
         _popupShown = false;
         _popupHeight = 0;
@@ -335,10 +450,20 @@ internal sealed partial class TrayApp
                 await pane.InitializeAsync(environment, handle, "popup.html", PopupBackground);
             }
         }
-        catch (Exception e) when (e is WebView2RuntimeNotFoundException or COMException or InvalidOperationException or ArgumentException)
+        catch (Exception e)
         {
             Log.Error("ui", "popup: WebView2 init failed", e);
             _environment = null;
+            if (_popup == window)
+            {
+                // Dropped so the next offers retry with a new popup.
+                DestroyPopup();
+                if (!_popupFailureShown)
+                {
+                    _popupFailureShown = true;
+                    ShowWebViewFailed();
+                }
+            }
         }
     }
 
@@ -402,6 +527,8 @@ internal sealed partial class TrayApp
         HidePopup();
         Log.Info("ui", "popup: destroy");
         _popup = null;
+        _popupParked = false;
+        _popupTimer.Stop();
         window.Destroy();
     }
 

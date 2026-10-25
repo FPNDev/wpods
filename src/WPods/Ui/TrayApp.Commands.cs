@@ -24,6 +24,8 @@ internal sealed partial class TrayApp
     private readonly Lock _linkLock = new();
     private readonly Dictionary<ulong, TaskCompletionSource> _linkWaits = [];
     private readonly Dictionary<ulong, TaskCompletionSource> _attachWaits = [];
+    // Last micStage message per MicSlot, replayed when the hidden main page shows again (it missed the ones since).
+    private readonly string?[] _micStages = new string?[2];
 
     private void OnMainMessage(WebPane pane, PageMessage m)
     {
@@ -487,21 +489,23 @@ internal sealed partial class TrayApp
     }
 
     // Under MicPipeline's lock (serialized); applied on the UI thread in the same order.
-    private void OnMicStage(ulong address, MicSlot slot, string? id, StageLoad load) =>
-        _ui.Post(_ => ApplyMicStage(address, slot, id, load), null);
+    private void OnMicStage(ulong address, MicSlot slot, string? id, StageLoad load, string? code) =>
+        _ui.Post(_ => ApplyMicStage(address, slot, id, load, code), null);
 
-    // Load state only (the config is saved when picked). A failed load keeps the previous stage running: toast, except
-    // for a load dropped by a detach (address 0).
-    private void ApplyMicStage(ulong address, MicSlot slot, string? id, StageLoad load)
+    // Load state only (the config is saved when picked). A failed load keeps the previous stage running: toast with
+    // its code, except for a load dropped by a detach (address 0).
+    private void ApplyMicStage(ulong address, MicSlot slot, string? id, StageLoad load, string? code)
     {
         Utf8JsonWriter w = _writer.Begin("micStage");
         w.WriteString("slot", MessageWriter.Camel(slot));
         w.WriteString("id", id);
         w.WriteString("state", MessageWriter.Camel(load));
-        PostMain(_writer.End());
+        string json = _writer.End();
+        _micStages[(int)slot] = json;
+        PostMain(json);
         if (load == StageLoad.Failed && address != 0)
         {
-            SendToast("micModelFailed", address);
+            SendToast("micModelFailed", address, code);
         }
     }
 

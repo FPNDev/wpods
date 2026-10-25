@@ -51,6 +51,11 @@ void __stdcall wpn_media_forget(void);
 // the present BTHENUM\DEV_<address> devnode; A2DP and Hands-Free endpoints share it), 0 if not or
 // if there is no default render endpoint, negative HRESULT on error.
 int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress);
+// Sets flush-to-zero (0x8000) and denormals-are-zero (0x0040) in the calling thread's MXCSR and returns the
+// previous MXCSR. Pair with wpn_fp_restore on the same thread, so a thread-pool thread is handed back unchanged.
+uint32_t __stdcall wpn_fp_set_ftz_daz(void);
+// Writes mxcsr (a value returned by wpn_fp_set_ftz_daz) back to the calling thread's MXCSR.
+void __stdcall wpn_fp_restore(uint32_t mxcsr);
 
 #ifdef __cplusplus
 }

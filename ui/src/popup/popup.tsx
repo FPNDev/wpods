@@ -53,6 +53,7 @@ let failed!: HTMLDivElement;
 let retry!: HTMLButtonElement;
 let close!: HTMLButtonElement;
 let announce!: HTMLDivElement;
+let announceFrame = 0;
 const root = (
   <div class="wp-popup wp-popup--window" role="dialog" hidden ref={card}>
     {offerView.el}
@@ -98,6 +99,9 @@ const setOffers = (next: Offer[]): void => {
   seen = now;
   dev = active ?? (next.length === 1 ? next[0] : null);
   view = active ? active.state : next.length === 1 ? 'offer' : next.length > 1 ? 'multi' : 'none';
+  if (view !== 'connected') {
+    confirmFor = null;
+  }
 };
 
 const render = (): void => {
@@ -110,8 +114,12 @@ const render = (): void => {
   setHidden(done, view !== 'connected');
   setHidden(failed, view !== 'failed');
   if (announceText) {
-    setText(announce, announceText);
+    /* Cleared now, set next frame, so a repeated identical text is still spoken; a newer one cancels the pending one. */
+    const text = announceText;
     announceText = '';
+    cancelAnimationFrame(announceFrame);
+    setText(announce, '');
+    announceFrame = requestAnimationFrame(() => setText(announce, text));
   }
   if (view === 'multi') {
     list.render(offers);

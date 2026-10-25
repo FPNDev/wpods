@@ -239,7 +239,9 @@ public sealed class ConnectionManager : IAsyncDisposable
         bool accepted = false;
         try
         {
-            for (int attempt = 1; attempt <= 2 && _link.IsUp(address); attempt++)
+            // Checked again before attempt 2: a lid open or Connect within the wait clears the flag, and a second
+            // request would drop the link the user just reconnected.
+            for (int attempt = 1; attempt <= 2 && _link.IsUp(address) && GetIdle(address) == IdleReason.UserDisconnected; attempt++)
             {
                 int hr = await Task.Run(() => Native.wpn_bt_disconnect_audio(address)).ConfigureAwait(false);
                 Log.Info("conn", $"DisconnectAsync {Mac.Format(address)}: disconnect audio attempt {attempt}/2 hr=0x{hr:X8}");
@@ -658,7 +660,15 @@ public sealed class ConnectionManager : IAsyncDisposable
             }
         };
         Volatile.Write(ref _session, session);
-        Settings.LastUsed = address;
+        try
+        {
+            Settings.LastUsed = address;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Kept in memory and written with the next settings change; the attach goes on.
+            Log.Warn("conn", $"lastUsed not saved: {e.Message}");
+        }
         SetIdle(address, IdleReason.None, "attached");
         Attached?.Invoke(session);
         session.Start();

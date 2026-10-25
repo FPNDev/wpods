@@ -8,6 +8,10 @@ namespace WPods.Audio.Enhance;
 /// </summary>
 internal sealed class Expander : IMicStage
 {
+    // dB of a power from its log2 (10 * log10(2)); log2 of a gain from its dB (log2(10) / 20).
+    private const float PowerDbPerLog2 = 3.01029996f;
+    private const float Log2PerDb = 0.166096404f;
+
     private readonly float _thresholdDb;
     private readonly float _ratioMinusOne;
     private readonly float _floorDb;
@@ -16,6 +20,8 @@ internal sealed class Expander : IMicStage
     private readonly float _detect = Level.Coefficient(10f);
     private float _power;
     private float _envelopeDb = -120f;
+    // Detector power (+ floor) the envelope was last set from; the envelope stays at its dB while holding.
+    private float _envelopePower;
     private int _hold;
 
     public Expander(float thresholdDb, float ratio = 2f, float floorDb = -15f, float holdMs = 100f, float releaseDbPerSecond = 100f)
@@ -33,24 +39,31 @@ internal sealed class Expander : IMicStage
         {
             float x = frame[i];
             _power = x * x + _detect * (_power - x * x);
-            float levelDb = Level.PowerToDb(_power);
-            if (levelDb >= _envelopeDb)
+            float power = _power + 1e-12f;
+            if (_hold > 0 && power < _envelopePower)
             {
-                _envelopeDb = levelDb;
-                _hold = _holdSamples;
-            }
-            else if (_hold > 0)
-            {
+                // Holding below the envelope: the level in dB is not needed.
                 _hold--;
             }
             else
             {
-                _envelopeDb = MathF.Max(levelDb, _envelopeDb - _releaseDbPerSample);
+                // Holding at or above the envelope power means the level in dB is at or above the envelope (attack).
+                float levelDb = PowerDbPerLog2 * MathF.Log2(power);
+                if (levelDb >= _envelopeDb)
+                {
+                    _envelopeDb = levelDb;
+                    _envelopePower = power;
+                    _hold = _holdSamples;
+                }
+                else
+                {
+                    _envelopeDb = MathF.Max(levelDb, _envelopeDb - _releaseDbPerSample);
+                }
             }
             float underDb = _envelopeDb - _thresholdDb;
             if (underDb < 0f)
             {
-                frame[i] = x * Level.DbToGain(MathF.Max(underDb * _ratioMinusOne, _floorDb));
+                frame[i] = x * float.Exp2(MathF.Max(underDb * _ratioMinusOne, _floorDb) * Log2PerDb);
             }
         }
     }

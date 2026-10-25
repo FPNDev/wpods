@@ -426,4 +426,12 @@ internal static unsafe partial class Native
     [LibraryImport("wpods_native.dll")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     public static partial int wpn_bt_disconnect_audio(ulong btAddress);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial uint wpn_fp_set_ftz_daz();
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial void wpn_fp_restore(uint mxcsr);
 }

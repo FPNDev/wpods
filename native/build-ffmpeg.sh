@@ -2,6 +2,7 @@
 # Configures, builds and installs a minimal LGPL FFmpeg with MSVC: avcodec (aac decoder only) + avutil + swresample.
 # --enable-small strips help/name strings; --optflags=-O2 keeps speed codegen (measured: same decode speed as plain
 # -O2, ~75 KB smaller; MSVC -O1 would be ~12% slower). -MT + -NODEFAULTLIB:libucrt.lib + ucrt.lib = hybrid CRT.
+# -guard:cf (compile + link) = Control Flow Guard.
 # Called by build-ffmpeg.ps1 from an MSVC x64 environment. Args: <source dir> <build dir> <install prefix>
 set -euo pipefail
 src=$1
@@ -19,6 +20,6 @@ cd "$build"
     --disable-network --disable-pixelutils --disable-iamf \
     --disable-everything --enable-decoder=aac \
     --enable-small --optflags=-O2 \
-    --extra-cflags=-MT --extra-ldflags=-NODEFAULTLIB:libucrt.lib --extra-libs=ucrt.lib
+    --extra-cflags="-MT -guard:cf" --extra-ldflags="-NODEFAULTLIB:libucrt.lib -guard:cf" --extra-libs=ucrt.lib
 make -j"$(nproc)"
 make install

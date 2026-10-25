@@ -1,12 +1,23 @@
 # Builds minimal LGPL FFmpeg DLLs (avcodec with only the aac decoder, avutil, swresample), x64, MSVC.
 # Hybrid CRT (static vcruntime + system UCRT): DLLs import only Windows/UCRT DLLs and each other.
-# Needs MSYS2 at C:\msys64 (make, diffutils, nasm are installed by this script).
+# Needs MSYS2 at C:\msys64 (pinned make, diffutils, nasm packages are installed by this script).
 # Output: .build\native\bin\{avcodec,avutil,swresample}-*.dll (headers + import libs: .build\native\ffmpeg)
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
+$ProgressPreference = 'SilentlyContinue'
 
 $Version = '7.1.5'
 $Url = "https://ffmpeg.org/releases/ffmpeg-$Version.tar.xz"
 $Sha256 = 'DE668509CAF9E35E3CD162473441FDB29538C6D96ED080292B3CF9E6FC5D558F'
+
+# MSYS2 build tools, exact package files (installed with pacman -U). Their dependencies (sh, libintl, libiconv) are
+# part of the base MSYS2 install.
+$MsysRepo = 'https://repo.msys2.org/msys/x86_64'
+$MsysPackages = [ordered]@{
+    'make-4.4.1-3-x86_64.pkg.tar.zst'     = 'AF0BDBA17F06FE037F0194069ADAA31A8FE45F1A11381501896AEA1FAE37BD5D'
+    'diffutils-3.12-1-x86_64.pkg.tar.zst' = '7902C8CE3D4DD69A0F5E98DC9D5C83C17B23314BA486169DB57EF6E2835CE3B6'
+    'nasm-3.02-1-x86_64.pkg.tar.zst'      = '1AB3D9D7F86F57A66CC506799648527B9215C3EB1B7BD404D886D59B503A05B7'
+}
 
 $root = [IO.Path]::GetFullPath("$PSScriptRoot\..\.build\native")
 $dl = "$root\src\dl"
@@ -20,15 +31,21 @@ if (-not (Test-Path $bash)) {
 }
 New-Item -ItemType Directory -Force $dl, $bin | Out-Null
 
-$archive = "$dl\ffmpeg-$Version.tar.xz"
-if (-not (Test-Path $archive) -or (Get-FileHash $archive -Algorithm SHA256).Hash -ne $Sha256) {
-    Invoke-WebRequest $Url -OutFile $archive
-    $hash = (Get-FileHash $archive -Algorithm SHA256).Hash
+# Downloads url to path unless path already has the expected hash.
+function Get-Pinned([string]$Url, [string]$Path, [string]$Sha256) {
+    if ((Test-Path $Path) -and (Get-FileHash $Path -Algorithm SHA256).Hash -eq $Sha256) {
+        return
+    }
+    Invoke-WebRequest $Url -OutFile $Path
+    $hash = (Get-FileHash $Path -Algorithm SHA256).Hash
     if ($hash -ne $Sha256) {
-        Remove-Item $archive
+        Remove-Item $Path
         throw "SHA-256 mismatch for $Url`: got $hash, expected $Sha256"
     }
 }
+
+$archive = "$dl\ffmpeg-$Version.tar.xz"
+Get-Pinned $Url $archive $Sha256
 
 foreach ($dir in $src, $obj, $prefix) {
     if (Test-Path $dir) {
@@ -41,7 +58,12 @@ if ($LASTEXITCODE) {
     throw 'tar failed'
 }
 
-& $bash -lc 'pacman -S --needed --noconfirm make diffutils nasm'
+# MSYS2 paths, single-quoted for the shell.
+$packages = foreach ($name in $MsysPackages.Keys) {
+    Get-Pinned "$MsysRepo/$name" "$dl\$name" $MsysPackages[$name]
+    "'$(& 'C:\msys64\usr\bin\cygpath.exe' -u "$dl\$name")'"
+}
+& $bash -lc "pacman -U --noconfirm $packages"
 if ($LASTEXITCODE) {
     throw 'pacman failed'
 }

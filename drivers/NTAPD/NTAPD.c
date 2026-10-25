@@ -42,6 +42,10 @@ typedef struct _AAP_DEVICE_CONTEXT {
     ULONG Posted;
     KEVENT NothingPosted;
     AAP_SLOT Slots[AAP_READ_SLOTS];
+    // Channel close: sent async from cleanup, CloseDone is set while none is outstanding.
+    WDFREQUEST CloseRequest;
+    BRB CloseBrb;
+    KEVENT CloseDone;
 } AAP_DEVICE_CONTEXT, *PAAP_DEVICE_CONTEXT;
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(AAP_DEVICE_CONTEXT, AapGetDeviceContext)
 
@@ -58,6 +62,7 @@ EVT_WDF_IO_QUEUE_IO_WRITE AapEvtIoWrite;
 EVT_WDF_IO_QUEUE_IO_STOP AapEvtIoStop;
 EVT_WDF_REQUEST_COMPLETION_ROUTINE AapEvtOpenComplete;
 EVT_WDF_REQUEST_COMPLETION_ROUTINE AapEvtReadComplete;
+EVT_WDF_REQUEST_COMPLETION_ROUTINE AapEvtCloseComplete;
 EVT_WDF_REQUEST_COMPLETION_ROUTINE AapEvtWriteComplete;
 
 static VOID AapPostSlot(_In_ PAAP_DEVICE_CONTEXT Ctx, _In_ PAAP_SLOT Slot);
@@ -165,6 +170,8 @@ AapPostSlot(_In_ PAAP_DEVICE_CONTEXT Ctx, _In_ PAAP_SLOT Slot)
     WDF_REQUEST_REUSE_PARAMS reuse;
     struct _BRB_L2CA_ACL_TRANSFER* brb = &Slot->Brb.BrbL2caAclTransfer;
     NTSTATUS status;
+    KIRQL irql;
+    BOOLEAN connected;
 
     WDF_REQUEST_REUSE_PARAMS_INIT(&reuse, WDF_REQUEST_REUSE_NO_FLAGS, STATUS_SUCCESS);
     status = WdfRequestReuse(Slot->Request, &reuse);
@@ -179,6 +186,16 @@ AapPostSlot(_In_ PAAP_DEVICE_CONTEXT Ctx, _In_ PAAP_SLOT Slot)
     }
     if (status != STATUS_PENDING) {
         AapReadDone(Ctx, Slot, status);
+        return;
+    }
+
+    // Cleanup clears Connected under the lock before it cancels posted slots, so a send that may have
+    // missed its cancel sees FALSE here. Cancelled outside the lock: completion takes it.
+    KeAcquireSpinLock(&Ctx->Lock, &irql);
+    connected = Ctx->Connected;
+    KeReleaseSpinLock(&Ctx->Lock, irql);
+    if (!connected) {
+        WdfRequestCancelSentRequest(Slot->Request);
     }
 }
 
@@ -242,6 +259,7 @@ AapEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT DeviceInit)
     ctx->IoTarget = WdfDeviceGetIoTarget(device);
     KeInitializeSpinLock(&ctx->Lock);
     KeInitializeEvent(&ctx->NothingPosted, NotificationEvent, TRUE);
+    KeInitializeEvent(&ctx->CloseDone, NotificationEvent, TRUE);
 
     status = WdfFdoQueryForInterface(
         device,
@@ -279,6 +297,12 @@ AapEvtDeviceAdd(_In_ WDFDRIVER Driver, _Inout_ PWDFDEVICE_INIT DeviceInit)
             return status;
         }
     }
+    WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
+    attributes.ParentObject = device;
+    status = WdfRequestCreate(&attributes, ctx->IoTarget, &ctx->CloseRequest);
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
 
     return WdfDeviceCreateDeviceInterface(device, &GUID_NTAPD_DEVICE_INTERFACE, NULL);
 }
@@ -307,6 +331,12 @@ AapEvtFileCreate(_In_ WDFDEVICE Device, _In_ WDFREQUEST Request, _In_ WDFFILEOBJ
 
     if (InterlockedCompareExchange(&ctx->Opened, 1, 0) != 0) {
         WdfRequestComplete(Request, STATUS_SHARING_VIOLATION);
+        return;
+    }
+    // A read or close left outstanding by a timed-out cleanup still owns its request; opening would reuse it.
+    if (KeReadStateEvent(&ctx->NothingPosted) == 0 || KeReadStateEvent(&ctx->CloseDone) == 0) {
+        InterlockedExchange(&ctx->Opened, 0);
+        WdfRequestComplete(Request, STATUS_DEVICE_BUSY);
         return;
     }
 
@@ -409,37 +439,84 @@ AapEvtReadComplete(
 }
 
 VOID
+AapEvtCloseComplete(
+    _In_ WDFREQUEST Request,
+    _In_ WDFIOTARGET Target,
+    _In_ PWDF_REQUEST_COMPLETION_PARAMS Params,
+    _In_ WDFCONTEXT Context
+    )
+{
+    UNREFERENCED_PARAMETER(Request);
+    UNREFERENCED_PARAMETER(Params);
+    UNREFERENCED_PARAMETER(Context);
+    KeSetEvent(&AapGetDeviceContext(WdfIoTargetGetDevice(Target))->CloseDone, IO_NO_INCREMENT, FALSE);
+}
+
+// State is read under the lock, the cancel runs after release: completion takes the lock.
+static VOID
+AapCancelPosted(_In_ PAAP_DEVICE_CONTEXT Ctx)
+{
+    KIRQL irql;
+    ULONG i;
+    BOOLEAN posted;
+
+    for (i = 0; i < AAP_READ_SLOTS; i++) {
+        KeAcquireSpinLock(&Ctx->Lock, &irql);
+        posted = Ctx->Slots[i].State == AapSlotPosted;
+        KeReleaseSpinLock(&Ctx->Lock, irql);
+        if (posted) {
+            WdfRequestCancelSentRequest(Ctx->Slots[i].Request);
+        }
+    }
+}
+
+VOID
 AapEvtFileCleanup(_In_ WDFFILEOBJECT FileObject)
 {
     PAAP_DEVICE_CONTEXT ctx = AapGetDeviceContext(WdfFileObjectGetDevice(FileObject));
     WDFREQUEST request;
-    BRB brb;
-    WDF_MEMORY_DESCRIPTOR input;
+    WDF_REQUEST_REUSE_PARAMS reuse;
     KIRQL irql;
-    ULONG i;
+    LARGE_INTEGER timeout;
+    NTSTATUS wait;
+    NTSTATUS status;
 
     while (NT_SUCCESS(WdfIoQueueRetrieveRequestByFileObject(ctx->ReadQueue, FileObject, &request))) {
         WdfRequestComplete(request, STATUS_CANCELLED);
     }
 
+    // With Connected FALSE no slot is reposted; a repost decided earlier cancels itself in AapPostSlot.
     KeAcquireSpinLock(&ctx->Lock, &irql);
     ctx->Connected = FALSE;
     KeReleaseSpinLock(&ctx->Lock, irql);
 
-    // Closing the channel fails the reads still posted to bthport; cancel covers a dead target.
-    ctx->Bth.BthInitializeBrb(&brb, BRB_L2CA_CLOSE_CHANNEL);
-    brb.BrbL2caCloseChannel.BtAddress = ctx->Address;
-    brb.BrbL2caCloseChannel.ChannelHandle = ctx->Channel;
-    WDF_MEMORY_DESCRIPTOR_INIT_BUFFER(&input, &brb, sizeof(brb.BrbL2caCloseChannel));
-    (VOID)WdfIoTargetSendInternalIoctlOthersSynchronously(
-        ctx->IoTarget, WDF_NO_HANDLE, IOCTL_INTERNAL_BTH_SUBMIT_BRB, &input, NULL, NULL, NULL, NULL);
+    // All reads are gone before the channel closes, so none reaches bthport with a stale handle.
+    AapCancelPosted(ctx);
+    timeout.QuadPart = -20000000; // 2 s
+    wait = KeWaitForSingleObject(&ctx->NothingPosted, Executive, KernelMode, FALSE, &timeout);
 
-    for (i = 0; i < AAP_READ_SLOTS; i++) {
-        if (ctx->Slots[i].State == AapSlotPosted) {
-            WdfRequestCancelSentRequest(ctx->Slots[i].Request);
-        }
+    // If bthport ignored the cancel, the close fails the reads still posted. The close is sent async with
+    // its BRB in the device context, so a close bthport never completes cannot hold cleanup.
+    KeClearEvent(&ctx->CloseDone);
+    WDF_REQUEST_REUSE_PARAMS_INIT(&reuse, WDF_REQUEST_REUSE_NO_FLAGS, STATUS_SUCCESS);
+    status = WdfRequestReuse(ctx->CloseRequest, &reuse);
+    if (NT_SUCCESS(status)) {
+        ctx->Bth.BthInitializeBrb(&ctx->CloseBrb, BRB_L2CA_CLOSE_CHANNEL);
+        ctx->CloseBrb.BrbL2caCloseChannel.BtAddress = ctx->Address;
+        ctx->CloseBrb.BrbL2caCloseChannel.ChannelHandle = ctx->Channel;
+        status = AapSendBrb(ctx, ctx->CloseRequest, &ctx->CloseBrb, AapEvtCloseComplete, NULL);
     }
-    KeWaitForSingleObject(&ctx->NothingPosted, Executive, KernelMode, FALSE, NULL);
+    if (status != STATUS_PENDING) {
+        KeSetEvent(&ctx->CloseDone, IO_NO_INCREMENT, FALSE);
+    } else if (KeWaitForSingleObject(&ctx->CloseDone, Executive, KernelMode, FALSE, &timeout) == STATUS_TIMEOUT) {
+        WdfRequestCancelSentRequest(ctx->CloseRequest);
+    }
+
+    // Never waits forever: a read still posted after this keeps the next open out (AapEvtFileCreate).
+    if (wait == STATUS_TIMEOUT) {
+        AapCancelPosted(ctx);
+        (VOID)KeWaitForSingleObject(&ctx->NothingPosted, Executive, KernelMode, FALSE, &timeout);
+    }
 }
 
 VOID

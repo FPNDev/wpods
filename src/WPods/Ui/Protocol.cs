@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -63,7 +64,10 @@ internal sealed class MessageWriter
     }
 
     /// <summary>Lower-camel name of an enum member, e.g. NoiseCancellation -> "noiseCancellation".</summary>
-    public static string Camel<T>(T value) where T : struct, Enum => JsonNamingPolicy.CamelCase.ConvertName(value.ToString());
+    public static string Camel<T>(T value) where T : struct, Enum =>
+        CamelNames<T>.Map.TryGetValue(value, out string? name) ? name : CamelName(value);
+
+    private static string CamelName<T>(T value) where T : struct, Enum => JsonNamingPolicy.CamelCase.ConvertName(value.ToString());
 
     /// <summary>Parses a lower-camel enum name; false for unknown or numeric text.</summary>
     public static bool TryParse<T>(string? text, out T value) where T : struct, Enum =>
@@ -385,6 +389,12 @@ internal sealed class MessageWriter
         w.WriteEndObject();
         w.WriteString("lang", locale.Code);
         w.WriteBoolean("rtl", locale.Rtl);
+    }
+
+    // Names of the defined members, built once per enum type. Other values (a raw byte cast to the enum) take the slow path.
+    private static class CamelNames<T> where T : struct, Enum
+    {
+        public static readonly FrozenDictionary<T, string> Map = Enum.GetValues<T>().ToFrozenDictionary(v => v, CamelName);
     }
 
     private static void WriteEnum<T>(Utf8JsonWriter w, string name, T? value) where T : struct, Enum
