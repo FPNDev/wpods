@@ -146,6 +146,7 @@ export type MainToHost =
   | { type: 'setEnhancement'; value: string | null }
   | { type: 'setTheme'; theme: Theme }
   | { type: 'setLanguage'; code: string }
+  | { type: 'openLegal'; name: 'license' | 'notices' }
   | { type: 'openBluetoothSettings' | 'openAddDevice' | 'getStarted' | 'minimize' | 'close' | 'beginDrag' };
 
 export type PopupToHost =

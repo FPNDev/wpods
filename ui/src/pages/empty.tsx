@@ -1,11 +1,13 @@
-/* No paired AirPods: art, how to pair, Open Bluetooth settings. */
+/* No paired AirPods: art, how to pair, Open Bluetooth settings, the legal footer. */
 import { PairSteps } from '../components/common';
 import { bindAttr } from '../i18n';
 import { Art, Icon } from '../icons';
 import { post } from '../host';
-import type { Page } from './page';
+import { LegalFoot } from './legal';
+import type { Ctx, Page } from './page';
 
-export const createEmpty = (): Page => {
+export const createEmpty = (ctx: Ctx): Page => {
+  const legal = LegalFoot(ctx);
   const art = Art({ model: 'empty', class: 'wp-empty__art' });
   bindAttr(art, 'aria-label', 'art.empty');
   const el = (
@@ -22,7 +24,8 @@ export const createEmpty = (): Page => {
         </div>
         <PairSteps />
       </div>
+      {legal.el}
     </div>
   ) as HTMLDivElement;
-  return { el, sections: {} };
+  return { el, sections: {}, returnFocus: () => legal.link };
 };

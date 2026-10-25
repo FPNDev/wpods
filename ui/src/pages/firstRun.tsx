@@ -1,4 +1,5 @@
-/* First run: welcome, three facts (the last carries the startup switch), Get started. */
+/* First run: welcome, three facts (the last carries the startup switch), the not-an-Apple-app disclaimer with a link
+   to the full terms, Agree and get started (= accepting it). */
 import { createSwitch } from '../components/common';
 import { setChecked } from '../dom';
 import { post } from '../host';
@@ -19,6 +20,7 @@ export const createFirstRun = (ctx: Ctx): Page => {
     store.startup = value;
     post({ type: 'setStartup', value });
   });
+  let readTerms!: HTMLButtonElement;
   const el = (
     <div class="wp-page">
       <div class="wp-empty">
@@ -38,8 +40,13 @@ export const createFirstRun = (ctx: Ctx): Page => {
             </span>
           </li>
         </ul>
+        <section class="wp-card wp-disclaimer" aria-labelledby="frLegalTitle">
+          <h2 class="wp-steps__title" id="frLegalTitle" l:text="legal.firstRunTitle" />
+          <p class="wp-empty__body" l:text="legal.firstRunBody" />
+          <button type="button" class="wp-btn wp-btn--subtle" l:text="legal.readTerms" ref={readTerms} onclick={() => ctx.go('legal')} />
+        </section>
         <div class="wp-empty__actions">
-          <button type="button" class="wp-btn wp-btn--primary wp-btn--lg wp-btn--block" l:text="firstRun.getStarted"
+          <button type="button" class="wp-btn wp-btn--primary wp-btn--lg wp-btn--block" l:text="firstRun.agree"
             onclick={() => {
               store.firstRun = false;
               post({ type: 'getStarted' });
@@ -49,5 +56,5 @@ export const createFirstRun = (ctx: Ctx): Page => {
       </div>
     </div>
   ) as HTMLDivElement;
-  return { el, sections: { firstRun: () => setChecked(startup.input, store.startup) } };
+  return { el, sections: { firstRun: () => setChecked(startup.input, store.startup) }, returnFocus: () => readTerms };
 };

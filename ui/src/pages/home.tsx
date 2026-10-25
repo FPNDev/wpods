@@ -1,4 +1,5 @@
-/* Home: hero (art, switcher, status, batteries, action), noise control, microphone (mic mode, side), features, More. */
+/* Home: hero (art, switcher, status, batteries, action), noise control, microphone (mode, enhancement, side), features,
+   More, the legal footer. */
 import { createBatteries } from '../components/batteryRing';
 import { createBusy, LockRow, NavRow, Note } from '../components/common';
 import { createDeviceMenu } from '../components/deviceMenu';
@@ -11,6 +12,7 @@ import { Art, Icon, Spinner } from '../icons';
 import type { Capability, Conn, HeartRate, ListeningMode, MicMode, MicSide, State, ToggleName } from '../protocol';
 import { beginDisconnect, capsOf, current, effectiveMode, live, store } from '../state';
 import { enhancementName } from './enhancement';
+import { LegalFoot } from './legal';
 import type { Ctx, Page } from './page';
 
 type FeatureKey = ToggleName | 'heartRate' | 'hearingAid';
@@ -202,6 +204,7 @@ export const createHome = (ctx: Ctx): Page => {
   /* More */
   const toControls = NavRow({ icon: 'press', title: 'controls.title', desc: 'home.controlsDesc', onclick: () => ctx.go('controls') });
   const toWindows = NavRow({ icon: 'pc', title: 'windows.title', desc: 'home.windowsDesc', onclick: () => ctx.go('windows') });
+  const legal = LegalFoot(ctx);
 
   const el = (
     <div class="wp-page">
@@ -284,6 +287,8 @@ export const createHome = (ctx: Ctx): Page => {
         <h2 class="wp-group__title" l:text="home.more" />
         <div class="wp-list">{toControls}{toWindows}</div>
       </section>
+
+      {legal.el}
     </div>
   ) as HTMLDivElement;
   for (const f of features) {
@@ -491,6 +496,8 @@ export const createHome = (ctx: Ctx): Page => {
           return menu.button;
         case 'enhancement':
           return toEnhancement.el;
+        case 'legal':
+          return legal.link;
         default:
           return null;
       }

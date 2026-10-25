@@ -131,6 +131,9 @@ internal sealed partial class TrayApp
                 // Opens Windows 11's "Add a device" dialog directly (the Bluetooth / Wireless display / Everything else picker).
                 Launch("ms-settings-connectabledevices:devicediscovery");
                 break;
+            case "openLegal" when m.Name is "license" or "notices":
+                OpenLegal(m.Name == "license" ? "LICENSE.txt" : "THIRD-PARTY-NOTICES.txt");
+                break;
             case "getStarted":
                 SavePrefs(_prefs with { FirstRunDone = true });
                 break;
@@ -517,6 +520,18 @@ internal sealed partial class TrayApp
         Utf8JsonWriter w = _writer.Begin("micConfig");
         MessageWriter.WriteMicConfig(w, "config", _settings.Mic);
         PostMain(_writer.End());
+    }
+
+    // Opens a file next to the exe with its default viewer.
+    private static void OpenLegal(string file)
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, file);
+        if (!File.Exists(path))
+        {
+            Log.Warn("ui", $"{path} missing");
+            return;
+        }
+        Launch(path);
     }
 
     private async Task RevertHandsFreeAsync(ulong address, HostSettings previous)

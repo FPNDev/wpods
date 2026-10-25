@@ -12,6 +12,7 @@ import { createEnhancement } from './pages/enhancement';
 import { createFirstRun } from './pages/firstRun';
 import { createHome } from './pages/home';
 import { createLanguage } from './pages/language';
+import { createLegal } from './pages/legal';
 import { createMicModes } from './pages/micModes';
 import type { Ctx, Page, PageName } from './pages/page';
 import { createPairGuide } from './pages/pairGuide';
@@ -32,6 +33,8 @@ const ROUTES: Record<PageName, Route> = {
   pair: { create: createPairGuide, title: 'pair.title', parent: 'home' },
   enhancement: { create: createEnhancement, title: 'mic.enhancement', parent: 'home' },
   micModes: { create: createMicModes, title: 'mic.modes', parent: 'windows' },
+  /* Opens from Home, first run and No AirPods; back to 'home' lands on first run or No AirPods while those apply. */
+  legal: { create: createLegal, title: 'legal.title', parent: 'home' },
 };
 
 const built = new Map<PageName, Built>();
@@ -129,7 +132,7 @@ const renderTitle = (): void => {
 };
 
 const renderPage = (): void => {
-  const top: PageName = store.firstRun ? 'firstRun' : store.devices.length === 0 ? 'empty' : requested;
+  const top: PageName = requested === 'legal' ? 'legal' : store.firstRun ? 'firstRun' : store.devices.length === 0 ? 'empty' : requested;
   if (top === 'firstRun' || top === 'empty') {
     requested = 'home';
   }
