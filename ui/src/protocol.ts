@@ -37,6 +37,7 @@ type Settings = {
   conversationAwareness: boolean | null;
   personalizedVolume: boolean | null;
   oneBudAnc: boolean | null;
+  allowOff: boolean | null;
   micSide: MicSide | null;
   pressSpeed: PressSpeed | null;
   holdDuration: HoldDuration | null;
@@ -56,7 +57,7 @@ export type State = Settings & {
   /* Handshake answered (session Ready): writes reach the AirPods. */
   ready: boolean;
 };
-export type ToggleName = 'earDetection' | 'conversationAwareness' | 'personalizedVolume' | 'oneBudAnc';
+export type ToggleName = 'earDetection' | 'conversationAwareness' | 'personalizedVolume' | 'oneBudAnc' | 'allowOff';
 export type Theme = 'light' | 'dark' | 'auto';
 export type AccentRamp = { accent: string; dark1: string; dark2: string; dark3: string; light1: string; light2: string; light3: string };
 export type Language = { code: string; originalName: string; engName: string };

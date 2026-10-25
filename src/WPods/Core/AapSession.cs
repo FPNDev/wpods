@@ -48,7 +48,7 @@ public sealed class AapSession : IAsyncDisposable
     private readonly SettingsStore _settings;
     private readonly byte[] _readBuffer = new byte[ReadBufferSize];
     private readonly SemaphoreSlim _writeGate = new(1, 1);
-    // Serializes the 0x34 + 0x1A pair (attach write and SetStemModesAsync) so they never interleave.
+    // Serializes stem-cycle (0x1A) writes (attach write, SetStemModesAsync, the Allow Off fix) so they never interleave.
     private readonly SemaphoreSlim _stemGate = new(1, 1);
     // Serializes SetHeartRateAsync (user toggles and the restart after a re-attach).
     private readonly SemaphoreSlim _heartRateGate = new(1, 1);
@@ -227,6 +227,28 @@ public sealed class AapSession : IAsyncDisposable
     public ValueTask<bool> SetOneBudAncAsync(bool on, CancellationToken ct = default) =>
         SendSettingAsync(Aap.Setting(Aap.OneBudAncId, Aap.Bool(on)), ct);
 
+    /// <summary>
+    /// Writes 0x34 (allow Off). Off also drops <see cref="StemModes.Off"/> from the stored stem cycle (written and
+    /// stored) and moves the Off listening mode to Transparency; on leaves the cycle as is. Throws
+    /// <see cref="InvalidOperationException"/> when the pair lacks the Allow Off capability.
+    /// </summary>
+    public async ValueTask<bool> SetAllowOffAsync(bool on, CancellationToken ct = default)
+    {
+        if ((State.Capabilities & DeviceCapabilities.AllowOff) == 0)
+        {
+            throw new InvalidOperationException("This AirPods device has no Allow Off setting.");
+        }
+        if (!await SendSettingAsync(Aap.Setting(Aap.AllowOffId, Aap.Bool(on)), ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+        if (!on)
+        {
+            await EnforceAllowOffAsync(ct).ConfigureAwait(false);
+        }
+        return true;
+    }
+
     /// <summary>Writes 0x01 and, when written, stores it for the pair (written again on every attach).</summary>
     public async ValueTask<bool> SetMicSideAsync(MicSide side, CancellationToken ct = default)
     {
@@ -261,9 +283,8 @@ public sealed class AapSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Sets the stem press-and-hold cycle: writes 0x34 (allow Off) = on when <see cref="StemModes.Off"/> is in
-    /// <paramref name="modes"/>, else off, then 0x1A = <paramref name="modes"/>; stores it for the pair (written again on
-    /// every attach) only when both writes succeeded. Throws <see cref="ArgumentOutOfRangeException"/> for fewer than
+    /// Sets the stem press-and-hold cycle: writes 0x1A = <paramref name="modes"/>; stores it for the pair (written again
+    /// on every attach) only when written. Throws <see cref="ArgumentOutOfRangeException"/> for fewer than
     /// two modes or unknown bits, <see cref="InvalidOperationException"/> when the pair lacks the listening-mode
     /// capability, or the Adaptive capability for a mask with Adaptive.
     /// </summary>
@@ -432,18 +453,29 @@ public sealed class AapSession : IAsyncDisposable
             setting.TrySetResult();
         }
         DeviceChange change = Aap.TryParseKeys(packet, out ProximityKeys? keys) ? OnKeys(keys) : DeviceChange.None;
+        bool allowOffTurnedOff;
         lock (_stateLock)
         {
+            bool? allowOffBefore = State.AllowOff;
             change |= Aap.Apply(packet, State);
             if (change != DeviceChange.None)
             {
                 Changed?.Invoke(change);
                 SavePodSettings(change);
             }
+            allowOffTurnedOff = allowOffBefore != false && State.AllowOff == false
+                && (State.Capabilities & DeviceCapabilities.AllowOff) != 0;
         }
         if ((change & DeviceChange.HeartRate) != 0)
         {
             _heartRateReading?.TrySetResult();
+        }
+        // The device reports Allow Off turned off (on attach or changed elsewhere); our own write is applied
+        // optimistically, so its echo is no change here.
+        if (allowOffTurnedOff)
+        {
+            Log.Info("aap", "device reports allow off off; dropping Off from the stem cycle");
+            _ = EnforceAllowOffInBackgroundAsync();
         }
         if (State.InitialReportDone && State.Reported != _savedReported)
         {
@@ -718,10 +750,21 @@ public sealed class AapSession : IAsyncDisposable
                 }
                 Log.Warn("aap", $"init: stored stem modes {stored} include Adaptive, which this pair lacks; writing {modes}");
             }
+            // Allow Off already reported off: Off leaves the cycle. Not reported yet: the report fixes it later.
+            bool dropOff = (modes & StemModes.Off) != 0 && (capabilities & DeviceCapabilities.AllowOff) != 0 && State.AllowOff == false;
+            if (dropOff)
+            {
+                modes = WithoutOff(modes);
+                Log.Info("aap", $"init: allow off is off; Off dropped from stem modes {stored}");
+            }
             Log.Info("aap", $"init: writing stem modes {modes} (0x{(byte)modes:X2})");
             if (!await WriteStemModesAsync(modes, ct).ConfigureAwait(false))
             {
                 Log.Warn("aap", "init: stem modes not written");
+            }
+            else if (dropOff)
+            {
+                SaveStemModes(modes);
             }
         }
         finally
@@ -730,10 +773,64 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // Hidden coupling (Round 18): 0x34 allow-off follows the Off bit, written before 0x1A so the device honours it.
-    private async ValueTask<bool> WriteStemModesAsync(StemModes modes, CancellationToken ct) =>
-        await SendSettingAsync(Aap.Setting(Aap.AllowOffId, Aap.Bool((modes & StemModes.Off) != 0)), ct).ConfigureAwait(false)
-        && await SendSettingAsync(Aap.Setting(Aap.StemModesId, (byte)modes), ct).ConfigureAwait(false);
+    // Writes 0x1A only; 0x34 (allow Off) is its own setting (SetAllowOffAsync), never written with the cycle.
+    private ValueTask<bool> WriteStemModesAsync(StemModes modes, CancellationToken ct) =>
+        SendSettingAsync(Aap.Setting(Aap.StemModesId, (byte)modes), ct);
+
+    // Allow Off is off: Off leaves the cycle; one mode left gets Transparency, else Noise Cancellation.
+    private static StemModes WithoutOff(StemModes modes)
+    {
+        modes &= ~StemModes.Off;
+        if (!Aap.IsValidStemModes(modes))
+        {
+            modes |= (modes & StemModes.Transparency) == 0 ? StemModes.Transparency : StemModes.NoiseCancellation;
+        }
+        return modes;
+    }
+
+    // Allow Off turned off: drops Off from the stored cycle (written and stored), then moves the Off listening mode
+    // to Transparency.
+    private async Task EnforceAllowOffAsync(CancellationToken ct)
+    {
+        await _stemGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            StemModes stored = _settings.GetStemModes(Address);
+            if ((stored & StemModes.Off) != 0)
+            {
+                StemModes modes = WithoutOff(stored);
+                Log.Info("aap", $"allow off is off; stem modes {stored} -> {modes} (0x{(byte)modes:X2})");
+                if (await WriteStemModesAsync(modes, ct).ConfigureAwait(false))
+                {
+                    SaveStemModes(modes);
+                }
+                else
+                {
+                    Log.Warn("aap", "allow off: stem modes not written");
+                }
+            }
+        }
+        finally
+        {
+            _stemGate.Release();
+        }
+        if (State.ListeningMode == ListeningMode.Off && !await SetListeningModeAsync(ListeningMode.Transparency, ct).ConfigureAwait(false))
+        {
+            Log.Warn("aap", "allow off: listening mode Transparency not written");
+        }
+    }
+
+    private async Task EnforceAllowOffInBackgroundAsync()
+    {
+        try
+        {
+            await EnforceAllowOffAsync(_life.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Session closed.
+        }
+    }
 
     // Writes a 0x09 setting, then applies the same bytes as the device echo would (optimistic update).
     private async ValueTask<bool> SendSettingAsync(byte[] packet, CancellationToken ct)
@@ -777,6 +874,25 @@ public sealed class AapSession : IAsyncDisposable
         {
             // The device has it; the next attach writes the previously stored value again.
             Log.Warn("aap", $"mic side not saved: {e.Message}");
+        }
+    }
+
+    // Stores a cycle the session changed on its own and raises DeviceChange.StemModes.
+    private void SaveStemModes(StemModes modes)
+    {
+        try
+        {
+            _settings.SetStemModes(Address, modes);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // The device has it; the next attach writes the previously stored mask again.
+            Log.Warn("aap", $"stem modes not saved: {e.Message}");
+            return;
+        }
+        lock (_stateLock)
+        {
+            Changed?.Invoke(DeviceChange.StemModes);
         }
     }
 

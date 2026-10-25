@@ -391,6 +391,7 @@ internal sealed partial class TrayApp
             "conversationAwareness" => (s, ct) => s.SetConversationAwarenessAsync(on, ct),
             "personalizedVolume" => (s, ct) => s.SetPersonalizedVolumeAsync(on, ct),
             "oneBudAnc" => (s, ct) => s.SetOneBudAncAsync(on, ct),
+            "allowOff" => (s, ct) => s.SetAllowOffAsync(on, ct),
             _ => null,
         };
         if (command is not null)

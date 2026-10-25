@@ -23,6 +23,8 @@ public enum DeviceChange
     Capabilities = 1 << 9,
     /// <summary>The initial report window after attach ended (<see cref="DeviceState.InitialReportDone"/> is now true).</summary>
     InitialReport = 1 << 10,
+    /// <summary>The stored stem press-and-hold cycle of the pair changed (written by the session itself).</summary>
+    StemModes = 1 << 11,
 }
 
 /// <summary>
@@ -134,6 +136,7 @@ internal sealed record PodSettings
     public bool? ConversationAwareness { get; init; }
     public bool? PersonalizedVolume { get; init; }
     public bool? OneBudAnc { get; init; }
+    public bool? AllowOff { get; init; }
     public PressSpeed? PressSpeed { get; init; }
     public HoldDuration? HoldDuration { get; init; }
     public byte? ToneVolume { get; init; }
@@ -299,6 +302,7 @@ public sealed class DeviceState
         ConversationAwareness = ConversationAwareness ?? fallback.ConversationAwareness,
         PersonalizedVolume = PersonalizedVolume ?? fallback.PersonalizedVolume,
         OneBudAnc = OneBudAnc ?? fallback.OneBudAnc,
+        AllowOff = AllowOff ?? fallback.AllowOff,
         PressSpeed = PressSpeed ?? fallback.PressSpeed,
         HoldDuration = HoldDuration ?? fallback.HoldDuration,
         ToneVolume = ToneVolume ?? fallback.ToneVolume,

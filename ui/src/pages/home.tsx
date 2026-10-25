@@ -34,6 +34,7 @@ const FEATURES: FeatureDef[] = [
   { key: 'conversationAwareness', title: 'features.conversation', desc: 'features.conversationDesc', podSaved: true },
   { key: 'oneBudAnc', title: 'features.oneBud', desc: 'features.oneBudDesc', podSaved: true },
   { key: 'personalizedVolume', title: 'features.personalizedVolume', desc: 'features.personalizedVolumeDesc', podSaved: true },
+  { key: 'allowOff', title: 'features.allowOff', desc: 'features.allowOffDesc', descMax: 'features.allowOffDescMax', podSaved: true },
   { key: 'heartRate', title: 'features.heartRate', desc: 'features.heartRateDesc' },
   { key: 'hearingAid', title: 'features.hearingAid', desc: 'features.hearingAidDesc', podSaved: true },
 ];
@@ -315,6 +316,7 @@ export const createHome = (ctx: Ctx): Page => {
       return;
     }
     const st = live(d);
+    nc.showItem('off', !(caps.has('allowOff') && (st ? st.allowOff : d.saved.allowOff) === false));
     nc.showItem('adaptive', caps.has('adaptive'));
     setHidden(ncLocked, !!st);
     /* Round 17: NC and Adaptive need both buds unless "Noise cancellation with one AirPod" is on: locked when fewer

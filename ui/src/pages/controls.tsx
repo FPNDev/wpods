@@ -67,8 +67,9 @@ export const createControls = (ctx: Ctx): Page => {
       post({ type: 'setHoldDuration', value });
     },
   }));
-  /* Press-and-hold cycle (replaces Allow Off). At least STEM_MIN modes stay checked: a click that would leave fewer
-     is ignored, without a message (iPhone behaviour). Rows show in the stem's own cycle order. */
+  /* Press-and-hold cycle. The Off row shows only while Allow Off isn't known to be off. At least STEM_MIN modes stay
+     checked: a click that would leave fewer is ignored, without a message (iPhone behaviour). Rows show in the stem's
+     own cycle order. */
   const stemLocked = LockRow('stemLocked');
   const stemChecked = new Set<StemMode>();
   const stem = createChoiceList<StemMode>({
@@ -190,11 +191,12 @@ export const createControls = (ctx: Ctx): Page => {
   const toneBusy = createBusy(tone, [tone]);
   toneHead.append(toneBusy.spin);
 
-  const renderStem = (modes: StemMode[], shown: boolean, adaptive: boolean, locked: boolean): void => {
+  const renderStem = (modes: StemMode[], shown: boolean, off: boolean, adaptive: boolean, locked: boolean): void => {
     setHidden(stemGroup, !shown);
     if (!shown) {
       return;
     }
+    stem.show('off', off);
     stem.show('adaptive', adaptive);
     stemChecked.clear();
     for (const m of modes) {
@@ -231,7 +233,8 @@ export const createControls = (ctx: Ctx): Page => {
     renderSeg(press, hasPress, !st, pending, notReady, st ? st.pressSpeed : d.saved.pressSpeed);
     renderSeg(hold, hasHold, !st, pending, notReady, st ? st.holdDuration : d.saved.holdDuration);
 
-    renderStem(d.stemModes, caps.has('listeningMode'), caps.has('adaptive'), !st);
+    renderStem(d.stemModes, caps.has('listeningMode'),
+      !(caps.has('allowOff') && (st ? st.allowOff : d.saved.allowOff) === false), caps.has('adaptive'), !st);
 
     setHidden(duckGroup, !caps.has('conversationAwareness'));
     setHidden(duckLocked, !!st);

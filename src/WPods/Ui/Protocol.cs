@@ -151,6 +151,7 @@ internal sealed class MessageWriter
         WriteBool(w, "conversationAwareness", pod.ConversationAwareness);
         WriteBool(w, "personalizedVolume", pod.PersonalizedVolume);
         WriteBool(w, "oneBudAnc", pod.OneBudAnc);
+        WriteBool(w, "allowOff", pod.AllowOff);
         WriteEnum(w, "micSide", s.MicSide);
         WriteEnum(w, "pressSpeed", pod.PressSpeed);
         WriteEnum(w, "holdDuration", pod.HoldDuration);
@@ -248,6 +249,7 @@ internal sealed class MessageWriter
         WriteBool(w, "conversationAwareness", saved.ConversationAwareness);
         WriteBool(w, "personalizedVolume", saved.PersonalizedVolume);
         WriteBool(w, "oneBudAnc", saved.OneBudAnc);
+        WriteBool(w, "allowOff", saved.AllowOff);
         w.WriteString("micSide", Camel(micSide));
         WriteEnum(w, "pressSpeed", saved.PressSpeed);
         WriteEnum(w, "holdDuration", saved.HoldDuration);

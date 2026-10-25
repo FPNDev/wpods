@@ -223,6 +223,10 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             dirty |= Dirty.Checking | Dirty.ListeningMode | Dirty.Settings;
         }
+        if ((change & DeviceChange.StemModes) != 0)
+        {
+            dirty |= Dirty.Devices;
+        }
         if (dirty != Dirty.None)
         {
             MarkDirty(dirty);
