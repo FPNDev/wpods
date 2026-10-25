@@ -16,6 +16,8 @@ body { background: var(--bg-window); overflow: hidden; }
 
 /* First row of a list that has no visible row before it draws no separator. */
 .wp-list > .wp-row:not(:not([hidden]) ~ .wp-row)::before { content: none; }
+/* A focused row's inset ring covers its separator line, so the line (painted above the ring) is dropped. */
+.wp-list > .wp-row:focus-visible::before { content: none; }
 
 /* Hero: switcher anchor and menu placement (design: 40 below, centred). */
 .wp-hero__switch { position: relative; max-width: 100%; }
