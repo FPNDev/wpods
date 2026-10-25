@@ -1,7 +1,7 @@
 /* Home: hero (art, switcher, status, batteries, action), noise control, microphone (mode, enhancement, side), features,
    More, the legal footer. */
 import { createBatteries } from '../components/batteryRing';
-import { createBusy, LockRow, NavRow, Note } from '../components/common';
+import { createBusy, NavRow, Note } from '../components/common';
 import { createDeviceMenu } from '../components/deviceMenu';
 import { createSegmented } from '../components/segmented';
 import { createSwitchRow, type SwitchRow } from '../components/switchRow';
@@ -16,7 +16,7 @@ import { LegalFoot } from './legal';
 import type { Ctx, Page } from './page';
 
 type FeatureKey = ToggleName | 'heartRate' | 'hearingAid';
-/* `podSaved`: the AirPods keep the value; it shows a spinner (last value, still usable) while checking. */
+/* `podSaved`: the AirPods keep the value; it shows the last value (still usable) while checking, the group title spins. */
 type FeatureDef = { key: FeatureKey; title: LabelKey; desc: LabelKey; descMax?: LabelKey; podSaved?: boolean };
 type Feature = SwitchRow & { def: FeatureDef };
 type Side = 'left' | 'right';
@@ -39,7 +39,7 @@ const FEATURES: FeatureDef[] = [
   { key: 'conversationAwareness', title: 'features.conversation', desc: 'features.conversationDesc', podSaved: true },
   { key: 'oneBudAnc', title: 'features.oneBud', desc: 'features.oneBudDesc', podSaved: true },
   { key: 'personalizedVolume', title: 'features.personalizedVolume', desc: 'features.personalizedVolumeDesc', podSaved: true },
-  { key: 'allowOff', title: 'features.allowOff', desc: 'features.allowOffDesc', descMax: 'features.allowOffDescMax', podSaved: true },
+  { key: 'allowOff', title: 'features.allowOff', desc: 'features.allowOffDesc', descMax: 'features.allowOffDescMax' },
   { key: 'heartRate', title: 'features.heartRate', desc: 'features.heartRateDesc' },
   { key: 'hearingAid', title: 'features.hearingAid', desc: 'features.hearingAidDesc', podSaved: true },
 ];
@@ -94,7 +94,6 @@ export const createHome = (ctx: Ctx): Page => {
 
   /* Noise control */
   let ncGroup!: HTMLElement;
-  const ncLocked = Note({ label: 'common.connectToChange', id: 'ncLocked' });
   const ncOneBud = Note({ label: 'nc.oneBudNote', id: 'ncOneBud' });
   ncOneBud.hidden = true;
   const ncOutOfEar = Note({ label: 'nc.outOfEarNote', id: 'ncOutOfEar' });
@@ -125,7 +124,6 @@ export const createHome = (ctx: Ctx): Page => {
   let micSideRow!: HTMLDivElement;
   let micModeRow!: HTMLDivElement;
   let micModeSpin!: HTMLSpanElement;
-  const micLocked = LockRow('micLocked');
   /* Mic mode: the enabled modes (Mic modes page in Windows settings), showing the effective one; the spinner keeps
      its space while the mode's model loads (the old one keeps running, so picking stays open). */
   const micMode = createSegmented<MicMode>({
@@ -163,8 +161,8 @@ export const createHome = (ctx: Ctx): Page => {
 
   /* Features */
   let featGroup!: HTMLElement;
+  let featTitle!: HTMLHeadingElement;
   let featList!: HTMLDivElement;
-  const featLocked = LockRow('featLocked');
   const features: Feature[] = [];
   const onFeature = (key: FeatureKey, value: boolean): void => {
     if (key === 'heartRate') {
@@ -243,7 +241,7 @@ export const createHome = (ctx: Ctx): Page => {
       <section class="wp-group" ref={ncGroup}>
         <h2 class="wp-group__title"><span l:text="nc.title" />{ncBusy.spin}</h2>
         <div class="wp-list">
-          <div class="wp-row wp-row--stack">{ncLocked}{nc.el}{ncOneBud}{ncOutOfEar}</div>
+          <div class="wp-row wp-row--stack">{nc.el}{ncOneBud}{ncOutOfEar}</div>
         </div>
       </section>
 
@@ -258,7 +256,6 @@ export const createHome = (ctx: Ctx): Page => {
           </span>
         </h2>
         <div class="wp-list">
-          {micLocked}
           <div class="wp-row"><div class="wp-row__text"><span class="wp-row__desc" ref={micDesc} /></div></div>
           <div class="wp-row wp-row--stack" ref={micModeRow}>
             <div class="wp-row__head">
@@ -268,19 +265,19 @@ export const createHome = (ctx: Ctx): Page => {
             {micMode.el}
           </div>
           {toEnhancement.el}
+          <div class="wp-row">{Note({ label: 'mic.note' })}</div>
           <div class="wp-row wp-row--stack" ref={micSideRow}>
             <div class="wp-row__head">
               <div class="wp-row__text"><span class="wp-row__title" l:text="mic.side" /><span class="wp-row__desc" l:text="mic.sideDesc" /></div>
             </div>
             {micSide.el}
           </div>
-          <div class="wp-row">{Note({ label: 'mic.note' })}</div>
         </div>
       </section>
 
       <section class="wp-group" ref={featGroup}>
-        <h2 class="wp-group__title" l:text="features.title" />
-        <div class="wp-list" ref={featList}>{featLocked}</div>
+        <h2 class="wp-group__title" ref={featTitle}><span l:text="features.title" /></h2>
+        <div class="wp-list" ref={featList} />
       </section>
 
       <section class="wp-group">
@@ -294,6 +291,9 @@ export const createHome = (ctx: Ctx): Page => {
   for (const f of features) {
     featList.append(f.row);
   }
+  /* One spinner for the whole group while checking (in the title); each pod-saved row blocks itself. */
+  const featBusy = createBusy(featList, []);
+  featTitle.append(featBusy.spin);
 
   const renderHero = (): void => {
     const d = current();
@@ -351,7 +351,6 @@ export const createHome = (ctx: Ctx): Page => {
     const st = live(d);
     nc.showItem('off', !(caps.has('allowOff') && (st ? st.allowOff : d.saved.allowOff) === false));
     nc.showItem('adaptive', caps.has('adaptive'));
-    setHidden(ncLocked, !!st);
     /* Round 17: NC and Adaptive need both buds unless "Noise cancellation with one AirPod" is on: locked when fewer
        than 2 buds are present OR exactly one is in ear. Off and Transparency stay available. */
     /* With no bud in an ear (one out or in the case) the AirPods force Transparency and ignore mode writes until a
@@ -374,7 +373,7 @@ export const createHome = (ctx: Ctx): Page => {
     for (const mode of ['off', 'noiseCancellation', 'transparency', 'adaptive'] as const) {
       const needsBoth = mode === 'noiseCancellation' || mode === 'adaptive';
       nc.lockItem(mode, !st || outOfEar || (oneIn && needsBoth),
-        !st ? 'ncLocked' : outOfEar ? 'ncOutOfEar' : oneIn && needsBoth ? 'ncOneBud' : null);
+        !st ? null : outOfEar ? 'ncOutOfEar' : oneIn && needsBoth ? 'ncOneBud' : null);
     }
     nc.set(st ? st.listeningMode : d.saved.listeningMode);
   };
@@ -390,20 +389,19 @@ export const createHome = (ctx: Ctx): Page => {
     setText(chipLabel, t(`mic.status.${mic}`));
     setText(micDesc, t(`mic.desc.${mic}`));
     const st = live(d);
-    setHidden(micLocked, !!st);
     const enabled = store.micEnabled;
     setHidden(micModeRow, enabled.size < 2);
     for (const mode of ['standard', 'voiceIsolation', 'wideSpectrum'] as const) {
       micMode.showItem(mode, enabled.has(mode));
     }
-    micMode.lock(!st, st ? null : 'micLocked');
+    micMode.lock(!st, null);
     micMode.set(effectiveMode(d.host.micMode));
     const loading = !!st && store.micLoading.mode !== null;
     setClass(micModeSpin, 'is-busy', loading);
     setAttr(micMode.el, 'aria-busy', loading ? 'true' : null);
     setText(toEnhancement.desc, enhancementName(store.micConfig.enhancement));
     setHidden(micSideRow, !capsOf(d).has('micSide'));
-    micSide.lock(!st || !st.ready, st ? null : 'micLocked');
+    micSide.lock(!st || !st.ready, null);
     /* Not reported = the device default, Automatic (Round 19). */
     micSide.set((st ? st.micSide : d.saved.micSide) ?? 'automatic');
   };
@@ -446,10 +444,10 @@ export const createHome = (ctx: Ctx): Page => {
         f.input.checked = !reason && !!value;
       }
       setDisabled(f.input, !st || reason || (!f.busy && notReady));
-      setAttr(f.input, 'aria-describedby', !st ? 'featLocked' : reason ? f.desc.id : null);
+      setAttr(f.input, 'aria-describedby', st && reason ? f.desc.id : null);
     }
+    featBusy.set(checking, false);
     setHidden(featGroup, !any);
-    setHidden(featLocked, !!st);
 
     const hrOn = !!st && HR_ON.has(st.heartRate) && caps.has('heartRate');
     const bpm = st?.heartRateBpm ?? null;

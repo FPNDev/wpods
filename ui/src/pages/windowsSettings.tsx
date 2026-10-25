@@ -1,9 +1,9 @@
 /* Windows settings: the pair's host settings (enabled only while that pair is connected), then the app's own:
    mic modes, startup, theme, language, Windows accent. */
-import { LockRow, Note } from '../components/common';
+import { Note } from '../components/common';
 import { createSegmented } from '../components/segmented';
 import { createSwitchRow, type SwitchRow } from '../components/switchRow';
-import { setAttr, setChecked, setDisabled, setHidden, setText } from '../dom';
+import { setChecked, setDisabled, setHidden, setText } from '../dom';
 import { post } from '../host';
 import { t } from '../i18n';
 import { Icon } from '../icons';
@@ -25,7 +25,6 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
   let langValue!: HTMLSpanElement;
   let toLanguage!: HTMLButtonElement;
   let toMicModes!: HTMLButtonElement;
-  const hostLocked = LockRow('hostLocked');
   const handsFree = createSwitchRow({ id: 'hfpTitle', title: 'windows.handsFree', desc: 'windows.handsFreeDesc', onChange: hostToggle('disableHandsFree') });
   const latency = createSwitchRow({ id: 'latencyTitle', title: 'windows.latency', desc: 'windows.latencyDesc', stack: true, onChange: hostToggle('lowLatency') });
   const latencyNote = Note({ label: 'windows.latencyNote', warning: true });
@@ -67,7 +66,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     <div class="wp-page">
       <section class="wp-group">
         <h2 class="wp-group__title" ref={forDevice} />
-        <div class="wp-list">{hostLocked}{handsFree.row}{latency.row}</div>
+        <div class="wp-list">{handsFree.row}{latency.row}</div>
       </section>
       <section class="wp-group">
         <h2 class="wp-group__title" l:text="app.name" />
@@ -96,7 +95,6 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
   const renderHost = (row: SwitchRow, on: boolean, locked: boolean): void => {
     setChecked(row.input, on);
     setDisabled(row.input, locked);
-    setAttr(row.input, 'aria-describedby', locked ? 'hostLocked' : null);
   };
   const render = (): void => {
     const d = current();
@@ -105,7 +103,6 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     }
     const locked = !live(d);
     setText(forDevice, t('windows.forDevice', { name: d.name }));
-    setHidden(hostLocked, !locked);
     renderHost(handsFree, d.host.disableHandsFree, locked);
     renderHost(latency, d.host.lowLatency, locked);
     setHidden(latencyNote, !d.host.lowLatency);

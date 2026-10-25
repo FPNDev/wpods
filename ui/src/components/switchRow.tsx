@@ -1,5 +1,6 @@
 /* A list row with a title, a description and a switch. `stack` rows put the text and switch in a head line so
-   more content (notes, live values) can follow below; `checking` adds `busy` (spinner slot before the switch).
+   more content (notes, live values) can follow below; `checking` adds `busy` (blocks the switch; its spinner
+   is not placed, the page shows one for the whole group).
    `desc: null` leaves the description to the render (it gets the id `<id>-desc`). */
 import { bindText, type LabelKey } from '../i18n';
 import { type Busy, createBusy, createSwitch } from './common';
@@ -36,9 +37,6 @@ export const createSwitchRow = (o: {
   let row: HTMLDivElement;
   if (o.stack) {
     const head = <div class="wp-row__head">{text}{sw.el}</div>;
-    if (busy) {
-      sw.el.before(busy.spin);
-    }
     row = <div class="wp-row wp-row--stack">{head}</div> as HTMLDivElement;
   } else {
     row = <div class="wp-row">{text}{sw.el}</div> as HTMLDivElement;

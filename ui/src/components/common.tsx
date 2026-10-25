@@ -17,11 +17,6 @@ export const Note = (p: { label: LabelKey; id?: string; warning?: boolean }): HT
   return el;
 };
 
-/* "Connect your AirPods to change these." once at the top of a group whose controls are locked. */
-export const LockRow = (id: string): HTMLDivElement => (
-  <div class="wp-row">{Note({ label: 'common.connectToChange', id })}</div>
-) as HTMLDivElement;
-
 /* Keys that change a radio, checkbox or range value. */
 const VALUE_KEYS = new Set([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
 

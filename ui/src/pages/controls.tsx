@@ -1,9 +1,9 @@
 /* Controls: double-press speed, press-and-hold duration, the modes press-and-hold cycles through, tone volume
    (each shown only when supported). */
 import { createChoiceList } from '../components/choiceList';
-import { type Busy, createBusy, LockRow } from '../components/common';
+import { type Busy, createBusy } from '../components/common';
 import { createSegmented, type Segmented } from '../components/segmented';
-import { setAttr, setDisabled, setHidden, setText } from '../dom';
+import { setDisabled, setHidden, setText } from '../dom';
 import { post } from '../host';
 import { t, type LabelKey } from '../i18n';
 import { Icon, type IconName } from '../icons';
@@ -70,7 +70,6 @@ export const createControls = (ctx: Ctx): Page => {
   /* Press-and-hold cycle. The Off row shows only while Allow Off isn't known to be off. At least STEM_MIN modes stay
      checked: a click that would leave fewer is ignored, without a message (iPhone behaviour). Rows show in the stem's
      own cycle order. */
-  const stemLocked = LockRow('stemLocked');
   const stemChecked = new Set<StemMode>();
   const stem = createChoiceList<StemMode>({
     role: 'checkbox',
@@ -101,7 +100,6 @@ export const createControls = (ctx: Ctx): Page => {
   let stemList!: HTMLDivElement;
   /* Conversation awareness "Lower media to": host setting duckPercent (10..90 step 5); shown with the
      conversationAwareness cap, enabled while the pair is attached (whether Conversation awareness is on or off). */
-  const duckLocked = LockRow('duckLocked');
   let duckGroup!: HTMLElement;
   let duck!: HTMLInputElement;
   let duckValue!: HTMLSpanElement;
@@ -110,8 +108,6 @@ export const createControls = (ctx: Ctx): Page => {
     duck.style.setProperty('--v', `${((value - DUCK_MIN) * 100) / (DUCK_MAX - DUCK_MIN)}%`);
     setText(duckValue, t('battery.pct', { pct: value }));
   };
-  const pressLocked = LockRow('pressLocked');
-  const toneLocked = LockRow('toneLocked');
   let pressGroup!: HTMLElement;
   let toneGroup!: HTMLElement;
   let toneHead!: HTMLDivElement;
@@ -128,16 +124,15 @@ export const createControls = (ctx: Ctx): Page => {
     <div class="wp-page">
       <section class="wp-group" ref={pressGroup}>
         <h2 class="wp-group__title" l:text="controls.pressTitle" />
-        <div class="wp-list">{pressLocked}{press.row}{hold.row}</div>
+        <div class="wp-list">{press.row}{hold.row}</div>
       </section>
       <section class="wp-group" ref={stemGroup}>
         <h2 class="wp-group__title" id="stemTitle" l:text="stem.title" />
-        <div class="wp-list" role="group" aria-labelledby="stemTitle" ref={stemList}>{stemLocked}</div>
+        <div class="wp-list" role="group" aria-labelledby="stemTitle" ref={stemList} />
       </section>
       <section class="wp-group" ref={duckGroup}>
         <h2 class="wp-group__title" l:text="features.conversation" />
         <div class="wp-list">
-          {duckLocked}
           <div class="wp-row wp-row--stack">
             <div class="wp-row__head">
               <div class="wp-row__text"><span class="wp-row__title" id="duckTitle" l:text="features.duck" /><span class="wp-row__desc" l:text="features.duckDesc" /></div>
@@ -162,7 +157,6 @@ export const createControls = (ctx: Ctx): Page => {
       <section class="wp-group" ref={toneGroup}>
         <h2 class="wp-group__title" l:text="controls.soundsTitle" />
         <div class="wp-list">
-          {toneLocked}
           <div class="wp-row wp-row--stack">
             <div class="wp-row__head" ref={toneHead}>
               <div class="wp-row__text"><span class="wp-row__title" l:text="controls.tone" /><span class="wp-row__desc" l:text="controls.toneDesc" /></div>
@@ -202,8 +196,7 @@ export const createControls = (ctx: Ctx): Page => {
     for (const m of modes) {
       stemChecked.add(m);
     }
-    setHidden(stemLocked, !locked);
-    stem.lock(locked, 'stemLocked');
+    stem.lock(locked, null);
     for (const m of STEM_ORDER) {
       stem.set(m, stemChecked.has(m));
     }
@@ -213,7 +206,7 @@ export const createControls = (ctx: Ctx): Page => {
     value: V | null): void => {
     setHidden(r.row, !shown);
     r.busy.set(checking, notReady);
-    r.seg.lock(locked, locked ? 'pressLocked' : null);
+    r.seg.lock(locked, null);
     r.seg.set(value);
   };
 
@@ -229,7 +222,6 @@ export const createControls = (ctx: Ctx): Page => {
     const hasPress = caps.has('pressSpeed');
     const hasHold = caps.has('holdDuration');
     setHidden(pressGroup, !hasPress && !hasHold);
-    setHidden(pressLocked, !!st);
     renderSeg(press, hasPress, !st, pending, notReady, st ? st.pressSpeed : d.saved.pressSpeed);
     renderSeg(hold, hasHold, !st, pending, notReady, st ? st.holdDuration : d.saved.holdDuration);
 
@@ -237,9 +229,7 @@ export const createControls = (ctx: Ctx): Page => {
       !(caps.has('allowOff') && (st ? st.allowOff : d.saved.allowOff) === false), caps.has('adaptive'), !st);
 
     setHidden(duckGroup, !caps.has('conversationAwareness'));
-    setHidden(duckLocked, !!st);
     setDisabled(duck, !st);
-    setAttr(duck, 'aria-describedby', st ? null : 'duckLocked');
     if (d.host.duckPercent !== lastDuck) {
       lastDuck = d.host.duckPercent;
       duck.value = String(lastDuck);
@@ -247,11 +237,9 @@ export const createControls = (ctx: Ctx): Page => {
     }
 
     setHidden(toneGroup, !caps.has('toneVolume'));
-    setHidden(toneLocked, !!st);
     const value = st ? st.toneVolume : d.saved.toneVolume;
     toneBusy.set(pending, notReady);
     setDisabled(tone, !st);
-    setAttr(tone, 'aria-describedby', st ? null : 'toneLocked');
     if (value !== null && value !== lastTone) {
       lastTone = value;
       tone.value = String(value);
