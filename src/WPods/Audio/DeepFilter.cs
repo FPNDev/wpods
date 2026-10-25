@@ -3,9 +3,10 @@ using System.Runtime.InteropServices;
 namespace WPods.Audio;
 
 /// <summary>
-/// DeepFilterNet 3 (deepfilter.dll = libDF v0.5.6 C API, model DeepFilterNet3_onnx.tar.gz next to the exe):
-/// 480-sample 48 kHz frames (hop size checked at creation), floats in -1..1, no attenuation limit, post filter off.
-/// The output lags the input by the STFT window plus the model lookahead. One caller at a time.
+/// DeepFilterNet 3 (deepfilter.dll = unmodified libDF v0.5.6 C API, model
+/// DeepFilterNet3_onnx.tar.gz next to the exe): 480-sample 48 kHz frames (hop size checked at
+/// creation), floats in -1..1. No attenuation limit, post filter off until set, libDF stage thresholds (-10 / 30 /
+/// 20 dB). The output lags the input by the STFT window plus the model lookahead. One caller at a time.
 /// </summary>
 internal sealed unsafe partial class DeepFilter : IDisposable
 {
@@ -40,6 +41,9 @@ internal sealed unsafe partial class DeepFilter : IDisposable
     /// <summary>Enhances one frame; returns the local SNR estimate in dB.</summary>
     public float Process(float* output, float* input) => df_process_frame(_state, input, output);
 
+    /// <summary>Post filter strength (libDF suggests 0..0.05); 0 turns it off.</summary>
+    public void SetPostFilterBeta(float beta) => df_set_post_filter_beta(_state, beta);
+
     public void Dispose()
     {
         df_free(_state);
@@ -51,6 +55,9 @@ internal sealed unsafe partial class DeepFilter : IDisposable
 
     [LibraryImport("deepfilter")]
     private static partial nuint df_get_frame_length(void* state);
+
+    [LibraryImport("deepfilter")]
+    private static partial void df_set_post_filter_beta(void* state, float beta);
 
     [LibraryImport("deepfilter")]
     private static partial float df_process_frame(void* state, float* input, float* output);

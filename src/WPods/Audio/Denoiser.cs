@@ -2,7 +2,10 @@ using System.Runtime.InteropServices;
 
 namespace WPods.Audio;
 
-/// <summary>RNNoise state: 480-sample 48 kHz frames, floats in 16-bit scale. One caller at a time.</summary>
+/// <summary>
+/// RNNoise state: 480-sample 48 kHz frames, floats in 16-bit scale. Default model compiled into rnnoise.dll.
+/// One caller at a time.
+/// </summary>
 internal sealed unsafe partial class Denoiser : IDisposable
 {
     public const int FrameSize = 480;
@@ -14,6 +17,7 @@ internal sealed unsafe partial class Denoiser : IDisposable
         _state = rnnoise_create(null);
         if (_state is null)
         {
+            Dispose();
             throw new InvalidOperationException("RNNoise could not be initialized.");
         }
     }

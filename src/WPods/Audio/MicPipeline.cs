@@ -21,11 +21,33 @@ public enum MicStatus
     Problem,
 }
 
+/// <summary>A stage <see cref="MicPipeline"/> loads: the effective mic mode's model, or the voice enhancement.</summary>
+public enum MicSlot
+{
+    Mode,
+    Enhancement,
+}
+
+/// <summary>Load state of the newest request of a <see cref="MicSlot"/>.</summary>
+public enum StageLoad
+{
+    Loading,
+    /// <summary>The stage (or none, for Off) runs, or waits for the next frame boundary to.</summary>
+    Ready,
+    /// <summary>Creation failed (or the session detached first); the previous stage keeps running.</summary>
+    Failed,
+}
+
 /// <summary>
-/// AirPods mic -> \\.\NTA2DPVM. Starts the AirPods mic stream the first time an app captures in a session and
-/// never stops it; 0x58 packets are dropped unread while nothing captures. Decodes on the session read loop, in float
-/// until the end: AAC-ELD -> 48 kHz mono float -> make-up gain -> mode processing -> soft limiter + the only 16-bit
-/// conversion -> WriteFile. While capturing it logs the input (decoded, before gain) and output levels once per second.
+/// AirPods mic -> \\.\NTA2DPVM. Starts the AirPods mic stream when an app starts capturing and stops it (0x58 STOP)
+/// when capture stops and before a user Disconnect or exit (<see cref="StopStreamAsync"/>); 0x58 packets are
+/// dropped unread while nothing captures. Decodes on the session read loop, in float
+/// until the end: AAC-ELD -> 48 kHz mono float -> make-up gain -> model of the effective mic mode
+/// (<see cref="MicConfig.EffectiveMode"/>) -> voice enhancement -> soft limiter + the only 16-bit conversion ->
+/// WriteFile. Stages (<see cref="MicCatalog"/>) are created on the thread pool on attach, on the attached pair's mic mode
+/// change and on a <see cref="MicConfig"/> change, and swapped in at a frame boundary; the replaced one is disposed on
+/// the thread pool. While capturing it logs the input (decoded, before gain) and output
+/// levels once per second.
 /// Create before <see cref="ConnectionManager.Start"/>.
 /// </summary>
 public sealed class MicPipeline
@@ -57,7 +79,6 @@ public sealed class MicPipeline
     private readonly float[] _pcm = GC.AllocateArray<float>(PcmCapacity, pinned: true);
     private readonly short[] _output = GC.AllocateArray<short>(PcmCapacity, pinned: true);
     private AacDecoder? _decoder;
-    private VoiceProcessor? _voice;
     // Written under _lock.
     private bool _nativeFailed;
     private int _fill;
@@ -68,6 +89,10 @@ public sealed class MicPipeline
     private LevelMeter _outputMeter;
     private long _levelLogTick;
     private long _lastDecoderFlushLog;
+
+    // One stage per slot (see StageSlot for which thread owns what).
+    private readonly StageSlot _model;
+    private readonly StageSlot _enhancement;
 
     // Shared state; written under _lock.
     private AapSession? _session;
@@ -81,7 +106,8 @@ public sealed class MicPipeline
     private long _lastAudio;
     private volatile bool _capturing;
     private volatile bool _flush;
-    private volatile MicMode _mode;
+    // Saved mic mode of the attached pair.
+    private MicMode _mode;
     private volatile MicStatus _status;
     private float _level;
 
@@ -89,11 +115,14 @@ public sealed class MicPipeline
     {
         _connections = connections;
         _settings = connections.Settings;
+        _model = new StageSlot("mode model", (id, load) => ReportLocked(MicSlot.Mode, id, load));
+        _enhancement = new StageSlot("enhancement", (id, load) => ReportLocked(MicSlot.Enhancement, id, load));
         _timer = new Timer(static s => ((MicPipeline)s!).OnTimer(), this, Timeout.Infinite, Timeout.Infinite);
         _mic = new VirtualMic(OnCaptureChanged);
         connections.Attached += OnAttached;
         connections.Detached += OnDetached;
         _settings.HostSettingsChanged += OnHostSettingsChanged;
+        _settings.MicConfigChanged += OnMicConfigChanged;
         _mic.Open();
     }
 
@@ -108,6 +137,12 @@ public sealed class MicPipeline
     /// capture-state wait thread under internal locks: handlers must not block.
     /// </summary>
     public event Action<bool>? CaptureChanged;
+
+    /// <summary>
+    /// Load state of a slot's newest request (address of the attached pair, 0 after detach; option id or null = none).
+    /// Raised in request order under the internal lock, on the thread that caused it: handlers must not block.
+    /// </summary>
+    public event Action<ulong, MicSlot, string?, StageLoad>? StageChanged;
 
     public MicStatus Status => _status;
 
@@ -150,7 +185,9 @@ public sealed class MicPipeline
             _started = false;
             _startFailed = false;
             _mode = _settings.Get(session.Address).MicMode;
-            Log.Info("mic", $"session {Mac.Format(session.Address)} attached, mode={_mode}, capturing={_capturing}");
+            MicConfig config = _settings.Mic;
+            Log.Info("mic", $"session {Mac.Format(session.Address)} attached, mode={_mode} (runs {config.EffectiveMode(_mode)}), capturing={_capturing}");
+            RequestStagesLocked(config);
             UpdateStatusLocked("session attached");
         }
         session.Changed += OnSessionChanged;
@@ -173,12 +210,12 @@ public sealed class MicPipeline
         Log.Info("mic", $"session {Mac.Format(session.Address)} detached");
         _decoder?.Dispose();
         _decoder = null;
-        _voice?.Dispose();
-        _voice = null;
         _fill = 0;
         lock (_lock)
         {
             _nativeFailed = false;
+            _model.ResetLocked();
+            _enhancement.ResetLocked();
         }
     }
 
@@ -203,10 +240,22 @@ public sealed class MicPipeline
     {
         lock (_lock)
         {
-            if (_session?.Address == address)
+            if (_session?.Address == address && _mode != settings.MicMode)
             {
                 _mode = settings.MicMode;
                 Log.Info("mic", $"mode -> {settings.MicMode}");
+                RequestStagesLocked(_settings.Mic);
+            }
+        }
+    }
+
+    private void OnMicConfigChanged(MicConfig config)
+    {
+        lock (_lock)
+        {
+            if (_session is not null)
+            {
+                RequestStagesLocked(config);
             }
         }
     }
@@ -333,14 +382,13 @@ public sealed class MicPipeline
         try
         {
             _decoder = new AacDecoder();
-            _voice = new VoiceProcessor();
-            Log.Info("mic", "decoder and voice processor created");
+            Log.Info("mic", "decoder created");
             return true;
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
         {
-            Log.Error("mic", "decoder/denoiser init failed", e);
             // Problem (M1) until the next session, which retries.
+            Log.Error("mic", "decoder init failed", e);
             _decoder?.Dispose();
             _decoder = null;
             lock (_lock)
@@ -385,12 +433,13 @@ public sealed class MicPipeline
         return true;
     }
 
-    // Wide Spectrum writes everything at once; the other modes write whole 480-sample frames.
+    // Without stages everything is written at once; otherwise whole 480-sample frames are written.
     private void Emit(long now)
     {
-        MicMode mode = _mode;
+        IMicStage? model = _model.TakeSwap();
+        IMicStage? enhancement = _enhancement.TakeSwap();
         int ready = 0;
-        if (mode == MicMode.WideSpectrum)
+        if (model is null && enhancement is null)
         {
             ready = _fill;
         }
@@ -398,7 +447,9 @@ public sealed class MicPipeline
         {
             for (; _fill - ready >= Denoiser.FrameSize; ready += Denoiser.FrameSize)
             {
-                _voice!.Process(_pcm.AsSpan(ready, Denoiser.FrameSize), mode);
+                Span<float> frame = _pcm.AsSpan(ready, Denoiser.FrameSize);
+                model?.Process(frame);
+                enhancement?.Process(frame);
             }
             if (ready == 0)
             {
@@ -421,7 +472,7 @@ public sealed class MicPipeline
         if (now - _levelLogTick >= LevelLogIntervalMs)
         {
             _levelLogTick = now;
-            Log.Info("mic", $"level in {_inputMeter.Take()} | out {_outputMeter.Take()} | mode {mode}, gain {MakeUpGain:0.00}");
+            Log.Info("mic", $"level in {_inputMeter.Take()} | out {_outputMeter.Take()} | model {_model.ActiveOption?.Id ?? "none"}, enhancement {_enhancement.ActiveOption?.Id ?? "off"}, gain {MakeUpGain:0.00}");
         }
     }
 
@@ -436,6 +487,16 @@ public sealed class MicPipeline
         _peak = 0;
         Volatile.Write(ref _level, MathF.Max(peak, Volatile.Read(ref _level) * LevelDecay));
     }
+
+    // The config holds only listed ids (checked on load and by the page commands).
+    private void RequestStagesLocked(MicConfig config)
+    {
+        MicMode mode = config.EffectiveMode(_mode);
+        _model.RequestLocked(MicCatalog.FindModel(mode, config.Models[mode]), _lock);
+        _enhancement.RequestLocked(config.Enhancement is { } id ? MicCatalog.FindEnhancement(id) : null, _lock);
+    }
+
+    private void ReportLocked(MicSlot slot, string? id, StageLoad load) => StageChanged?.Invoke(_session?.Address ?? 0, slot, id, load);
 
     private void BeginWaitLocked(long now, string reason)
     {
@@ -527,6 +588,138 @@ public sealed class MicPipeline
     }
 
     private static bool IsReady(AapSession session) => session.State.Status == SessionStatus.Ready;
+
+    /// <summary>
+    /// One slot's stage. A request creates the new stage on the thread pool (model loads take up to
+    /// about a second) and leaves it as the pending swap; the read loop takes it at its next frame boundary and
+    /// disposes the replaced stage on the thread pool. A failed creation is logged and keeps the current stage. Every
+    /// request is reported (loading, then ready or failed; a stale creation reports nothing) under the pipeline lock.
+    /// The *Locked methods run under the pipeline lock; TakeSwap on the read loop (ResetLocked after it ended).
+    /// </summary>
+    private sealed class StageSlot(string kind, Action<string?, StageLoad> report)
+    {
+        // Under the pipeline lock.
+        private string? _requested;
+        private string? _published;
+        private int _generation;
+        // Set under the pipeline lock, taken by the read loop.
+        private Swap? _pending;
+        // Read loop.
+        private IMicStage? _active;
+
+        /// <summary>The option whose stage runs now (read loop).</summary>
+        public MicOption? ActiveOption { get; private set; }
+
+        /// <summary>
+        /// Starts creating the stage for <paramref name="option"/> (null = none; "raw" has no stage) unless it is
+        /// already requested.
+        /// </summary>
+        public void RequestLocked(MicOption? option, Lock gate)
+        {
+            string? id = option?.Id;
+            if (id == _requested)
+            {
+                return;
+            }
+            _requested = id;
+            int generation = ++_generation;
+            if (option?.Create is null)
+            {
+                DisposeLater(PublishLocked(new Swap(option, null)));
+                report(id, StageLoad.Ready);
+                return;
+            }
+            Log.Info("mic", $"{kind} {id} loading");
+            report(id, StageLoad.Loading);
+            _ = Task.Run(() => Create(option, generation, gate));
+        }
+
+        /// <summary>Detach (read loop ended): disposes the active and pending stages, drops creations in flight.</summary>
+        public void ResetLocked()
+        {
+            if (_requested != _published)
+            {
+                Log.Info("mic", $"{kind} {_requested} load dropped (detached)");
+                report(_requested, StageLoad.Failed);
+            }
+            _generation++;
+            _requested = null;
+            _published = null;
+            DisposeLater(Interlocked.Exchange(ref _pending, null)?.Stage);
+            DisposeLater(_active);
+            _active = null;
+            ActiveOption = null;
+        }
+
+        /// <summary>Read loop, at a frame boundary: applies a pending swap; returns the stage to run (null = none).</summary>
+        public IMicStage? TakeSwap()
+        {
+            if (Volatile.Read(ref _pending) is null || Interlocked.Exchange(ref _pending, null) is not { } swap)
+            {
+                return _active;
+            }
+            DisposeLater(_active);
+            _active = swap.Stage;
+            ActiveOption = swap.Option;
+            Log.Info("mic", $"{kind} -> {swap.Option?.Id ?? "off"}");
+            return _active;
+        }
+
+        private void Create(MicOption option, int generation, Lock gate)
+        {
+            IMicStage stage;
+            long start = Environment.TickCount64;
+            try
+            {
+                stage = option.Create!();
+            }
+            catch (Exception e)
+            {
+                lock (gate)
+                {
+                    Log.Error("mic", $"{kind} {option.Id} could not be created, keeping {_published ?? "off"}", e);
+                    if (generation == _generation)
+                    {
+                        _requested = _published;
+                        report(option.Id, StageLoad.Failed);
+                    }
+                }
+                return;
+            }
+            Log.Info("mic", $"{kind} {option.Id} created in {Environment.TickCount64 - start} ms");
+            IMicStage? unused;
+            lock (gate)
+            {
+                if (generation == _generation)
+                {
+                    unused = PublishLocked(new Swap(option, stage));
+                    report(option.Id, StageLoad.Ready);
+                }
+                else
+                {
+                    unused = stage;
+                }
+            }
+            unused?.Dispose();
+        }
+
+        // Returns the stage of a pending swap the read loop never took, for the caller to dispose.
+        private IMicStage? PublishLocked(Swap swap)
+        {
+            _published = swap.Option?.Id;
+            return Interlocked.Exchange(ref _pending, swap)?.Stage;
+        }
+
+        private static void DisposeLater(IMicStage? stage)
+        {
+            if (stage is not null)
+            {
+                _ = Task.Run(stage.Dispose);
+            }
+        }
+    }
+
+    private sealed record Swap(MicOption? Option, IMicStage? Stage);
 
     /// <summary>RMS and peak of the samples added since the last <see cref="Take"/>, in dBFS (full scale = 1).</summary>
     private struct LevelMeter
