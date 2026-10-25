@@ -125,7 +125,7 @@ public enum BatteryStatus : byte
 public readonly record struct Battery(byte? Percent, BatteryStatus Status);
 
 /// <summary>
-/// Shown settings stored on the AirPods themselves (not the per-host ear detection, mic side and stem modes);
+/// Shown settings stored on the AirPods themselves (not the per-host ear detection, mic side, allow off and stem modes);
 /// null = never seen. Remembered per pair for display only, see <see cref="DeviceState.RememberedSettings"/>.
 /// </summary>
 internal sealed record PodSettings
@@ -136,7 +136,6 @@ internal sealed record PodSettings
     public bool? ConversationAwareness { get; init; }
     public bool? PersonalizedVolume { get; init; }
     public bool? OneBudAnc { get; init; }
-    public bool? AllowOff { get; init; }
     public PressSpeed? PressSpeed { get; init; }
     public HoldDuration? HoldDuration { get; init; }
     public byte? ToneVolume { get; init; }
@@ -302,7 +301,6 @@ public sealed class DeviceState
         ConversationAwareness = ConversationAwareness ?? fallback.ConversationAwareness,
         PersonalizedVolume = PersonalizedVolume ?? fallback.PersonalizedVolume,
         OneBudAnc = OneBudAnc ?? fallback.OneBudAnc,
-        AllowOff = AllowOff ?? fallback.AllowOff,
         PressSpeed = PressSpeed ?? fallback.PressSpeed,
         HoldDuration = HoldDuration ?? fallback.HoldDuration,
         ToneVolume = ToneVolume ?? fallback.ToneVolume,

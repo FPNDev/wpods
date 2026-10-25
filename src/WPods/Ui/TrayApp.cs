@@ -538,7 +538,8 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             string conn = Conn(device, out NearbyOffer? offer);
             MessageWriter.WriteDevice(w, device, conn, conn == "elsewhere" ? offer?.Batteries : null, _settings.Get(device.Address),
-                _settings.GetPodSettings(device.Address), _settings.GetEarDetection(device.Address), _settings.GetMicSide(device.Address));
+                _settings.GetPodSettings(device.Address), _settings.GetEarDetection(device.Address),
+                _settings.GetAllowOff(device.Address), _settings.GetMicSide(device.Address));
         }
         w.WriteEndArray();
         if (_session is { } session)

@@ -126,6 +126,7 @@ public sealed class SettingsStore
     private readonly Dictionary<ulong, DeviceCapabilities> _capabilities = [];
     private readonly Dictionary<ulong, StemModes> _stemModes = [];
     private readonly Dictionary<ulong, bool> _earDetection = [];
+    private readonly Dictionary<ulong, bool> _allowOff = [];
     private readonly Dictionary<ulong, MicSide> _micSide = [];
     private readonly Dictionary<ulong, PodSettings> _podSettings = [];
     private readonly Dictionary<ulong, DateTime> _pairingDates = [];
@@ -283,6 +284,15 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>Allow Off (0x34) of the pair as last set by the user; false when never set.</summary>
+    internal bool GetAllowOff(ulong address)
+    {
+        lock (_lock)
+        {
+            return _allowOff.GetValueOrDefault(address, false);
+        }
+    }
+
     /// <summary>Microphone side (0x01) of the pair as last set by the user or reported by the device; Automatic when never set.</summary>
     internal MicSide GetMicSide(ulong address)
     {
@@ -435,6 +445,20 @@ public sealed class SettingsStore
         }
     }
 
+    internal void SetAllowOff(ulong address, bool on)
+    {
+        lock (_lock)
+        {
+            if (_allowOff.TryGetValue(address, out bool current) && current == on)
+            {
+                return;
+            }
+            _allowOff[address] = on;
+            SaveSettings();
+            Log.Info("settings", $"{Mac.Format(address)}: allowOff = {on}");
+        }
+    }
+
     internal void SetMicSide(ulong address, MicSide side)
     {
         lock (_lock)
@@ -524,6 +548,13 @@ public sealed class SettingsStore
                 if (Mac.TryParse(mac, out ulong address))
                 {
                     _earDetection[address] = on;
+                }
+            }
+            foreach ((string mac, bool on) in file.AllowOff)
+            {
+                if (Mac.TryParse(mac, out ulong address))
+                {
+                    _allowOff[address] = on;
                 }
             }
             foreach ((string mac, MicSide side) in file.MicSide)
@@ -687,6 +718,10 @@ public sealed class SettingsStore
         {
             file.EarDetection[Mac.Format(address)] = on;
         }
+        foreach ((ulong address, bool on) in _allowOff)
+        {
+            file.AllowOff[Mac.Format(address)] = on;
+        }
         foreach ((ulong address, MicSide side) in _micSide)
         {
             file.MicSide[Mac.Format(address)] = side;
@@ -769,6 +804,8 @@ internal sealed class SettingsFile
     public Dictionary<string, StemModes> StemModes { get; set; } = [];
     /// <summary>Ear detection (0x0A) per pair (optional; older files have none, missing = on).</summary>
     public Dictionary<string, bool> EarDetection { get; set; } = [];
+    /// <summary>Allow Off (0x34) per pair (optional; older files have none, missing = off).</summary>
+    public Dictionary<string, bool> AllowOff { get; set; } = [];
     /// <summary>Microphone side (0x01) per pair (optional; older files have none, missing = Automatic).</summary>
     public Dictionary<string, MicSide> MicSide { get; set; } = [];
     /// <summary>Last seen pod-saved settings per pair, for display only (optional; older files have none).</summary>

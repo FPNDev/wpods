@@ -142,8 +142,8 @@ internal sealed class MessageWriter
     }
 
     /// <summary>
-    /// Every device-side setting except the listening mode (fields of the "settings" message). Ear detection and mic
-    /// side are per-host values (stored, set from attach on); the others are pod-saved, see <see cref="Shown"/>.
+    /// Every device-side setting except the listening mode (fields of the "settings" message). Ear detection, mic
+    /// side and allow off are per-host values (stored, set from attach on); the others are pod-saved, see <see cref="Shown"/>.
     /// </summary>
     public static void WriteSettingFields(Utf8JsonWriter w, DeviceState s)
     {
@@ -152,7 +152,7 @@ internal sealed class MessageWriter
         WriteBool(w, "conversationAwareness", pod.ConversationAwareness);
         WriteBool(w, "personalizedVolume", pod.PersonalizedVolume);
         WriteBool(w, "oneBudAnc", pod.OneBudAnc);
-        WriteBool(w, "allowOff", pod.AllowOff);
+        WriteBool(w, "allowOff", s.AllowOff);
         WriteEnum(w, "micSide", s.MicSide);
         WriteEnum(w, "pressSpeed", pod.PressSpeed);
         WriteEnum(w, "holdDuration", pod.HoldDuration);
@@ -266,7 +266,7 @@ internal sealed class MessageWriter
     /// for the pair (display while not attached).
     /// </summary>
     public static void WriteDevice(Utf8JsonWriter w, KnownDevice d, string conn, PodBatteries? batteries, HostSettings host,
-        PodSettings saved, bool earDetection, MicSide micSide)
+        PodSettings saved, bool earDetection, bool allowOff, MicSide micSide)
     {
         AirPodsModel model = Models.FromModelNumber(d.ModelNumber) ?? Models.Unknown;
         w.WriteStartObject();
@@ -301,7 +301,7 @@ internal sealed class MessageWriter
         WriteBool(w, "conversationAwareness", saved.ConversationAwareness);
         WriteBool(w, "personalizedVolume", saved.PersonalizedVolume);
         WriteBool(w, "oneBudAnc", saved.OneBudAnc);
-        WriteBool(w, "allowOff", saved.AllowOff);
+        w.WriteBoolean("allowOff", allowOff);
         w.WriteString("micSide", Camel(micSide));
         WriteEnum(w, "pressSpeed", saved.PressSpeed);
         WriteEnum(w, "holdDuration", saved.HoldDuration);

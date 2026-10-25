@@ -84,10 +84,12 @@ public sealed class AapSession : IAsyncDisposable
         _savedPodSettings = settings.GetPodSettings(address);
         State = new DeviceState(settings.GetCapabilities(address), baseline, _savedPodSettings);
         _savedReported = State.Reported;
-        // The AirPods never report 0x0A or 0x01 (per-host settings, Round 20/21 probes), so the stored values are the
-        // state from the start and are written on attach; a device report replaces them (OnPacket).
+        // The AirPods never report 0x0A, 0x01 or 0x34 (per-host settings, Round 20/21 probes and attach logs), so the
+        // stored values are the state from the start and are written on attach; a device report of 0x0A or 0x01
+        // replaces them (OnPacket).
         State.SetSetting(Aap.EarDetectionId, Aap.Bool(settings.GetEarDetection(address)));
         State.SetSetting(Aap.MicSideId, (byte)settings.GetMicSide(address));
+        State.SetSetting(Aap.AllowOffId, Aap.Bool(settings.GetAllowOff(address)));
     }
 
     public ulong Address { get; }
@@ -228,8 +230,9 @@ public sealed class AapSession : IAsyncDisposable
         SendSettingAsync(Aap.Setting(Aap.OneBudAncId, Aap.Bool(on)), ct);
 
     /// <summary>
-    /// Writes 0x34 (allow Off). Off also drops <see cref="StemModes.Off"/> from the stored stem cycle (written and
-    /// stored) and moves the Off listening mode to Transparency; on leaves the cycle as is. Throws
+    /// Writes 0x34 (allow Off) and, when written, stores it for the pair (written again on every attach). Off also
+    /// drops <see cref="StemModes.Off"/> from the stored stem cycle (written and stored) and moves the Off listening
+    /// mode to Transparency; on leaves the cycle as is. Throws
     /// <see cref="InvalidOperationException"/> when the pair lacks the Allow Off capability.
     /// </summary>
     public async ValueTask<bool> SetAllowOffAsync(bool on, CancellationToken ct = default)
@@ -242,6 +245,7 @@ public sealed class AapSession : IAsyncDisposable
         {
             return false;
         }
+        SaveAllowOff(on);
         if (!on)
         {
             await EnforceAllowOffAsync(ct).ConfigureAwait(false);
@@ -453,29 +457,18 @@ public sealed class AapSession : IAsyncDisposable
             setting.TrySetResult();
         }
         DeviceChange change = Aap.TryParseKeys(packet, out ProximityKeys? keys) ? OnKeys(keys) : DeviceChange.None;
-        bool allowOffTurnedOff;
         lock (_stateLock)
         {
-            bool? allowOffBefore = State.AllowOff;
             change |= Aap.Apply(packet, State);
             if (change != DeviceChange.None)
             {
                 Changed?.Invoke(change);
                 SavePodSettings(change);
             }
-            allowOffTurnedOff = allowOffBefore != false && State.AllowOff == false
-                && (State.Capabilities & DeviceCapabilities.AllowOff) != 0;
         }
         if ((change & DeviceChange.HeartRate) != 0)
         {
             _heartRateReading?.TrySetResult();
-        }
-        // The device reports Allow Off turned off (on attach or changed elsewhere); our own write is applied
-        // optimistically, so its echo is no change here.
-        if (allowOffTurnedOff)
-        {
-            Log.Info("aap", "device reports allow off off; dropping Off from the stem cycle");
-            _ = EnforceAllowOffInBackgroundAsync();
         }
         if (State.InitialReportDone && State.Reported != _savedReported)
         {
@@ -587,6 +580,15 @@ public sealed class AapSession : IAsyncDisposable
                 }
             }
             await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
+            if ((State.Capabilities & DeviceCapabilities.AllowOff) != 0)
+            {
+                bool allowOff = _settings.GetAllowOff(Address);
+                Log.Info("aap", $"init: writing allow off {(allowOff ? "on" : "off")}");
+                if (!await SendSettingAsync(Aap.Setting(Aap.AllowOffId, Aap.Bool(allowOff)), ct).ConfigureAwait(false))
+                {
+                    Log.Warn("aap", "init: allow off not written");
+                }
+            }
             await WriteStemModesOnAttachAsync(ct).ConfigureAwait(false);
             bool earDetection = _settings.GetEarDetection(Address);
             Log.Info("aap", $"init: writing ear detection {(earDetection ? "on" : "off")}");
@@ -820,18 +822,6 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    private async Task EnforceAllowOffInBackgroundAsync()
-    {
-        try
-        {
-            await EnforceAllowOffAsync(_life.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            // Session closed.
-        }
-    }
-
     // Writes a 0x09 setting, then applies the same bytes as the device echo would (optimistic update).
     private async ValueTask<bool> SendSettingAsync(byte[] packet, CancellationToken ct)
     {
@@ -861,6 +851,19 @@ public sealed class AapSession : IAsyncDisposable
         {
             // The device has it; the next attach writes the previously stored value again.
             Log.Warn("aap", $"ear detection not saved: {e.Message}");
+        }
+    }
+
+    private void SaveAllowOff(bool on)
+    {
+        try
+        {
+            _settings.SetAllowOff(Address, on);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // The device has it; the next attach writes the previously stored value again.
+            Log.Warn("aap", $"allow off not saved: {e.Message}");
         }
     }
 
