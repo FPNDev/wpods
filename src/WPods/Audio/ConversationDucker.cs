@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using WPods.Core;
+using Timer = System.Threading.Timer;
 
 namespace WPods.Audio;
 
@@ -7,10 +8,13 @@ namespace WPods.Audio;
 /// Conversation awareness on the host, relative to the default console render endpoint's master volume at the start
 /// of the conversation (the "start" volume). The AirPods report a 0x4B level (Apple captures: 1/2 = person started
 /// speaking, lowest volume; intermediate values = intermediate volume; 8/9 = normal): level 1 or 2 starts an episode
-/// and sets start x DuckPercent / 100 (the pair's "Lower media to" host setting, read at the episode start); levels
-/// 3..7 step back up toward the start volume (<see cref="Recovery"/>); 8/9 restore the start volume. Every change after
+/// and sets start x DuckPercent / 100 (the pair's "Lower media to" host setting); levels 3..7 step back up toward the
+/// start volume (<see cref="Recovery"/>); 8/9 restore the start volume. The AirPods often stop at an intermediate level
+/// and rarely send 8/9, so no new level for 2 s after a 3..7 step also restores; 1/2 cancel that wait. DuckPercent is
+/// read on every change, so moving its slider during an episode re-sets the current level at once. Every change after
 /// the first, and the restore, happen only while the volume is still the one WPods set; a volume the user changed ends
-/// the episode and is kept. Also restores when the feature is turned off, the session detaches and on
+/// the episode and is kept. No episode starts while an app captures from the virtual mic, and one running when capture
+/// starts is restored. Also restores when the feature is turned off, the session detaches and on
 /// <see cref="Dispose"/>. Create before <see cref="ConnectionManager.Start"/>.
 /// </summary>
 public sealed unsafe partial class ConversationDucker : IDisposable
@@ -21,8 +25,10 @@ public sealed unsafe partial class ConversationDucker : IDisposable
     private const int ConsoleRole = 0; // eConsole
     private const int NoRequest = 0;
     private const int RestoreRequest = -1;
+    private const int QuietRequest = -2; // no level for QuietMs after a 3..7 step
     private const int LowestLevel = 2;
     private const int LastStepLevel = 7;
+    private const int QuietMs = 2000;
     private const float SameVolumeTolerance = 0.005f;
 
     private static readonly Guid MmDeviceEnumeratorClass = new("BCDE0395-E52F-467C-8E3D-C4579291692E");
@@ -31,21 +37,30 @@ public sealed unsafe partial class ConversationDucker : IDisposable
 
     private readonly SettingsStore _settings;
     private readonly Lock _lock = new();
+    private readonly Timer _quiet;
     private AapSession? _session;
-    private int _pending; // a level 1..7, RestoreRequest or NoRequest
+    private int _pending; // a level 1..7, RestoreRequest, QuietRequest or NoRequest
+    private bool _reapply; // DuckPercent changed during an episode
+    private volatile bool _capturing; // an app captures from the virtual mic
+    private volatile int _percent; // DuckPercent of the last volume set
     // Under _lock (COM work runs on thread-pool threads, which are MTA).
     private void* _enumerator;
     private void* _volume;
     private float _start;
-    private float _ducked;
+    private int _level; // last level applied in this episode
     private float _set = float.NaN; // last volume WPods set in this episode
     private volatile bool _active;
 
-    public ConversationDucker(ConnectionManager connections)
+    public ConversationDucker(ConnectionManager connections, MicPipeline mic)
     {
         _settings = connections.Settings;
+        _quiet = new Timer(static s => ((ConversationDucker)s!).OnQuiet(), this, Timeout.Infinite, Timeout.Infinite);
         connections.Attached += OnAttached;
         connections.Detached += OnDetached;
+        _settings.HostSettingsChanged += OnHostSettingsChanged;
+        mic.CaptureChanged += OnCaptureChanged;
+        // An app may already capture before this subscribed.
+        _capturing = mic.Capturing;
     }
 
     /// <summary>
@@ -60,6 +75,7 @@ public sealed unsafe partial class ConversationDucker : IDisposable
     /// <summary>Restores the volume synchronously (call on exit).</summary>
     public void Dispose()
     {
+        _quiet.Dispose();
         Volatile.Write(ref _pending, RestoreRequest);
         // Waited on a thread-pool thread: the COM objects were created in the MTA.
         Task.Run(Run).Wait();
@@ -102,6 +118,38 @@ public sealed unsafe partial class ConversationDucker : IDisposable
         }
     }
 
+    // Raised on the UI thread. Kept apart from _pending so it never replaces a level; a pending level reads the new
+    // DuckPercent anyway.
+    private void OnHostSettingsChanged(ulong address, HostSettings settings)
+    {
+        if (_active && settings.DuckPercent != _percent && Volatile.Read(ref _session)?.Address == address)
+        {
+            Log.Info("ducker", $"lower to -> {settings.DuckPercent} %");
+            Volatile.Write(ref _reapply, true);
+            Queue();
+        }
+    }
+
+    // Raised on the capture-state wait thread under the mic's locks: only records and posts.
+    private void OnCaptureChanged(bool capturing)
+    {
+        _capturing = capturing;
+        Log.Info("ducker", $"mic capture {(capturing ? "started" : "stopped")}");
+        if (capturing)
+        {
+            Post(RestoreRequest);
+        }
+    }
+
+    // Only when nothing is pending: a pending level means the conversation went on, a pending restore covers it.
+    private void OnQuiet()
+    {
+        if (Interlocked.CompareExchange(ref _pending, QuietRequest, NoRequest) == NoRequest)
+        {
+            Queue();
+        }
+    }
+
     // Latest request wins; Changed may run on the caller's (UI) thread, so COM work is moved to the pool.
     private void Post(int request)
     {
@@ -110,21 +158,37 @@ public sealed unsafe partial class ConversationDucker : IDisposable
             return;
         }
         Volatile.Write(ref _pending, request);
-        ThreadPool.UnsafeQueueUserWorkItem(static d => d.Run(), this, preferLocal: false);
+        Queue();
     }
+
+    private void Queue() => ThreadPool.UnsafeQueueUserWorkItem(static d => d.Run(), this, preferLocal: false);
 
     private void Run()
     {
         lock (_lock)
         {
             int request = Interlocked.Exchange(ref _pending, NoRequest);
+            bool reapply = Interlocked.Exchange(ref _reapply, false);
             if (request == RestoreRequest)
             {
                 Restore();
             }
-            else if (request != NoRequest)
+            else if (request > NoRequest)
             {
-                Apply(request);
+                Apply(request); // reads the current DuckPercent, so it covers a reapply
+            }
+            else
+            {
+                // A 1/2 applied after the timer fired cancels the quiet restore.
+                if (request == QuietRequest && _active && _level > LowestLevel)
+                {
+                    Log.Info("ducker", $"no level for {QuietMs} ms after level {_level}");
+                    Restore();
+                }
+                if (reapply)
+                {
+                    Reapply();
+                }
             }
         }
     }
@@ -148,12 +212,23 @@ public sealed unsafe partial class ConversationDucker : IDisposable
     }
 
     // Level 1/2 starts an episode (saves the start volume, keeps the endpoint until the restore); 3..7 only step a
-    // running episode.
+    // running episode and arm the quiet timer, 1/2 disarm it. Nothing starts while an app captures from the mic.
     private void Apply(int level)
     {
+        // Detached: a restore is pending.
+        if (Volatile.Read(ref _session) is not { } session)
+        {
+            return;
+        }
+        if (_capturing)
+        {
+            Log.Info("ducker", $"level {level} ignored: mic in use");
+            Restore();
+            return;
+        }
         if (!_active)
         {
-            if (level > LowestLevel || Volatile.Read(ref _session) is not { } session)
+            if (level > LowestLevel)
             {
                 return;
             }
@@ -168,11 +243,9 @@ public sealed unsafe partial class ConversationDucker : IDisposable
                 EndEpisode();
                 return;
             }
-            int percent = _settings.Get(session.Address).DuckPercent;
             _start = start;
-            _ducked = start * percent / 100f;
             _active = true;
-            Log.Info("ducker", $"episode start: volume {start:0.00}, lower to {percent} % = {_ducked:0.00}");
+            Log.Info("ducker", $"episode start: volume {start:0.00}");
         }
         else if (!IsStillOurs())
         {
@@ -180,9 +253,37 @@ public sealed unsafe partial class ConversationDucker : IDisposable
             EndEpisode();
             return;
         }
-        float volume = _ducked + (_start - _ducked) * Recovery[level];
+        _level = level;
+        _quiet.Change(level > LowestLevel ? QuietMs : Timeout.Infinite, Timeout.Infinite);
+        SetLevelVolume(session, $"level {level}");
+    }
+
+    // DuckPercent moved during an episode: the current level again with the new percent. Never starts an episode and
+    // leaves the quiet timer alone (no new level arrived).
+    private void Reapply()
+    {
+        if (!_active || Volatile.Read(ref _session) is not { } session)
+        {
+            return;
+        }
+        if (!IsStillOurs())
+        {
+            Log.Info("ducker", "lower to changed: volume changed by the user while ducked, kept; episode ended");
+            EndEpisode();
+            return;
+        }
+        SetLevelVolume(session, $"lower to changed, level {_level}");
+    }
+
+    // The ducked volume is start x DuckPercent / 100, read from the settings on every change.
+    private void SetLevelVolume(AapSession session, string reason)
+    {
+        int percent = _settings.Get(session.Address).DuckPercent;
+        float ducked = _start * percent / 100f;
+        float volume = ducked + (_start - ducked) * Recovery[_level];
+        _percent = percent;
         SetVolume(volume);
-        Log.Info("ducker", $"level {level}: volume {volume:0.00} (start {_start:0.00})");
+        Log.Info("ducker", $"{reason}: lower to {percent} % = {ducked:0.00}, volume {volume:0.00} (start {_start:0.00})");
     }
 
     // The endpoint stores volume in dB steps, so a scalar read back can differ slightly from the one set.
@@ -221,6 +322,7 @@ public sealed unsafe partial class ConversationDucker : IDisposable
 
     private void EndEpisode()
     {
+        _quiet.Change(Timeout.Infinite, Timeout.Infinite);
         Release(_volume);
         _volume = null;
         _set = float.NaN;

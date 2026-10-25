@@ -63,7 +63,7 @@ internal static class Program
         var connections = new ConnectionManager(settings);
         var mic = new MicPipeline(connections);
         var keepAlive = new LowLatencyKeepAlive(connections);
-        var ducker = new ConversationDucker(connections);
+        var ducker = new ConversationDucker(connections, mic);
         _ = new EarPause(connections);
         var nearby = new NearbyService(connections);
         // Opening the case releases a pair the user disconnected while Windows still has its link up.
