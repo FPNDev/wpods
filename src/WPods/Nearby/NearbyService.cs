@@ -30,6 +30,7 @@ public sealed record NearbyOffer(ulong Address, string Name, AirPodsModel Model,
 public sealed class NearbyService : IDisposable
 {
     private const long GoneMs = 45_000;
+    private const short LostRssi = -127;
     private const long MissLogIntervalMs = 10_000;
     private const int MaxResolvedAddresses = 256;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
@@ -78,7 +79,7 @@ public sealed class NearbyService : IDisposable
 
     /// <summary>
     /// "Connected to another device": the pair's proximity adverts are seen (resolved with its keys, last one less
-    /// than 45 s ago) while its link to Windows is down.
+    /// than 45 s ago) while its link to Windows is down, unless the last one said both buds are in the closed case.
     /// </summary>
     public bool IsNearby(ulong address)
     {
@@ -282,7 +283,9 @@ public sealed class NearbyService : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
     private static unsafe void OnAdvert(nint context, ulong address, byte addressType, short rssi, byte* data, uint length)
     {
-        if (GCHandle.FromIntPtr(context).Target is NearbyService self)
+        // Windows reports a device it stopped hearing (~60 s after its last advert) with RSSI -127 and that advert's old
+        // payload: not an advert.
+        if (rssi != LostRssi && GCHandle.FromIntPtr(context).Target is NearbyService self)
         {
             self.HandleAdvert(address, addressType, new ReadOnlySpan<byte>(data, (int)length));
         }
@@ -418,6 +421,7 @@ public sealed class NearbyService : IDisposable
             Log.Info("nearby", $"{Mac.Format(pair.Address)} lid {(pair.LidOpen ? "open" : "closed")}, bud in case={budInCase}, linkUp={pair.LinkUp}");
         }
         pair.BudInCase = budInCase;
+        pair.InClosedCase = !pair.LidOpen && Proximity.AreBothInCase(data);
         if (pair.Offer is { } offer)
         {
             bool single = offer.Model.SingleBattery;
@@ -674,10 +678,12 @@ public sealed class NearbyService : IDisposable
         public bool LidOpen { get; set; }
         /// <summary>Last advert's bud-in-case flag; only used to log changes.</summary>
         public bool BudInCase { get; set; }
+        /// <summary>Last advert: lid closed with both buds in the case (the case sends a short burst, then goes silent).</summary>
+        public bool InClosedCase { get; set; }
         public long LastSeen { get; set; }
         public int Generation { get; set; }
         public NearbyOffer? Offer { get; set; }
-        public bool Nearby => Present && !LinkUp;
+        public bool Nearby => Present && !LinkUp && !InClosedCase;
         /// <summary>Completed when the link comes up during a connect; cancelled to abandon the connect.</summary>
         public TaskCompletionSource? Link { get; set; }
 

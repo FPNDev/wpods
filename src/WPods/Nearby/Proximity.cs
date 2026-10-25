@@ -31,6 +31,9 @@ internal static class Proximity
     /// <summary>Status bit 2 (both in case), bit 4 (one in case) or bit 6 (this bud in case).</summary>
     public static bool IsBudInCase(ReadOnlySpan<byte> data) => (data[5] & 0x54) != 0;
 
+    /// <summary>Status bit 2: both buds in the case.</summary>
+    public static bool AreBothInCase(ReadOnlySpan<byte> data) => (data[5] & 0x04) != 0;
+
     /// <summary>Cipher for <see cref="Resolves"/>. AAP delivers the IRK least-significant byte first; AES takes it reversed.</summary>
     public static Aes CreateIrkCipher(ReadOnlySpan<byte> irk)
     {
