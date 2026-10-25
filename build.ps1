@@ -22,11 +22,18 @@ function Invoke-Script([string]$Script) {
 
 if (-not $SkipNative) {
     $nativeBin = Join-Path $build 'native\bin'
+    # Mic mode models (the files WPods.csproj ships from models\): downloaded ones, then the exported one.
+    $fetched = 'dpdfnet2_48khz_hr', 'dpdfnet8_48khz_hr', 'fastenhancer48k_t', 'fastenhancer48k_b', 'fastenhancer48k_s',
+        'fastenhancer48k_m', 'fastenhancer48k_l', 'gtcrn_simple', 'fevd_gtcrn_spec'
     $native = @(
         @{ Script = 'native\build-ffmpeg.ps1'; Outputs = 'avcodec-61.dll', 'avutil-59.dll', 'swresample-5.dll' },
         @{ Script = 'native\build-rnnoise.ps1'; Outputs = 'rnnoise.dll' },
         @{ Script = 'native\build-helper.ps1'; Outputs = 'wpods_native.dll' },
-        @{ Script = 'native\build-deepfilter.ps1'; Outputs = 'deepfilter.dll', 'DeepFilterNet3_onnx.tar.gz' }
+        @{ Script = 'native\build-deepfilter.ps1'; Outputs = 'deepfilter.dll', 'DeepFilterNet3_onnx.tar.gz' },
+        @{ Script = 'native\build-webrtc-apm.ps1'; Outputs = 'webrtc_apm.dll' },
+        @{ Script = 'native\fetch-models.ps1'; Outputs = @('onnxruntime.dll') + ($fetched | ForEach-Object { "models\$_.onnx" }) },
+        # Runs the export only when its output is missing (pinned venv under .build\native).
+        @{ Script = 'native\export-models.ps1'; Outputs = 'models\nsnet2_48k.onnx' }
     )
     foreach ($step in $native) {
         foreach ($output in $step.Outputs) {
