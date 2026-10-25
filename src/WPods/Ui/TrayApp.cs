@@ -186,9 +186,10 @@ internal sealed partial class TrayApp : ApplicationContext
     private void OnSessionChanged(DeviceChange change)
     {
         Dirty dirty = Dirty.None;
+        // Shown pod-saved values follow "checking" (remembered ones while it is on), so they are resent when it may end.
         if ((change & DeviceChange.Connection) != 0)
         {
-            dirty |= Dirty.Status;
+            dirty |= Dirty.Status | Dirty.ListeningMode | Dirty.Settings;
         }
         if ((change & DeviceChange.Identity) != 0)
         {
@@ -520,7 +521,8 @@ internal sealed partial class TrayApp : ApplicationContext
         foreach (KnownDevice device in _devices)
         {
             string conn = Conn(device, out NearbyOffer? offer);
-            MessageWriter.WriteDevice(w, device, conn, conn == "elsewhere" ? offer?.Batteries : null, _settings.Get(device.Address));
+            MessageWriter.WriteDevice(w, device, conn, conn == "elsewhere" ? offer?.Batteries : null, _settings.Get(device.Address),
+                _settings.GetPodSettings(device.Address), _settings.GetEarDetection(device.Address), _settings.GetMicSide(device.Address));
         }
         w.WriteEndArray();
         if (_session is { } session)

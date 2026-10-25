@@ -71,6 +71,7 @@ public sealed class SettingsStore
     private readonly Dictionary<ulong, StemModes> _stemModes = [];
     private readonly Dictionary<ulong, bool> _earDetection = [];
     private readonly Dictionary<ulong, MicSide> _micSide = [];
+    private readonly Dictionary<ulong, PodSettings> _podSettings = [];
     private ulong _lastUsed;
     private UiPrefs _ui = UiPrefs.Default;
 
@@ -208,6 +209,15 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>Pod-saved settings of the pair as last seen; <see cref="PodSettings.None"/> if never seen.</summary>
+    internal PodSettings GetPodSettings(ulong address)
+    {
+        lock (_lock)
+        {
+            return _podSettings.GetValueOrDefault(address, PodSettings.None);
+        }
+    }
+
     public bool HasKeys(ulong address)
     {
         lock (_lock)
@@ -260,6 +270,19 @@ public sealed class SettingsStore
                 return;
             }
             _capabilities[address] = capabilities;
+            SaveSettings();
+        }
+    }
+
+    internal void SetPodSettings(ulong address, PodSettings settings)
+    {
+        lock (_lock)
+        {
+            if (_podSettings.TryGetValue(address, out PodSettings? current) && current == settings)
+            {
+                return;
+            }
+            _podSettings[address] = settings;
             SaveSettings();
         }
     }
@@ -397,6 +420,13 @@ public sealed class SettingsStore
                     Log.Warn("settings", $"{mac}: micSide {side} invalid, using Automatic");
                 }
             }
+            foreach ((string mac, PodSettings settings) in file.PodSettings)
+            {
+                if (Mac.TryParse(mac, out ulong address))
+                {
+                    _podSettings[address] = settings;
+                }
+            }
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -485,6 +515,10 @@ public sealed class SettingsStore
         {
             file.MicSide[Mac.Format(address)] = side;
         }
+        foreach ((ulong address, PodSettings settings) in _podSettings)
+        {
+            file.PodSettings[Mac.Format(address)] = settings;
+        }
         WriteAtomic(_settingsPath, JsonSerializer.SerializeToUtf8Bytes(file, SettingsJson.Default.SettingsFile));
     }
 
@@ -555,6 +589,8 @@ internal sealed class SettingsFile
     public Dictionary<string, bool> EarDetection { get; set; } = [];
     /// <summary>Microphone side (0x01) per pair (optional; older files have none, missing = Automatic).</summary>
     public Dictionary<string, MicSide> MicSide { get; set; } = [];
+    /// <summary>Last seen pod-saved settings per pair, for display only (optional; older files have none).</summary>
+    public Dictionary<string, PodSettings> PodSettings { get; set; } = [];
 }
 
 internal sealed class LegacyRecord

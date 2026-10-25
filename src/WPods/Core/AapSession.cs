@@ -60,6 +60,8 @@ public sealed class AapSession : IAsyncDisposable
     private byte _streamSequence;
     // Reported capability set last written to settings (read loop and initialization).
     private DeviceCapabilities _savedReported;
+    // Pod-saved settings last written to settings; guarded by _stateLock.
+    private PodSettings _savedPodSettings;
     // Read loop: 0x58 mic audio packets are logged as one count per second.
     private int _audioCount;
     private long _audioWindowStart;
@@ -70,7 +72,8 @@ public sealed class AapSession : IAsyncDisposable
         _stream = new FileStream(handle, FileAccess.ReadWrite, bufferSize: 0, isAsync: true);
         _settings = settings;
         DeviceCapabilities baseline = Models.FromModelNumber(settings.GetModel(address)?.Number)?.Capabilities ?? DeviceCapabilities.None;
-        State = new DeviceState(settings.GetCapabilities(address), baseline);
+        _savedPodSettings = settings.GetPodSettings(address);
+        State = new DeviceState(settings.GetCapabilities(address), baseline, _savedPodSettings);
         _savedReported = State.Reported;
         // The AirPods never report 0x0A or 0x01 (per-host settings, Round 20/21 probes), so the stored values are the
         // state from the start and are written on attach; a device report replaces them (OnPacket).
@@ -178,6 +181,7 @@ public sealed class AapSession : IAsyncDisposable
             if (State.IsCurrentHold(serial) && Aap.ApplySetting(packet, State) is var change && change != DeviceChange.None)
             {
                 Changed?.Invoke(change);
+                SavePodSettings(change);
             }
         }
         return true;
@@ -405,6 +409,7 @@ public sealed class AapSession : IAsyncDisposable
             if (change != DeviceChange.None)
             {
                 Changed?.Invoke(change);
+                SavePodSettings(change);
             }
         }
         if ((change & DeviceChange.HeartRate) != 0)
@@ -560,6 +565,7 @@ public sealed class AapSession : IAsyncDisposable
             lock (_stateLock)
             {
                 Changed?.Invoke(State.FinishInitialReport() | DeviceChange.InitialReport);
+                SavePodSettings(DeviceChange.InitialReport);
             }
             SaveCapabilities();
         }
@@ -641,6 +647,7 @@ public sealed class AapSession : IAsyncDisposable
             if (State.ReleaseListeningMode(serial))
             {
                 Changed?.Invoke(DeviceChange.ListeningMode);
+                SavePodSettings(DeviceChange.ListeningMode);
             }
         }
     }
@@ -699,6 +706,7 @@ public sealed class AapSession : IAsyncDisposable
             if (change != DeviceChange.None)
             {
                 Changed?.Invoke(change);
+                SavePodSettings(change);
             }
         }
         return true;
@@ -727,6 +735,32 @@ public sealed class AapSession : IAsyncDisposable
         {
             // The device has it; the next attach writes the previously stored value again.
             Log.Warn("aap", $"mic side not saved: {e.Message}");
+        }
+    }
+
+    // Under _stateLock, after a change was raised. Once the initial report ended (values before it may be partial),
+    // remembers the pod-saved settings for display while the next attach waits for its report; a setting this session
+    // never reported keeps its remembered value. Written only when changed.
+    private void SavePodSettings(DeviceChange change)
+    {
+        if (!State.InitialReportDone || (change & (DeviceChange.ListeningMode | DeviceChange.Settings | DeviceChange.InitialReport)) == 0)
+        {
+            return;
+        }
+        PodSettings settings = State.GetPodSettings(_savedPodSettings);
+        if (settings == _savedPodSettings)
+        {
+            return;
+        }
+        try
+        {
+            _settings.SetPodSettings(Address, settings);
+            _savedPodSettings = settings;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Retried on the next change.
+            Log.Warn("aap", $"pod settings not saved: {e.Message}");
         }
     }
 

@@ -80,4 +80,23 @@ span.wp-menu__glyph { display: grid; place-items: center; }
 /* ChoiceList rows that can't change (not connected). */
 .wp-choice:disabled { cursor: not-allowed; background: transparent; }
 .wp-choice:disabled .wp-row__title, .wp-choice:disabled .wp-row__check { color: var(--text-disabled); }
-.wp-slider__input:disabled ~ .wp-slider__value { color: var(--text-disabled); }
+.wp-slider__input:is(:disabled, [aria-disabled="true"]) ~ .wp-slider__value { color: var(--text-disabled); }
+.wp-slider:has(> .wp-slider__input:is(:disabled, [aria-disabled="true"])) > .wp-slider__icon { color: var(--text-disabled); }
+
+/* Busy pod-saved controls (aria-disabled, not disabled, so keyboard focus stays): the disabled look of bundle.css and
+   no hover or pressed change; a keyboard-focused one still shows the focus ring. The switch track rules also cover
+   :disabled, so a disabled checked switch keeps its disabled look under the pointer too. */
+.wp-switch .wp-switch__input:is(:disabled, [aria-disabled="true"]) + .wp-switch__track { background: var(--fill-control); box-shadow: inset 0 0 0 1px var(--text-disabled); }
+.wp-switch .wp-switch__input:is(:disabled, [aria-disabled="true"]):checked + .wp-switch__track { background: var(--accent-disabled); box-shadow: inset 0 0 0 1px var(--accent-disabled); }
+.wp-switch:has(.wp-switch__input[aria-disabled="true"]) { cursor: not-allowed; }
+.wp-switch:has(.wp-switch__input[aria-disabled="true"]):active .wp-switch__thumb { transform: none; }
+.wp-switch:has(.wp-switch__input[aria-disabled="true"]:checked):active .wp-switch__thumb { transform: translateX(calc(16px * var(--wp-dir, 1))); }
+.wp-seg__item > .wp-seg__input[aria-disabled="true"] + .wp-seg__face { color: var(--text-disabled); background: transparent; box-shadow: none; }
+.wp-seg__item > .wp-seg__input[aria-disabled="true"]:checked + .wp-seg__face { background: var(--fill-segment); box-shadow: var(--shadow-segment); color: var(--text-disabled); }
+.wp-seg__input[aria-disabled="true"] + .wp-seg__face .wp-seg__disc { background: var(--fill-control); color: var(--text-disabled); }
+.wp-seg__item:has(.wp-seg__input[aria-disabled="true"]) { cursor: not-allowed; }
+.wp-slider__input[aria-disabled="true"] { cursor: not-allowed; }
+.wp-slider__input[aria-disabled="true"]::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--text-disabled) var(--v), var(--fill-sunken) var(--v)); }
+.wp-slider .wp-slider__input[aria-disabled="true"]::-webkit-slider-thumb { transform: none; }
+/* The busy spinner: hidden, it still keeps its space, so showing it never moves the layout. */
+.wp-busy:not(.is-busy) { visibility: hidden; }

@@ -191,6 +191,7 @@ export const apply = (msg: HostToMain): void => {
     case 'checking':
       if (st) {
         st.checking = msg.checking;
+        st.ready = msg.ready;
         mark('nc', 'mic', 'features', 'controls');
       }
       break;

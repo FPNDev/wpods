@@ -124,7 +124,7 @@ internal sealed class MessageWriter
         }
     }
 
-    public static void WriteListeningMode(Utf8JsonWriter w, DeviceState s) => WriteEnum(w, "listeningMode", s.ListeningMode);
+    public static void WriteListeningMode(Utf8JsonWriter w, DeviceState s) => WriteEnum(w, "listeningMode", Shown(s).ListeningMode);
 
     public static void WriteHeartRate(Utf8JsonWriter w, DeviceState s)
     {
@@ -132,20 +132,28 @@ internal sealed class MessageWriter
         WriteNumber(w, "heartRateBpm", s.HeartRateBpm);
     }
 
-    /// <summary>Every device-side setting except the listening mode (fields of the "settings" message).</summary>
+    /// <summary>
+    /// Every device-side setting except the listening mode (fields of the "settings" message). Ear detection and mic
+    /// side are per-host values (stored, set from attach on); the others are pod-saved, see <see cref="Shown"/>.
+    /// </summary>
     public static void WriteSettingFields(Utf8JsonWriter w, DeviceState s)
     {
+        PodSettings pod = Shown(s);
         WriteBool(w, "earDetection", s.EarDetection);
-        WriteBool(w, "conversationAwareness", s.ConversationAwareness);
-        WriteBool(w, "personalizedVolume", s.PersonalizedVolume);
-        WriteBool(w, "oneBudAnc", s.OneBudAnc);
+        WriteBool(w, "conversationAwareness", pod.ConversationAwareness);
+        WriteBool(w, "personalizedVolume", pod.PersonalizedVolume);
+        WriteBool(w, "oneBudAnc", pod.OneBudAnc);
         WriteEnum(w, "micSide", s.MicSide);
-        WriteEnum(w, "pressSpeed", s.PressSpeed);
-        WriteEnum(w, "holdDuration", s.HoldDuration);
-        WriteNumber(w, "toneVolume", s.ToneVolume);
-        WriteBool(w, "hearingAidEnrolled", s.HearingAidEnrolled);
-        w.WriteBoolean("hearingAidEnabled", s.HearingAidEnabled);
+        WriteEnum(w, "pressSpeed", pod.PressSpeed);
+        WriteEnum(w, "holdDuration", pod.HoldDuration);
+        WriteNumber(w, "toneVolume", pod.ToneVolume);
+        WriteBool(w, "hearingAidEnrolled", pod.HearingAidEnrolled);
+        w.WriteBoolean("hearingAidEnabled", pod.HearingAidEnabled);
     }
+
+    // Pod-saved settings to show: while checking, the remembered value for each one not reported yet (display only,
+    // the session acts on DeviceState alone); afterwards only what the device reported.
+    private static PodSettings Shown(DeviceState s) => s.GetPodSettings(IsChecking(s) ? s.RememberedSettings : PodSettings.None);
 
     /// <summary>The "state" value: the attached session's DeviceState, or null.</summary>
     public static void WriteState(Utf8JsonWriter w, DeviceState? s)
@@ -170,9 +178,17 @@ internal sealed class MessageWriter
     public static void WriteCaps(Utf8JsonWriter w, DeviceState s) =>
         WriteCaps(w, s.Capabilities, Models.FromModelNumber(s.ModelNumber)?.SingleBattery == true);
 
-    /// <summary>"checking": true from attach until the initial report window ends (or the handshake got no answer).</summary>
-    public static void WriteChecking(Utf8JsonWriter w, DeviceState s) =>
-        w.WriteBoolean("checking", !s.InitialReportDone && s.Status != SessionStatus.NoResponse);
+    /// <summary>
+    /// "checking": true from attach until the initial report window ends (or the handshake got no answer).
+    /// "ready": true once the handshake answered.
+    /// </summary>
+    public static void WriteChecking(Utf8JsonWriter w, DeviceState s)
+    {
+        w.WriteBoolean("checking", IsChecking(s));
+        w.WriteBoolean("ready", s.Status == SessionStatus.Ready);
+    }
+
+    private static bool IsChecking(DeviceState s) => !s.InitialReportDone && s.Status != SessionStatus.NoResponse;
 
     public static void WriteHost(Utf8JsonWriter w, HostSettings host)
     {
@@ -184,8 +200,12 @@ internal sealed class MessageWriter
         w.WriteEndObject();
     }
 
-    /// <summary>One Device object; <paramref name="batteries"/> only for a pair offered nearby.</summary>
-    public static void WriteDevice(Utf8JsonWriter w, KnownDevice d, string conn, PodBatteries? batteries, HostSettings host)
+    /// <summary>
+    /// One Device object; <paramref name="batteries"/> only for a pair offered nearby. "saved" = the settings remembered
+    /// for the pair (display while not attached).
+    /// </summary>
+    public static void WriteDevice(Utf8JsonWriter w, KnownDevice d, string conn, PodBatteries? batteries, HostSettings host,
+        PodSettings saved, bool earDetection, MicSide micSide)
     {
         AirPodsModel model = Models.FromModelNumber(d.ModelNumber) ?? Models.Unknown;
         w.WriteStartObject();
@@ -214,6 +234,19 @@ internal sealed class MessageWriter
             }
         }
         w.WriteEndArray();
+        w.WriteStartObject("saved");
+        WriteEnum(w, "listeningMode", saved.ListeningMode);
+        w.WriteBoolean("earDetection", earDetection);
+        WriteBool(w, "conversationAwareness", saved.ConversationAwareness);
+        WriteBool(w, "personalizedVolume", saved.PersonalizedVolume);
+        WriteBool(w, "oneBudAnc", saved.OneBudAnc);
+        w.WriteString("micSide", Camel(micSide));
+        WriteEnum(w, "pressSpeed", saved.PressSpeed);
+        WriteEnum(w, "holdDuration", saved.HoldDuration);
+        WriteNumber(w, "toneVolume", saved.ToneVolume);
+        WriteBool(w, "hearingAidEnrolled", saved.HearingAidEnrolled);
+        w.WriteBoolean("hearingAidEnabled", saved.HearingAidEnabled);
+        w.WriteEndObject();
         w.WriteEndObject();
     }
 

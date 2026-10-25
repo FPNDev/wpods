@@ -1,6 +1,6 @@
 /* Home: hero (art, switcher, status, batteries, action), noise control, microphone (mic mode, side), features, More. */
 import { createBatteries } from '../components/batteryRing';
-import { Checking, LockRow, NavRow, Note } from '../components/common';
+import { createBusy, LockRow, NavRow, Note } from '../components/common';
 import { createDeviceMenu } from '../components/deviceMenu';
 import { createSegmented } from '../components/segmented';
 import { createSwitchRow, type SwitchRow } from '../components/switchRow';
@@ -9,11 +9,11 @@ import { post } from '../host';
 import { t, type LabelKey } from '../i18n';
 import { Art, Icon, Spinner } from '../icons';
 import type { Capability, Conn, HeartRate, ListeningMode, MicMode, MicSide, State, ToggleName } from '../protocol';
-import { beginDisconnect, capsOf, current, live, store } from '../state';
 import type { Ctx, Page } from './page';
 
 type FeatureKey = ToggleName | 'heartRate' | 'hearingAid';
-type FeatureDef = { key: FeatureKey; title: LabelKey; desc: LabelKey; descMax?: LabelKey };
+/* `podSaved`: the AirPods keep the value; it shows a spinner (last value, still usable) while checking. */
+type FeatureDef = { key: FeatureKey; title: LabelKey; desc: LabelKey; descMax?: LabelKey; podSaved?: boolean };
 type Feature = SwitchRow & { def: FeatureDef };
 type Side = 'left' | 'right';
 
@@ -31,11 +31,11 @@ const HR_ON = new Set<HeartRate>(['starting', 'streaming', 'noReading']);
 const CONTROLS_CAPS: Capability[] = ['listeningMode', 'pressSpeed', 'holdDuration', 'conversationAwareness', 'toneVolume'];
 const FEATURES: FeatureDef[] = [
   { key: 'earDetection', title: 'features.ear', desc: 'features.earDesc', descMax: 'features.earDescMax' },
-  { key: 'conversationAwareness', title: 'features.conversation', desc: 'features.conversationDesc' },
-  { key: 'oneBudAnc', title: 'features.oneBud', desc: 'features.oneBudDesc' },
-  { key: 'personalizedVolume', title: 'features.personalizedVolume', desc: 'features.personalizedVolumeDesc' },
+  { key: 'conversationAwareness', title: 'features.conversation', desc: 'features.conversationDesc', podSaved: true },
+  { key: 'oneBudAnc', title: 'features.oneBud', desc: 'features.oneBudDesc', podSaved: true },
+  { key: 'personalizedVolume', title: 'features.personalizedVolume', desc: 'features.personalizedVolumeDesc', podSaved: true },
   { key: 'heartRate', title: 'features.heartRate', desc: 'features.heartRateDesc' },
-  { key: 'hearingAid', title: 'features.hearingAid', desc: 'features.hearingAidDesc' },
+  { key: 'hearingAid', title: 'features.hearingAid', desc: 'features.hearingAidDesc', podSaved: true },
 ];
 
 /* Ear line under one bud ring; '' (hidden) for null, 'disconnected' and AirPods Max (the host sends null there). */
@@ -95,6 +95,8 @@ export const createHome = (ctx: Ctx): Page => {
       post({ type: 'setListeningMode', mode });
     },
   });
+  /* Pod-saved: spinner while checking (in the group title), blocked until the session is ready. */
+  const ncBusy = createBusy(nc.el, nc.el.elements);
 
   /* Microphone */
   let chip!: HTMLSpanElement;
@@ -102,7 +104,6 @@ export const createHome = (ctx: Ctx): Page => {
   let micDesc!: HTMLSpanElement;
   let micSideRow!: HTMLDivElement;
   const micLocked = LockRow('micLocked');
-  const micSideCheck = Checking();
   const micMode = createSegmented<MicMode>({
     name: 'micMode',
     legend: 'mic.mode',
@@ -152,7 +153,7 @@ export const createHome = (ctx: Ctx): Page => {
     ctx.update('features', 'nc');
   };
   for (const def of FEATURES) {
-    const row = createSwitchRow({ id: `f-${def.key}`, title: def.title, desc: null, stack: true, checking: true, onChange: (on) => onFeature(def.key, on) });
+    const row = createSwitchRow({ id: `f-${def.key}`, title: def.title, desc: null, stack: true, checking: def.podSaved, onChange: (on) => onFeature(def.key, on) });
     row.row.hidden = true;
     features.push({ ...row, def });
   }
@@ -212,7 +213,7 @@ export const createHome = (ctx: Ctx): Page => {
       </section>
 
       <section class="wp-group" ref={ncGroup}>
-        <h2 class="wp-group__title" l:text="nc.title" />
+        <h2 class="wp-group__title"><span l:text="nc.title" />{ncBusy.spin}</h2>
         <div class="wp-list">
           <div class="wp-row wp-row--stack">{ncLocked}{nc.el}{ncOneBud}</div>
         </div>
@@ -239,7 +240,6 @@ export const createHome = (ctx: Ctx): Page => {
           <div class="wp-row wp-row--stack" ref={micSideRow}>
             <div class="wp-row__head">
               <div class="wp-row__text"><span class="wp-row__title" l:text="mic.side" /><span class="wp-row__desc" l:text="mic.sideDesc" /></div>
-              {micSideCheck}
             </div>
             {micSide.el}
           </div>
@@ -326,11 +326,12 @@ export const createHome = (ctx: Ctx): Page => {
       oneIn = present < 2 || inEar === 1;
     }
     setHidden(ncOneBud, !oneIn);
+    ncBusy.set(!!st && st.checking, !!st && !st.ready);
     for (const mode of ['off', 'noiseCancellation', 'transparency', 'adaptive'] as const) {
       const needsBoth = mode === 'noiseCancellation' || mode === 'adaptive';
       nc.lockItem(mode, !st || (oneIn && needsBoth), !st ? 'ncLocked' : oneIn && needsBoth ? 'ncOneBud' : null);
     }
-    nc.set(st?.listeningMode ?? null);
+    nc.set(st ? st.listeningMode : d.saved.listeningMode);
   };
 
   const renderMic = (): void => {
@@ -348,12 +349,9 @@ export const createHome = (ctx: Ctx): Page => {
     micMode.set(d.host.micMode);
     micMode.lock(!st, st ? null : 'micLocked');
     setHidden(micSideRow, !capsOf(d).has('micSide'));
-    const checking = !!st && st.checking && st.micSide === null;
-    setHidden(micSideCheck, !checking);
-    setHidden(micSide.el, checking);
-    micSide.lock(!st, st ? null : 'micLocked');
+    micSide.lock(!st || !st.ready, st ? null : 'micLocked');
     /* Not reported = the device default, Automatic (Round 19). */
-    micSide.set(st ? st.micSide ?? 'automatic' : null);
+    micSide.set((st ? st.micSide : d.saved.micSide) ?? 'automatic');
   };
 
   const renderFeatures = (): void => {
@@ -363,6 +361,9 @@ export const createHome = (ctx: Ctx): Page => {
     }
     const caps = capsOf(d);
     const st = live(d);
+    const pods = st ?? d.saved;
+    const checking = !!st && st.checking;
+    const notReady = !!st && !st.ready;
     const single = caps.has('singleBattery');
     let any = false;
     for (const f of features) {
@@ -378,22 +379,19 @@ export const createHome = (ctx: Ctx): Page => {
       if (def.key === 'heartRate') {
         value = st ? HR_ON.has(st.heartRate) : null;
       } else if (def.key === 'hearingAid') {
-        reason = st?.hearingAidEnrolled === false;
-        value = st && st.hearingAidEnrolled !== null ? st.hearingAidEnabled : null;
+        reason = pods.hearingAidEnrolled === false;
+        value = pods.hearingAidEnrolled !== null ? pods.hearingAidEnabled : null;
       } else {
-        value = st ? st[def.key] : null;
+        value = pods[def.key];
       }
-      const checking = !!st && st.checking && !reason && value === null;
       setClass(f.row, 'is-disabled', reason);
       setText(f.desc, t(reason ? 'features.hearingAidSetup' : single && def.descMax ? def.descMax : def.desc));
-      if (f.check) {
-        setHidden(f.check, !checking);
-      }
-      setHidden(f.sw, checking);
+      /* Hearing aid stays blocked while checking: it depends on the setup done on a Mac or iPhone. */
+      f.busy?.set(checking, notReady || (def.key === 'hearingAid' && checking));
       if (f.input.checked !== (!reason && !!value)) {
         f.input.checked = !reason && !!value;
       }
-      setDisabled(f.input, !st || reason);
+      setDisabled(f.input, !st || reason || (!f.busy && notReady));
       setAttr(f.input, 'aria-describedby', !st ? 'featLocked' : reason ? f.desc.id : null);
     }
     setHidden(featGroup, !any);

@@ -24,6 +24,8 @@ export type Device = {
   batteries: Batteries | null;
   host: HostSettings;
   stemModes: StemMode[];
+  /* The settings remembered for the pair, shown while it has no live session. */
+  saved: Saved;
 };
 export type ListeningMode = 'off' | 'noiseCancellation' | 'transparency' | 'adaptive';
 export type MicSide = 'automatic' | 'left' | 'right';
@@ -42,6 +44,7 @@ type Settings = {
   hearingAidEnrolled: boolean | null;
   hearingAidEnabled: boolean;
 };
+type Saved = Settings & { listeningMode: ListeningMode | null };
 export type State = Settings & {
   battery: Batteries;
   ear: EarState;
@@ -50,6 +53,8 @@ export type State = Settings & {
   heartRateBpm: number | null;
   caps: Capability[];
   checking: boolean;
+  /* Handshake answered (session Ready): writes reach the AirPods. */
+  ready: boolean;
 };
 export type ToggleName = 'earDetection' | 'conversationAwareness' | 'personalizedVolume' | 'oneBudAnc';
 export type Theme = 'light' | 'dark' | 'auto';
@@ -94,7 +99,7 @@ export type HostToMain =
   | { type: 'settings'; settings: Partial<Settings> }
   | { type: 'heartRate'; heartRate: HeartRate; heartRateBpm: number | null }
   | { type: 'caps'; caps: Capability[] }
-  | { type: 'checking'; checking: boolean }
+  | { type: 'checking'; checking: boolean; ready: boolean }
   | { type: 'hostSettings'; id: DeviceId; host: HostSettings }
   | { type: 'mic'; status: MicStatus }
   | { type: 'toast'; toast: ToastId; device: DeviceId | null };

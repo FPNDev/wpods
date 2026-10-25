@@ -122,6 +122,25 @@ public enum BatteryStatus : byte
 /// <summary>One battery component; <c>default</c> = not reported / absent.</summary>
 public readonly record struct Battery(byte? Percent, BatteryStatus Status);
 
+/// <summary>
+/// Shown settings stored on the AirPods themselves (not the per-host ear detection, mic side and stem modes);
+/// null = never seen. Remembered per pair for display only, see <see cref="DeviceState.RememberedSettings"/>.
+/// </summary>
+internal sealed record PodSettings
+{
+    public static readonly PodSettings None = new();
+
+    public ListeningMode? ListeningMode { get; init; }
+    public bool? ConversationAwareness { get; init; }
+    public bool? PersonalizedVolume { get; init; }
+    public bool? OneBudAnc { get; init; }
+    public PressSpeed? PressSpeed { get; init; }
+    public HoldDuration? HoldDuration { get; init; }
+    public byte? ToneVolume { get; init; }
+    public bool? HearingAidEnrolled { get; init; }
+    public bool HearingAidEnabled { get; init; }
+}
+
 public enum HeartRateStatus
 {
     Off,
@@ -164,11 +183,13 @@ public sealed class DeviceState
 
     /// <param name="remembered">Reported on the last attach.</param>
     /// <param name="baseline">Baseline of the last known model.</param>
-    internal DeviceState(DeviceCapabilities remembered, DeviceCapabilities baseline)
+    /// <param name="rememberedSettings">See <see cref="RememberedSettings"/>.</param>
+    internal DeviceState(DeviceCapabilities remembered, DeviceCapabilities baseline, PodSettings rememberedSettings)
     {
         Reported = remembered;
         _baseline = baseline;
         Capabilities = remembered | baseline;
+        RememberedSettings = rememberedSettings;
     }
 
     public SessionStatus Status { get; internal set; }
@@ -184,6 +205,12 @@ public sealed class DeviceState
 
     /// <summary>The initial report has ended: 1 s after the device's first 0x09 setting, or its timeout.</summary>
     public bool InitialReportDone { get; private set; }
+
+    /// <summary>
+    /// Pod-saved settings last seen on an earlier attach. UI display only, while the initial report is pending; never
+    /// part of the setting properties below, which hold only what this session reported or wrote.
+    /// </summary>
+    internal PodSettings RememberedSettings { get; }
 
     public string? Name { get; internal set; }
     public string? ModelNumber { get; internal set; }
@@ -256,6 +283,21 @@ public sealed class DeviceState
         Reported = _observed;
         return UpdateCapabilities();
     }
+
+    /// <summary>The pod-saved settings this session reported or wrote; <paramref name="fallback"/>'s value for each other one.</summary>
+    internal PodSettings GetPodSettings(PodSettings fallback) => new()
+    {
+        ListeningMode = ListeningMode ?? fallback.ListeningMode,
+        ConversationAwareness = ConversationAwareness ?? fallback.ConversationAwareness,
+        PersonalizedVolume = PersonalizedVolume ?? fallback.PersonalizedVolume,
+        OneBudAnc = OneBudAnc ?? fallback.OneBudAnc,
+        PressSpeed = PressSpeed ?? fallback.PressSpeed,
+        HoldDuration = HoldDuration ?? fallback.HoldDuration,
+        ToneVolume = ToneVolume ?? fallback.ToneVolume,
+        HearingAidEnrolled = HearingAidEnrolled ?? fallback.HearingAidEnrolled,
+        // The enabled byte comes with 0x2C (enrolment).
+        HearingAidEnabled = HearingAidEnrolled is null ? fallback.HearingAidEnabled : HearingAidEnabled,
+    };
 
     internal DeviceChange SetBaseline(DeviceCapabilities baseline)
     {

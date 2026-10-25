@@ -1,4 +1,5 @@
 /* Small stateless pieces shared by the pages. Called as functions where the caller keeps the element. */
+import { setAttr, setClass } from '../dom';
 import type { LabelKey } from '../i18n';
 import { Icon, type IconName, Spinner } from '../icons';
 
@@ -21,13 +22,43 @@ export const LockRow = (id: string): HTMLDivElement => (
   <div class="wp-row">{Note({ label: 'common.connectToChange', id })}</div>
 ) as HTMLDivElement;
 
-/* Spinner + "Checking..." in place of a control while the initial report is pending. */
-export const Checking = (): HTMLSpanElement => (
-  <span class="wp-row__end wp-row__checking" hidden>
-    <Spinner />
-    <span l:text="common.checking" />
-  </span>
-) as HTMLSpanElement;
+/* Keys that change a radio, checkbox or range value. */
+const VALUE_KEYS = new Set([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown']);
+
+export type Busy = { spin: HTMLSpanElement; set: (spin: boolean, block: boolean) => void };
+/* A pod-saved control. `spin` (placed by the caller) spins and aria-busy goes on `control` while the initial report
+   is pending; the control keeps its last value and stays usable. `block`: it looks disabled and takes no input (until
+   the session is ready). aria-disabled on `items`, not `disabled`: `disabled` drops keyboard focus when a re-attach
+   starts again. The spinner slot always keeps its space, so showing it never moves the layout. */
+export const createBusy = (control: HTMLElement, items: Iterable<Element>): Busy => {
+  let blocked = false;
+  const stop = (e: Event): void => {
+    if (blocked) {
+      e.preventDefault();
+    }
+  };
+  control.addEventListener('click', stop, true);
+  control.addEventListener('mousedown', stop, true);
+  control.addEventListener('keydown', (e) => {
+    if (VALUE_KEYS.has(e.key)) {
+      stop(e);
+    }
+  }, true);
+  const spin = (
+    <span class="wp-row__end wp-busy" role="img" l:aria-label="common.checking"><Spinner class="wp-spinner--sm" /></span>
+  ) as HTMLSpanElement;
+  return {
+    spin,
+    set: (spinning, block) => {
+      blocked = block;
+      setClass(spin, 'is-busy', spinning);
+      setAttr(control, 'aria-busy', spinning ? 'true' : null);
+      for (const item of items) {
+        setAttr(item, 'aria-disabled', block ? 'true' : null);
+      }
+    },
+  };
+};
 
 type Switch = { el: HTMLLabelElement; input: HTMLInputElement };
 export const createSwitch = (labelledBy: string, onChange: (on: boolean) => void): Switch => {

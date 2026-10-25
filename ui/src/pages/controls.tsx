@@ -1,7 +1,7 @@
 /* Controls: double-press speed, press-and-hold duration, the modes press-and-hold cycles through, tone volume
    (each shown only when supported). */
 import { createChoiceList } from '../components/choiceList';
-import { Checking, LockRow } from '../components/common';
+import { type Busy, createBusy, LockRow } from '../components/common';
 import { createSegmented, type Segmented } from '../components/segmented';
 import { setAttr, setDisabled, setHidden, setText } from '../dom';
 import { post } from '../host';
@@ -11,7 +11,7 @@ import type { HoldDuration, PressSpeed, StemMode } from '../protocol';
 import { capsOf, current, live, store } from '../state';
 import type { Ctx, Page } from './page';
 
-type SegRow<V extends string> = { row: HTMLDivElement; check: HTMLSpanElement; seg: Segmented<V> };
+type SegRow<V extends string> = { row: HTMLDivElement; busy: Busy; seg: Segmented<V> };
 
 const STEM_ORDER: StemMode[] = ['off', 'noiseCancellation', 'transparency', 'adaptive'];
 const STEM_MIN = 2;
@@ -22,18 +22,18 @@ const TONE_MIN = 15;
 const TONE_MAX = 100;
 
 const segRow = <V extends string>(icon: IconName, title: LabelKey, desc: LabelKey, seg: Segmented<V>): SegRow<V> => {
-  const check = Checking();
+  const busy = createBusy(seg.el, seg.el.elements);
   const row = (
     <div class="wp-row wp-row--stack">
       <div class="wp-row__head">
         <span class="wp-row__lead"><Icon name={icon} /></span>
         <div class="wp-row__text"><span class="wp-row__title" l:text={title} /><span class="wp-row__desc" l:text={desc} /></div>
-        {check}
+        {busy.spin}
       </div>
       {seg.el}
     </div>
   ) as HTMLDivElement;
-  return { row, check, seg };
+  return { row, busy, seg };
 };
 
 export const createControls = (ctx: Ctx): Page => {
@@ -111,10 +111,9 @@ export const createControls = (ctx: Ctx): Page => {
   };
   const pressLocked = LockRow('pressLocked');
   const toneLocked = LockRow('toneLocked');
-  const toneCheck = Checking();
   let pressGroup!: HTMLElement;
   let toneGroup!: HTMLElement;
-  let slider!: HTMLDivElement;
+  let toneHead!: HTMLDivElement;
   let tone!: HTMLInputElement;
   let toneValue!: HTMLSpanElement;
   let lastTone: number | null = null;
@@ -164,11 +163,10 @@ export const createControls = (ctx: Ctx): Page => {
         <div class="wp-list">
           {toneLocked}
           <div class="wp-row wp-row--stack">
-            <div class="wp-row__head">
+            <div class="wp-row__head" ref={toneHead}>
               <div class="wp-row__text"><span class="wp-row__title" l:text="controls.tone" /><span class="wp-row__desc" l:text="controls.toneDesc" /></div>
-              {toneCheck}
             </div>
-            <div class="wp-slider" ref={slider}>
+            <div class="wp-slider">
               <Icon name="tone" class="wp-slider__icon" />
               <input class="wp-slider__input" type="range" min={String(TONE_MIN)} max={String(TONE_MAX)} l:aria-label="controls.tone" ref={tone}
                 oninput={() => showTone(tone.value)}
@@ -189,6 +187,8 @@ export const createControls = (ctx: Ctx): Page => {
   ) as HTMLDivElement;
 
   stemList.append(...stem.rows);
+  const toneBusy = createBusy(tone, [tone]);
+  toneHead.append(toneBusy.spin);
 
   const renderStem = (modes: StemMode[], shown: boolean, adaptive: boolean, locked: boolean): void => {
     setHidden(stemGroup, !shown);
@@ -207,10 +207,10 @@ export const createControls = (ctx: Ctx): Page => {
     }
   };
 
-  const renderSeg = <V extends string>(r: SegRow<V>, shown: boolean, locked: boolean, checking: boolean, value: V | null): void => {
+  const renderSeg = <V extends string>(r: SegRow<V>, shown: boolean, locked: boolean, checking: boolean, notReady: boolean,
+    value: V | null): void => {
     setHidden(r.row, !shown);
-    setHidden(r.check, !checking);
-    setHidden(r.seg.el, checking);
+    r.busy.set(checking, notReady);
     r.seg.lock(locked, locked ? 'pressLocked' : null);
     r.seg.set(value);
   };
@@ -223,12 +223,13 @@ export const createControls = (ctx: Ctx): Page => {
     const caps = capsOf(d);
     const st = live(d);
     const pending = !!st && st.checking;
+    const notReady = !!st && !st.ready;
     const hasPress = caps.has('pressSpeed');
     const hasHold = caps.has('holdDuration');
     setHidden(pressGroup, !hasPress && !hasHold);
     setHidden(pressLocked, !!st);
-    renderSeg(press, hasPress, !st, pending && st.pressSpeed === null, st?.pressSpeed ?? null);
-    renderSeg(hold, hasHold, !st, pending && st.holdDuration === null, st?.holdDuration ?? null);
+    renderSeg(press, hasPress, !st, pending, notReady, st ? st.pressSpeed : d.saved.pressSpeed);
+    renderSeg(hold, hasHold, !st, pending, notReady, st ? st.holdDuration : d.saved.holdDuration);
 
     renderStem(d.stemModes, caps.has('listeningMode'), caps.has('adaptive'), !st);
 
@@ -244,10 +245,8 @@ export const createControls = (ctx: Ctx): Page => {
 
     setHidden(toneGroup, !caps.has('toneVolume'));
     setHidden(toneLocked, !!st);
-    const value = st?.toneVolume ?? null;
-    const checking = pending && value === null;
-    setHidden(toneCheck, !checking);
-    setHidden(slider, checking);
+    const value = st ? st.toneVolume : d.saved.toneVolume;
+    toneBusy.set(pending, notReady);
     setDisabled(tone, !st);
     setAttr(tone, 'aria-describedby', st ? null : 'toneLocked');
     if (value !== null && value !== lastTone) {
