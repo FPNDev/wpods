@@ -103,7 +103,7 @@ export type HostToMain =
   | { type: 'checking'; checking: boolean; ready: boolean }
   | { type: 'hostSettings'; id: DeviceId; host: HostSettings }
   | { type: 'mic'; status: MicStatus }
-  | { type: 'toast'; toast: ToastId; device: DeviceId | null };
+  | { type: 'toast'; toast: ToastId; device: DeviceId | null; code?: string };
 
 export type HostToPopup =
   | CommonMessage

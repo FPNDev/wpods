@@ -154,7 +154,7 @@
     "toast.noResponse": "Your AirPods didn't respond. Try reconnecting.",
     "toast.connectFailed": "Couldn't connect. Make sure the case is open and nearby.",
     "toast.bluetoothOff": "Bluetooth is off.",
-    "toast.micFailed": "The microphone couldn't start. Try reconnecting your AirPods.",
+    "toast.micFailed": "Something went wrong with the microphone (error {code}). Try reconnecting your AirPods.",
     "toast.lowLatencyFailed": "Low audio latency couldn't start. Make sure your AirPods are the output device.",
     "toast.handsFreeFailed": "Couldn't change Hands-Free mode. Try again.",
     "toast.disconnectFailed": "Couldn't disconnect. Try again.",

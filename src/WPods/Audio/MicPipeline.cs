@@ -5,15 +5,18 @@ namespace WPods.Audio;
 
 public enum MicStatus
 {
-    /// <summary>No app captures from "Headset (A2DP)".</summary>
+    /// <summary>No app captures from "Headset (A2DP)", or one captures while no AirPods are attached.</summary>
     NotActive,
-    /// <summary>An app captures and the mic stream was requested; no audio yet.</summary>
+    /// <summary>An app captures and AirPods are attached; no START written yet in this session.</summary>
     Starting,
-    /// <summary>Decoded audio is flowing.</summary>
+    /// <summary>
+    /// An app captures and a START was written (or audio decoded) in this session. Silence stays Live: the AirPods
+    /// send nothing while it is quiet.
+    /// </summary>
     Live,
     /// <summary>
-    /// An app captures but no audio arrived for 3 s (including no AirPods attached), or the virtual mic device
-    /// cannot be opened or read.
+    /// A software fault: the virtual mic device cannot be opened or read, the decoder failed to load, or a START
+    /// write failed.
     /// </summary>
     Problem,
 }
@@ -30,7 +33,6 @@ public sealed class MicPipeline
     private const int HeaderLength = 22;
     private const int RecordHeaderLength = 5; // u32 LE timestamp + u8 AU length
     private const int PcmCapacity = 2048;
-    private const int ProblemAfterMs = 3000;
     private const int StallAfterMs = 8000;
     private const int RestartEveryMs = 5000;
     private const int MaxConsecutiveErrors = 8;
@@ -42,7 +44,10 @@ public sealed class MicPipeline
     private const float MakeUpGain = 4f;
 
     private static readonly byte[] StartMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x01, 0x82, 0x00, 0x00, 0x00, 0x04, 0x96, 0x00];
+    // From LibrePods (AACP_STOP_AUDIO).
+    private static readonly byte[] StopMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x02, 0x00, 0x03, 0x01];
 
+    private readonly ConnectionManager _connections;
     private readonly SettingsStore _settings;
     private readonly VirtualMic _mic;
     private readonly Lock _lock = new();
@@ -53,6 +58,7 @@ public sealed class MicPipeline
     private readonly short[] _output = GC.AllocateArray<short>(PcmCapacity, pinned: true);
     private AacDecoder? _decoder;
     private VoiceProcessor? _voice;
+    // Written under _lock.
     private bool _nativeFailed;
     private int _fill;
     private int _errors;
@@ -66,6 +72,11 @@ public sealed class MicPipeline
     // Shared state; written under _lock.
     private AapSession? _session;
     private bool _startSent;
+    // A START write succeeded or audio was decoded in this session.
+    private bool _started;
+    // The latest START write failed.
+    private bool _startFailed;
+    private volatile string? _faultCode;
     private long _lastStart;
     private long _lastAudio;
     private volatile bool _capturing;
@@ -76,6 +87,7 @@ public sealed class MicPipeline
 
     public MicPipeline(ConnectionManager connections)
     {
+        _connections = connections;
         _settings = connections.Settings;
         _timer = new Timer(static s => ((MicPipeline)s!).OnTimer(), this, Timeout.Infinite, Timeout.Infinite);
         _mic = new VirtualMic(OnCaptureChanged);
@@ -91,10 +103,43 @@ public sealed class MicPipeline
     /// </summary>
     public event Action<MicStatus>? StatusChanged;
 
+    /// <summary>
+    /// True when an app starts capturing from the virtual mic, false when it stops. Raised only on change, on the
+    /// capture-state wait thread under internal locks: handlers must not block.
+    /// </summary>
+    public event Action<bool>? CaptureChanged;
+
     public MicStatus Status => _status;
+
+    /// <summary>
+    /// Why the status is <see cref="MicStatus.Problem"/> while an app captures: "M1" the decoder or voice processor
+    /// failed to load, "M2" a START write failed; null otherwise. Set before <see cref="StatusChanged"/> is raised, so
+    /// read it from that handler.
+    /// </summary>
+    public string? FaultCode => _faultCode;
+
+    /// <summary>An app captures from the virtual mic.</summary>
+    public bool Capturing => _capturing;
 
     /// <summary>Smoothed output peak 0..1, updated at most every 100 ms while <see cref="MicStatus.Live"/>; 0 otherwise.</summary>
     public float Level => Volatile.Read(ref _level);
+
+    /// <summary>
+    /// Stops the AirPods mic stream (0x58 STOP) when a START was sent in the attached session. Completes when the
+    /// STOP was written, or at once when there is nothing to stop. Call before an intentional detach (user
+    /// Disconnect, exit): AirPods cut off mid-stream may reconnect on their own.
+    /// </summary>
+    public Task StopStreamAsync()
+    {
+        lock (_lock)
+        {
+            if (!_startSent || _session is not { } session)
+            {
+                return Task.CompletedTask;
+            }
+            return StopLocked(session, "before detach");
+        }
+    }
 
     private void OnAttached(AapSession session)
     {
@@ -102,8 +147,11 @@ public sealed class MicPipeline
         {
             _session = session;
             _startSent = false;
+            _started = false;
+            _startFailed = false;
             _mode = _settings.Get(session.Address).MicMode;
             Log.Info("mic", $"session {Mac.Format(session.Address)} attached, mode={_mode}, capturing={_capturing}");
+            UpdateStatusLocked("session attached");
         }
         session.Changed += OnSessionChanged;
         session.PacketReceived += OnPacket;
@@ -119,6 +167,7 @@ public sealed class MicPipeline
             if (_session == session)
             {
                 _session = null;
+                UpdateStatusLocked("session detached");
             }
         }
         Log.Info("mic", $"session {Mac.Format(session.Address)} detached");
@@ -126,8 +175,11 @@ public sealed class MicPipeline
         _decoder = null;
         _voice?.Dispose();
         _voice = null;
-        _nativeFailed = false;
         _fill = 0;
+        lock (_lock)
+        {
+            _nativeFailed = false;
+        }
     }
 
     private void OnSessionChanged(DeviceChange change)
@@ -165,10 +217,20 @@ public sealed class MicPipeline
         lock (_lock)
         {
             Log.Info("mic", $"capture state {state}, session={(_session is { } s ? Mac.Format(s.Address) + " " + s.State.Status : "none")}, startSent={_startSent}");
-            _capturing = state == CaptureState.Capturing;
+            bool capturing = state == CaptureState.Capturing;
+            if (capturing != _capturing)
+            {
+                _capturing = capturing;
+                CaptureChanged?.Invoke(capturing);
+            }
             if (!_capturing)
             {
                 _timer.Change(Timeout.Infinite, Timeout.Infinite);
+                if (_startSent && _session is { } attached)
+                {
+                    _ = StopLocked(attached, "capture stopped");
+                }
+                _faultCode = null;
                 SetStatusLocked(state == CaptureState.Unavailable ? MicStatus.Problem : MicStatus.NotActive, $"capture state {state}");
                 return;
             }
@@ -182,28 +244,19 @@ public sealed class MicPipeline
         }
     }
 
-    // Stall checks only; re-armed for the next deadline, so it fires about every 3 s while audio flows.
+    // Stall re-send of START only. Silence never changes the status: the AirPods send nothing while it is quiet.
+    // Re-armed for the next deadline, so it fires about every 8 s while audio flows.
     private void OnTimer()
     {
         lock (_lock)
         {
-            if (!_capturing)
+            if (!_capturing || _session is not { } session || !IsReady(session))
             {
+                // Capture start and session ready restart the wait.
                 return;
             }
             long now = Environment.TickCount64;
             long silent = now - Volatile.Read(ref _lastAudio);
-            if (silent < ProblemAfterMs)
-            {
-                ArmLocked(ProblemAfterMs - silent);
-                return;
-            }
-            SetStatusLocked(MicStatus.Problem, $"no audio for {silent} ms");
-            if (_session is not { } session || !IsReady(session))
-            {
-                // Attach/ready restarts the wait.
-                return;
-            }
             long sinceStart = now - _lastStart;
             if (silent >= StallAfterMs && sinceStart >= RestartEveryMs)
             {
@@ -261,10 +314,11 @@ public sealed class MicPipeline
         {
             lock (_lock)
             {
-                if (_capturing)
+                if (_capturing && (!_started || _startFailed))
                 {
-                    SetStatusLocked(MicStatus.Live, "decoded audio");
-                    ArmLocked(ProblemAfterMs);
+                    _started = true;
+                    _startFailed = false;
+                    UpdateStatusLocked("decoded audio");
                 }
             }
         }
@@ -285,11 +339,15 @@ public sealed class MicPipeline
         }
         catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
         {
-            // No audio -> Problem after 3 s; retried on the next session.
             Log.Error("mic", "decoder/denoiser init failed", e);
+            // Problem (M1) until the next session, which retries.
             _decoder?.Dispose();
             _decoder = null;
-            _nativeFailed = true;
+            lock (_lock)
+            {
+                _nativeFailed = true;
+                UpdateStatusLocked("decoder init failed");
+            }
             return false;
         }
     }
@@ -382,8 +440,8 @@ public sealed class MicPipeline
     private void BeginWaitLocked(long now, string reason)
     {
         Volatile.Write(ref _lastAudio, now);
-        SetStatusLocked(MicStatus.Starting, reason);
-        ArmLocked(ProblemAfterMs);
+        ArmLocked(StallAfterMs);
+        UpdateStatusLocked(reason);
     }
 
     private void SendStartLocked(AapSession session, long now, string reason)
@@ -394,13 +452,61 @@ public sealed class MicPipeline
         _ = SendStartAsync(session);
     }
 
-    // A failed write is covered by the stall re-send.
-    private static async Task SendStartAsync(AapSession session)
+    // A write skipped or cancelled because the session is closing is a detach, not a failure. A real failure is
+    // Problem (M2) until a later START write succeeds or audio is decoded; the stall re-send retries.
+    private async Task SendStartAsync(AapSession session)
     {
-        if (!await session.WriteAsync(StartMicrophone).ConfigureAwait(false))
+        bool ok = await session.WriteAsync(StartMicrophone).ConfigureAwait(false);
+        if (!ok)
         {
             Log.Warn("mic", "START write failed");
         }
+        lock (_lock)
+        {
+            if (!_startSent || _session != session || (!ok &&(_connections.Session != session || session.Completion.IsCompleted)))
+            {
+                return;
+            }
+            if (ok)
+            {
+                _started = true;
+            }
+            _startFailed = !ok;
+            UpdateStatusLocked(ok ? "START written" : "START write failed");
+        }
+    }
+
+    // No status change: a detach after a Disconnect makes it NotActive; a later capture start sends START again.
+    // Stops the stall timer so no START re-send follows the STOP.
+    private Task StopLocked(AapSession session, string reason)
+    {
+        _startSent = false;
+        _started = false;
+        _startFailed = false;
+        _timer.Change(Timeout.Infinite, Timeout.Infinite);
+        Log.Info("mic", $"STOP sent to {Mac.Format(session.Address)} ({reason})");
+        return WriteStopAsync(session);
+    }
+
+    private static async Task WriteStopAsync(AapSession session)
+    {
+        if (!await session.WriteAsync(StopMicrophone).ConfigureAwait(false))
+        {
+            Log.Warn("mic", "STOP write failed");
+        }
+    }
+
+    // While capturing: no session -> NotActive; a fault (M1 wins over M2) -> Problem; START written or audio
+    // decoded -> Live; else Starting. While not capturing only OnCaptureChanged sets the status.
+    private void UpdateStatusLocked(string reason)
+    {
+        if (!_capturing)
+        {
+            return;
+        }
+        string? fault = _session is null ? null : _nativeFailed ? "M1" : _startFailed ? "M2" : null;
+        _faultCode = fault;
+        SetStatusLocked(_session is null ? MicStatus.NotActive : fault is not null ? MicStatus.Problem : _started ? MicStatus.Live : MicStatus.Starting, reason);
     }
 
     private void ArmLocked(long dueMs) => _timer.Change(Math.Max(dueMs, 1), Timeout.Infinite);

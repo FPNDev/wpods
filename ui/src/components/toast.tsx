@@ -8,7 +8,7 @@ import type { ToastId } from '../protocol';
 type ToastAction = 'reconnect' | 'tryAgain' | 'openSettings';
 type Toast = {
   el: HTMLDivElement;
-  show: (id: ToastId) => void;
+  show: (id: ToastId, code: string | null) => void;
   hide: () => void;
   relabel: () => void;
 };
@@ -27,6 +27,7 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
   let msg!: HTMLSpanElement;
   let actionBtn!: HTMLButtonElement;
   let shown: ToastId | null = null;
+  let code: string | null = null;
   let timer = 0;
   let ms = 0;
   const hide = (): void => {
@@ -69,7 +70,7 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
       return;
     }
     const action = ACTIONS[shown];
-    setText(msg, t(`toast.${shown}`));
+    setText(msg, t(`toast.${shown}`, code === null ? undefined : { code }));
     setHidden(actionBtn, !action);
     if (action) {
       setText(actionBtn, t(`toast.action.${action}`));
@@ -77,11 +78,12 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
   };
   return {
     el,
-    show: (id) => {
+    show: (id, faultCode) => {
       if (!ms) {
         ms = parseFloat(getComputedStyle(el).getPropertyValue('--dur-toast')) || 4000;
       }
       shown = id;
+      code = faultCode;
       relabel();
       setHidden(el, false);
       arm();

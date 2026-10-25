@@ -31,6 +31,7 @@ export const store = {
   announce: '',
   toast: null as ToastId | null,
   toastDevice: null as DeviceId | null,
+  toastCode: null as string | null,
   relabel: false,
 };
 
@@ -217,6 +218,7 @@ export const apply = (msg: HostToMain): void => {
     case 'toast':
       store.toast = msg.toast;
       store.toastDevice = msg.device;
+      store.toastCode = msg.code ?? null;
       if (msg.toast === 'disconnectFailed' && msg.device !== null && disconnecting.delete(msg.device)) {
         applyDevices(lastDevices, store.attached);
       }

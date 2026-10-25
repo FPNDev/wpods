@@ -49,7 +49,7 @@ internal sealed partial class TrayApp : ApplicationContext
         Count,
     }
 
-    private sealed record ToastRequest(string Id, ulong Device);
+    private sealed record ToastRequest(string Id, ulong Device, string? Code);
 
     private const int LowBatteryPercent = 10;
     private const char MiddleDot = (char)0xB7;
@@ -155,10 +155,11 @@ internal sealed partial class TrayApp : ApplicationContext
         }
     }
 
-    private void QueueToast(string id, ulong device)
+    private void QueueToast(string id, ulong device, string? code = null)
     {
-        Log.Info("ui", $"toast queued: {id} device={Mac.Format(device)}");
-        Volatile.Write(ref _pendingToast, new ToastRequest(id, device));
+        string codeTag = code is null ? "" : $" code={code}";
+        Log.Info("ui", $"toast queued: {id} device={Mac.Format(device)}{codeTag}");
+        Volatile.Write(ref _pendingToast, new ToastRequest(id, device, code));
         MarkDirty(Dirty.Toast);
     }
 
@@ -259,12 +260,12 @@ internal sealed partial class TrayApp : ApplicationContext
         MarkDirty(Dirty.HostSettings);
     }
 
-    // Under MicPipeline's lock (serialized).
+    // Under MicPipeline's lock (serialized). Any move into Problem while an app captures toasts, with the fault code.
     private void OnMicStatus(MicStatus status)
     {
-        if (status == MicStatus.Problem && _micSeen == MicStatus.Starting)
+        if (status == MicStatus.Problem && _micSeen != MicStatus.Problem && _mic.Capturing)
         {
-            QueueToast("micFailed", 0);
+            QueueToast("micFailed", 0, _mic.FaultCode);
         }
         _micSeen = status;
         MarkDirty(Dirty.Mic);
@@ -346,7 +347,7 @@ internal sealed partial class TrayApp : ApplicationContext
         }
         if ((dirty & Dirty.Toast) != 0 && Interlocked.Exchange(ref _pendingToast, null) is { } toast)
         {
-            SendToast(toast.Id, toast.Device);
+            SendToast(toast.Id, toast.Device, toast.Code);
         }
         if ((dirty & (Dirty.Devices | Dirty.Offers | Dirty.Session | Dirty.Status)) != 0)
         {
@@ -502,14 +503,15 @@ internal sealed partial class TrayApp : ApplicationContext
     }
 
     /// <summary>In-page toast; only while the main window shows (protocol 6).</summary>
-    private void SendToast(string id, ulong device)
+    private void SendToast(string id, ulong device, string? code = null)
     {
+        string codeTag = code is null ? "" : $" code={code}";
         if (!MainLive)
         {
-            Log.Info("ui", $"toast {id} device={Mac.Format(device)} dropped (main window not showing)");
+            Log.Info("ui", $"toast {id} device={Mac.Format(device)}{codeTag} dropped (main window not showing)");
             return;
         }
-        Log.Info("ui", $"toast {id} device={Mac.Format(device)} shown");
+        Log.Info("ui", $"toast {id} device={Mac.Format(device)}{codeTag} shown");
         Utf8JsonWriter w = _writer.Begin("toast");
         w.WriteString("toast", id);
         if (device != 0)
@@ -519,6 +521,10 @@ internal sealed partial class TrayApp : ApplicationContext
         else
         {
             w.WriteNull("device");
+        }
+        if (code is not null)
+        {
+            w.WriteString("code", code);
         }
         PostMain(_writer.End());
     }
@@ -804,6 +810,7 @@ internal sealed partial class TrayApp : ApplicationContext
             main.Destroy();
         }
         _host.SetHotKey(false);
+        await _mic.StopStreamAsync();
         await _connections.DisposeAsync();
         _ducker.Dispose();
         _nearby.Dispose();

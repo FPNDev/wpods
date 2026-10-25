@@ -325,6 +325,7 @@ internal sealed partial class TrayApp
     {
         if (_connections.Session?.Address == address)
         {
+            await _mic.StopStreamAsync();
             bool ok = await _connections.DisconnectAsync();
             Log.Info("ui", $"disconnect {Mac.Format(address)}: {ok}, reconnect={reconnect}");
             if (!ok)

@@ -161,7 +161,7 @@ const render = (): void => {
     store.announce = '';
   }
   if (store.toast) {
-    toast.show(store.toast);
+    toast.show(store.toast, store.toastCode);
     shell.insertBefore(toast.el, announce);
     store.toast = null;
   }
