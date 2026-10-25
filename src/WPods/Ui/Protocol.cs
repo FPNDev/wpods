@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using WPods.Audio;
 using WPods.Core;
 using WPods.Nearby;
 
@@ -206,6 +207,57 @@ internal sealed class MessageWriter
         w.WriteBoolean("lowLatency", host.LowLatency);
         w.WriteString("micMode", Camel(host.MicMode));
         w.WriteNumber("duckPercent", host.DuckPercent);
+        w.WriteEndObject();
+    }
+
+    /// <summary>"micCatalog": each mode's models and the voice enhancements, in picker order.</summary>
+    public static void WriteMicCatalog(Utf8JsonWriter w)
+    {
+        w.WriteStartObject("micCatalog");
+        WriteMicOptions(w, "standard", MicCatalog.Standard);
+        WriteMicOptions(w, "voiceIsolation", MicCatalog.VoiceIsolation);
+        WriteMicOptions(w, "wideSpectrum", MicCatalog.WideSpectrum);
+        WriteMicOptions(w, "enhancement", MicCatalog.Enhancements);
+        w.WriteEndObject();
+    }
+
+    private static void WriteMicOptions(Utf8JsonWriter w, string name, MicOption[] options)
+    {
+        w.WriteStartArray(name);
+        foreach (MicOption option in options)
+        {
+            w.WriteStartObject();
+            w.WriteString("id", option.Id);
+            w.WriteString("name", option.Name);
+            w.WriteString("weight", option.Weight);
+            w.WriteNumber("threads", option.Threads);
+            w.WriteNumber("cores", option.Cores);
+            w.WriteNumber("latencyMs", option.LatencyMs);
+            w.WriteEndObject();
+        }
+        w.WriteEndArray();
+    }
+
+    /// <summary>A MicConfig object: modes (Apple's order), models per mode, enhancement (null = Off).</summary>
+    public static void WriteMicConfig(Utf8JsonWriter w, string name, MicConfig config)
+    {
+        w.WriteStartObject(name);
+        w.WriteStartArray("modes");
+        foreach (MicMode mode in MicConfig.AllModes)
+        {
+            if (config.Modes.Contains(mode))
+            {
+                w.WriteStringValue(Camel(mode));
+            }
+        }
+        w.WriteEndArray();
+        w.WriteStartObject("models");
+        foreach (MicMode mode in MicConfig.AllModes)
+        {
+            w.WriteString(Camel(mode), config.Models[mode]);
+        }
+        w.WriteEndObject();
+        w.WriteString("enhancement", config.Enhancement);
         w.WriteEndObject();
     }
 

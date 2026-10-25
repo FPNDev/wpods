@@ -2,7 +2,7 @@
    their element handles while another page shows: a re-show is one append, and their bound labels stay current. */
 import type { Section } from '../state';
 
-export type PageName = 'firstRun' | 'empty' | 'home' | 'controls' | 'windows' | 'language' | 'pair';
+export type PageName = 'firstRun' | 'empty' | 'home' | 'controls' | 'windows' | 'language' | 'pair' | 'enhancement' | 'micModes';
 
 export type Page = {
   el: HTMLDivElement;

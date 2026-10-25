@@ -9,6 +9,8 @@ import { post } from '../host';
 import { t, type LabelKey } from '../i18n';
 import { Art, Icon, Spinner } from '../icons';
 import type { Capability, Conn, HeartRate, ListeningMode, MicMode, MicSide, State, ToggleName } from '../protocol';
+import { beginDisconnect, capsOf, current, effectiveMode, live, store } from '../state';
+import { enhancementName } from './enhancement';
 import type { Ctx, Page } from './page';
 
 type FeatureKey = ToggleName | 'heartRate' | 'hearingAid';
@@ -16,6 +18,7 @@ type FeatureKey = ToggleName | 'heartRate' | 'hearingAid';
 type FeatureDef = { key: FeatureKey; title: LabelKey; desc: LabelKey; descMax?: LabelKey; podSaved?: boolean };
 type Feature = SwitchRow & { def: FeatureDef };
 type Side = 'left' | 'right';
+type PickerRow = { el: HTMLButtonElement; desc: HTMLSpanElement };
 
 const STATUS_KIND: Record<Conn, string> = {
   connected: 'connected',
@@ -44,6 +47,18 @@ const earText = (st: State | null, side: Side): string => {
   const ear = st ? st.ear[side] : null;
   return ear === 'inEar' || ear === 'out' || ear === 'inCase' ? t(EAR_KEY[ear]) : '';
 };
+/* Navigation row to the enhancement page; its description shows the picked entry. */
+const PickerRow = (title: LabelKey, onclick: () => void): PickerRow => {
+  let desc!: HTMLSpanElement;
+  const el = (
+    <button type="button" class="wp-row wp-row--nav" onclick={onclick}>
+      <span class="wp-row__text"><span class="wp-row__title" l:text={title} /><span class="wp-row__desc" ref={desc} /></span>
+      <span class="wp-row__end"><Icon name="chevron-right" /></span>
+    </button>
+  ) as HTMLButtonElement;
+  return { el, desc };
+};
+
 /* A bud counts as present when its battery is reported and it isn't 'disconnected'. */
 const budPresent = (st: State, side: Side): boolean => st.battery[side] !== null && st.ear[side] !== 'disconnected';
 
@@ -106,7 +121,11 @@ export const createHome = (ctx: Ctx): Page => {
   let chipLabel!: HTMLSpanElement;
   let micDesc!: HTMLSpanElement;
   let micSideRow!: HTMLDivElement;
+  let micModeRow!: HTMLDivElement;
+  let micModeSpin!: HTMLSpanElement;
   const micLocked = LockRow('micLocked');
+  /* Mic mode: the enabled modes (Mic modes page in Windows settings), showing the effective one; the spinner keeps
+     its space while the mode's model loads (the old one keeps running, so picking stays open). */
   const micMode = createSegmented<MicMode>({
     name: 'micMode',
     legend: 'mic.mode',
@@ -115,14 +134,17 @@ export const createHome = (ctx: Ctx): Page => {
       { value: 'voiceIsolation', label: 'mic.voiceIsolation' },
       { value: 'wideSpectrum', label: 'mic.wideSpectrum' },
     ],
-    onChange: (value) => {
+    onChange: (mode) => {
       const d = current();
       if (d) {
-        d.host.micMode = value;
-        post({ type: 'setHostSetting', id: d.id, name: 'micMode', value });
+        d.host.micMode = mode;
+        post({ type: 'setHostSetting', id: d.id, name: 'micMode', value: mode });
+        ctx.update('mic');
       }
     },
   });
+  /* Voice enhancement: app-wide, never locked. */
+  const toEnhancement = PickerRow('mic.enhancement', () => ctx.go('enhancement'));
   const micSide = createSegmented<MicSide>({
     name: 'micSide',
     legend: 'mic.side',
@@ -235,17 +257,21 @@ export const createHome = (ctx: Ctx): Page => {
         <div class="wp-list">
           {micLocked}
           <div class="wp-row"><div class="wp-row__text"><span class="wp-row__desc" ref={micDesc} /></div></div>
-          <div class="wp-row wp-row--stack">
-            <div class="wp-row__head"><div class="wp-row__text"><span class="wp-row__title" l:text="mic.mode" /></div></div>
+          <div class="wp-row wp-row--stack" ref={micModeRow}>
+            <div class="wp-row__head">
+              <div class="wp-row__text"><span class="wp-row__title" l:text="mic.mode" /></div>
+              <span class="wp-row__end wp-busy" ref={micModeSpin}><Spinner class="wp-spinner--sm" /></span>
+            </div>
             {micMode.el}
-            {Note({ label: 'mic.rnnoiseNote' })}
           </div>
+          {toEnhancement.el}
           <div class="wp-row wp-row--stack" ref={micSideRow}>
             <div class="wp-row__head">
               <div class="wp-row__text"><span class="wp-row__title" l:text="mic.side" /><span class="wp-row__desc" l:text="mic.sideDesc" /></div>
             </div>
             {micSide.el}
           </div>
+          <div class="wp-row">{Note({ label: 'mic.note' })}</div>
         </div>
       </section>
 
@@ -360,8 +386,17 @@ export const createHome = (ctx: Ctx): Page => {
     setText(micDesc, t(`mic.desc.${mic}`));
     const st = live(d);
     setHidden(micLocked, !!st);
-    micMode.set(d.host.micMode);
+    const enabled = store.micEnabled;
+    setHidden(micModeRow, enabled.size < 2);
+    for (const mode of ['standard', 'voiceIsolation', 'wideSpectrum'] as const) {
+      micMode.showItem(mode, enabled.has(mode));
+    }
     micMode.lock(!st, st ? null : 'micLocked');
+    micMode.set(effectiveMode(d.host.micMode));
+    const loading = !!st && store.micLoading.mode !== null;
+    setClass(micModeSpin, 'is-busy', loading);
+    setAttr(micMode.el, 'aria-busy', loading ? 'true' : null);
+    setText(toEnhancement.desc, enhancementName(store.micConfig.enhancement));
     setHidden(micSideRow, !capsOf(d).has('micSide'));
     micSide.lock(!st || !st.ready, st ? null : 'micLocked');
     /* Not reported = the device default, Automatic (Round 19). */
@@ -446,6 +481,19 @@ export const createHome = (ctx: Ctx): Page => {
       mic: renderMic,
       features: renderFeatures,
     },
-    returnFocus: (from) => (from === 'controls' ? toControls : from === 'windows' ? toWindows : from === 'pair' ? menu.button : null),
+    returnFocus: (from) => {
+      switch (from) {
+        case 'controls':
+          return toControls;
+        case 'windows':
+          return toWindows;
+        case 'pair':
+          return menu.button;
+        case 'enhancement':
+          return toEnhancement.el;
+        default:
+          return null;
+      }
+    },
   };
 };

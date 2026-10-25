@@ -129,6 +129,7 @@ internal sealed partial class TrayApp : ApplicationContext
         connections.HandsFreeFailed += (address, _) => QueueToast("handsFreeFailed", address);
         settings.HostSettingsChanged += OnHostSettingsChanged;
         mic.StatusChanged += OnMicStatus;
+        mic.StageChanged += OnMicStage;
         keepAlive.Failed += OnLowLatencyFailed;
         nearby.OffersChanged += () => MarkDirty(Dirty.Offers);
         nearby.NearbyChanged += () => MarkDirty(Dirty.Devices);

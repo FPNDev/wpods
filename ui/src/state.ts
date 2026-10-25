@@ -1,7 +1,7 @@
 /* Main window store: the host's data as last received, plus which render sections it made stale. Messages are
    applied as they arrive; main.tsx renders the stale sections of the shown page once per animation frame. */
 import { t } from './i18n';
-import type { Batteries, Capability, Conn, Device, DeviceId, HostToMain, Language, MicStatus, State, ToastId } from './protocol';
+import type { Batteries, Capability, Conn, Device, DeviceId, HostToMain, Language, MicCatalog, MicConfig, MicMode, MicSlot, MicStatus, State, ToastId } from './protocol';
 
 export type Section = 'page' | 'title' | 'hero' | 'menu' | 'nc' | 'mic' | 'features' | 'controls' | 'windows' | 'langs' | 'firstRun';
 type Entry = Device & { capSet: Set<Capability> };
@@ -25,6 +25,12 @@ export const store = {
   languages: [] as Language[],
   languageByCode: new Map<string, Language>(),
   windowsLanguageName: '',
+  /* The model lists (sent once in init) and the app-wide mic config. */
+  micCatalog: { standard: [], voiceIsolation: [], wideSpectrum: [], enhancement: [] } as MicCatalog,
+  micConfig: { modes: [], models: { standard: '', voiceIsolation: '', wideSpectrum: '' }, enhancement: null } as MicConfig,
+  micEnabled: new Set<MicMode>(),
+  /* Per slot, the id whose stage the attached pair loads now, or null. */
+  micLoading: { mode: null, enhancement: null } as Record<MicSlot, string | null>,
   lastBattery: new Map<DeviceId, Batteries>(),
   lowSaid: new Set<string>(),
   /* One-shot outputs, consumed by the next frame. */
@@ -40,6 +46,24 @@ export const mark = (...sections: Section[]): void => {
   for (const s of sections) {
     dirty.add(s);
   }
+};
+
+/* Fallback cycle of the effective mic mode: voiceIsolation -> standard -> wideSpectrum -> (wraps). */
+const NEXT_MODE: Record<MicMode, MicMode> = { voiceIsolation: 'standard', standard: 'wideSpectrum', wideSpectrum: 'voiceIsolation' };
+/* The saved mode if enabled, else the first enabled one walking the cycle forward after it. The saved mode itself is
+   never changed, so re-enabling it brings it back. */
+export const effectiveMode = (saved: MicMode): MicMode => {
+  let mode = saved;
+  for (let i = 0; i < 3 && !store.micEnabled.has(mode); i++) {
+    mode = NEXT_MODE[mode];
+  }
+  return mode;
+};
+/* Takes a mic config (from the host, or the page's optimistic change). */
+export const applyMicConfig = (config: MicConfig): void => {
+  store.micConfig = config;
+  store.micEnabled = new Set(config.modes);
+  mark('mic');
 };
 
 export const current = (): Entry | null => (store.selected === null ? null : store.byId.get(store.selected) ?? null);
@@ -137,6 +161,10 @@ export const apply = (msg: HostToMain): void => {
         store.languageByCode.set(l.code, l);
       }
       store.windowsLanguageName = msg.windowsLanguageName;
+      store.micCatalog = msg.micCatalog;
+      applyMicConfig(msg.micConfig);
+      store.micLoading.mode = null;
+      store.micLoading.enhancement = null;
       store.mic = msg.mic;
       store.attached = msg.attached;
       store.selected = msg.selected ?? msg.attached;
@@ -207,6 +235,13 @@ export const apply = (msg: HostToMain): void => {
     }
     case 'mic':
       store.mic = msg.status;
+      mark('mic');
+      break;
+    case 'micConfig':
+      applyMicConfig(msg.config);
+      break;
+    case 'micStage':
+      store.micLoading[msg.slot] = msg.state === 'loading' ? msg.id : null;
       mark('mic');
       break;
     case 'prefs':

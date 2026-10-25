@@ -1,5 +1,5 @@
 /* Windows settings: the pair's host settings (enabled only while that pair is connected), then the app's own:
-   startup, theme, language, Windows accent. */
+   mic modes, startup, theme, language, Windows accent. */
 import { LockRow, Note } from '../components/common';
 import { createSegmented } from '../components/segmented';
 import { createSwitchRow, type SwitchRow } from '../components/switchRow';
@@ -24,6 +24,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
   let forDevice!: HTMLHeadingElement;
   let langValue!: HTMLSpanElement;
   let toLanguage!: HTMLButtonElement;
+  let toMicModes!: HTMLButtonElement;
   const hostLocked = LockRow('hostLocked');
   const handsFree = createSwitchRow({ id: 'hfpTitle', title: 'windows.handsFree', desc: 'windows.handsFreeDesc', onChange: hostToggle('disableHandsFree') });
   const latency = createSwitchRow({ id: 'latencyTitle', title: 'windows.latency', desc: 'windows.latencyDesc', stack: true, onChange: hostToggle('lowLatency') });
@@ -71,6 +72,10 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
       <section class="wp-group">
         <h2 class="wp-group__title" l:text="app.name" />
         <div class="wp-list">
+          <button type="button" class="wp-row wp-row--nav" ref={toMicModes} onclick={() => ctx.go('micModes')}>
+            <span class="wp-row__text"><span class="wp-row__title" l:text="mic.modes" /><span class="wp-row__desc" l:text="mic.modesDesc" /></span>
+            <span class="wp-row__end"><Icon name="chevron-right" /></span>
+          </button>
           {startup.row}
           <div class="wp-row wp-row--stack">
             <div class="wp-row__head">
@@ -111,5 +116,5 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     setText(langValue, lang ? lang.originalName : t('lang.sameAsWindows'));
   };
 
-  return { el, sections: { windows: render }, returnFocus: (from) => (from === 'language' ? toLanguage : null) };
+  return { el, sections: { windows: render }, returnFocus: (from) => (from === 'language' ? toLanguage : from === 'micModes' ? toMicModes : null) };
 };

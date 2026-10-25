@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Security;
 using System.Text;
 using System.Text.Json;
+using WPods.Audio;
 using WPods.Core;
 using WPods.Nearby;
 
@@ -91,6 +92,19 @@ internal sealed partial class TrayApp
                 break;
             case "setStemModes" when id != 0 && m.Modes is not null:
                 SetStemModes(id, m.Modes);
+                break;
+            case "setMicModes" when MicConfig.TryParseModes(m.Modes, out HashSet<MicMode> modes):
+                SaveMicConfig(_settings.Mic with { Modes = modes });
+                break;
+            case "setMicModel" when MessageWriter.TryParse(m.Mode, out MicMode micMode) && m.Name is not null && MicCatalog.FindModel(micMode, m.Name) is not null:
+            {
+                MicConfig config = _settings.Mic;
+                SaveMicConfig(config with { Models = new Dictionary<MicMode, string>(config.Models) { [micMode] = m.Name } });
+                break;
+            }
+            case "setEnhancement" when m.Value.ValueKind == JsonValueKind.Null
+                || (m.Value.ValueKind == JsonValueKind.String && MicCatalog.FindEnhancement(m.Value.GetString()!) is not null):
+                SaveMicConfig(_settings.Mic with { Enhancement = m.Value.GetString() });
                 break;
             case "setTheme" when m.Theme is "light" or "dark" or "auto":
                 SavePrefs(_prefs with { Theme = m.Theme });
@@ -434,17 +448,19 @@ internal sealed partial class TrayApp
 
     private async void SetHostSetting(ulong address, string? name, JsonElement value)
     {
+        bool attached = _connections.Session?.Address == address;
         HostSettings current = _settings.Get(address);
         HostSettings? next = name switch
         {
             "disableHandsFree" when value.ValueKind is JsonValueKind.True or JsonValueKind.False => current with { DisableHandsFree = value.GetBoolean() },
             "lowLatency" when value.ValueKind is JsonValueKind.True or JsonValueKind.False => current with { LowLatency = value.GetBoolean() },
+            // The pipeline loads the new effective mode's model (HostSettingsChanged).
             "micMode" when value.ValueKind == JsonValueKind.String && MessageWriter.TryParse(value.GetString(), out MicMode mode) => current with { MicMode = mode },
             "duckPercent" when value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int duck) && duck is >= 10 and <= 90 => current with { DuckPercent = duck },
             _ => null,
         };
         // Host settings are editable only for the attached pair; anything else just gets the saved value back.
-        if (next is not null && _connections.Session?.Address == address)
+        if (next is not null && attached)
         {
             int lowLatencyFailures = Volatile.Read(ref _lowLatencyFailures);
             try
@@ -465,6 +481,42 @@ internal sealed partial class TrayApp
             }
         }
         SendHostSettings(address);
+    }
+
+    // Under MicPipeline's lock (serialized); applied on the UI thread in the same order.
+    private void OnMicStage(ulong address, MicSlot slot, string? id, StageLoad load) =>
+        _ui.Post(_ => ApplyMicStage(address, slot, id, load), null);
+
+    // Load state only (the config is saved when picked). A failed load keeps the previous stage running: toast, except
+    // for a load dropped by a detach (address 0).
+    private void ApplyMicStage(ulong address, MicSlot slot, string? id, StageLoad load)
+    {
+        Utf8JsonWriter w = _writer.Begin("micStage");
+        w.WriteString("slot", MessageWriter.Camel(slot));
+        w.WriteString("id", id);
+        w.WriteString("state", MessageWriter.Camel(load));
+        PostMain(_writer.End());
+        if (load == StageLoad.Failed && address != 0)
+        {
+            SendToast("micModelFailed", address);
+        }
+    }
+
+    // Saved at once, editable any time; the pipeline follows through MicConfigChanged.
+    private void SaveMicConfig(MicConfig config)
+    {
+        try
+        {
+            _settings.SetMic(config);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Kept for this session; the next successful save writes it.
+            Log.Warn("ui", $"mic config not saved: {e.Message}");
+        }
+        Utf8JsonWriter w = _writer.Begin("micConfig");
+        MessageWriter.WriteMicConfig(w, "config", _settings.Mic);
+        PostMain(_writer.End());
     }
 
     private async Task RevertHandsFreeAsync(ulong address, HostSettings previous)

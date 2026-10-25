@@ -240,6 +240,8 @@ internal sealed partial class TrayApp
         }
         MessageWriter.WriteState(w, _session?.State);
         w.WriteString("mic", MessageWriter.Camel(_micStatus));
+        MessageWriter.WriteMicCatalog(w);
+        MessageWriter.WriteMicConfig(w, "micConfig", _settings.Mic);
         w.WriteBoolean("visible", _mainShown);
         PostMain(_writer.End());
     }

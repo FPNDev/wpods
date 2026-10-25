@@ -12,6 +12,16 @@ export type Capability = 'listeningMode' | 'adaptive' | 'earDetection' | 'conver
 export type Conn = 'connected' | 'connecting' | 'reconnecting' | 'notConnected' | 'elsewhere' | 'attachFailed';
 export type MicMode = 'standard' | 'voiceIsolation' | 'wideSpectrum';
 type HostSettings = { disableHandsFree: boolean; lowLatency: boolean; micMode: MicMode; duckPercent: number };
+export type MicSlot = 'mode' | 'enhancement';
+type StageLoad = 'loading' | 'ready' | 'failed';
+export type Weight = 'light' | 'medium' | 'heavy' | 'veryHeavy' | 'notMeasured';
+/* One model / enhancement entry; name is technical English (not localized), cores = average CPU in cores (all
+   threads), 0 = not measured. */
+export type MicOption = { id: string; name: string; weight: Weight; threads: number; cores: number; latencyMs: number };
+/* The model list per mic mode and the enhancement list, in picker order (sent once in init). */
+export type MicCatalog = { standard: MicOption[]; voiceIsolation: MicOption[]; wideSpectrum: MicOption[]; enhancement: MicOption[] };
+/* App-wide: enabled modes (Apple order, at least one), the model id per mode, the enhancement id (null = Off). */
+export type MicConfig = { modes: MicMode[]; models: Record<MicMode, string>; enhancement: string | null };
 export type StemMode = 'off' | 'noiseCancellation' | 'transparency' | 'adaptive';
 export type Device = {
   id: DeviceId;
@@ -62,7 +72,8 @@ export type Theme = 'light' | 'dark' | 'auto';
 export type AccentRamp = { accent: string; dark1: string; dark2: string; dark3: string; light1: string; light2: string; light3: string };
 export type Language = { code: string; originalName: string; engName: string };
 export type MicStatus = 'notActive' | 'starting' | 'live' | 'problem';
-export type ToastId = 'noResponse' | 'connectFailed' | 'bluetoothOff' | 'micFailed' | 'lowLatencyFailed' | 'handsFreeFailed' | 'disconnectFailed';
+export type ToastId = 'noResponse' | 'connectFailed' | 'bluetoothOff' | 'micFailed' | 'lowLatencyFailed' | 'handsFreeFailed' | 'disconnectFailed'
+  | 'micModelFailed';
 type OfferState = 'offer' | 'connecting' | 'connected' | 'failed';
 export type Offer = { id: DeviceId; name: string; art: Art; batteries: Batteries; state: OfferState };
 
@@ -87,6 +98,8 @@ type MainInit = { type: 'init' } & Labels & Prefs & {
   selected: DeviceId | null;
   state: State | null;
   mic: MicStatus;
+  micCatalog: MicCatalog;
+  micConfig: MicConfig;
 };
 
 export type HostToMain =
@@ -103,6 +116,9 @@ export type HostToMain =
   | { type: 'checking'; checking: boolean; ready: boolean }
   | { type: 'hostSettings'; id: DeviceId; host: HostSettings }
   | { type: 'mic'; status: MicStatus }
+  | { type: 'micConfig'; config: MicConfig }
+  /* Load state of the slot's newest request for the attached pair (id = model / enhancement id; null = none). */
+  | { type: 'micStage'; slot: MicSlot; id: string | null; state: StageLoad }
   | { type: 'toast'; toast: ToastId; device: DeviceId | null; code?: string };
 
 export type HostToPopup =
@@ -125,6 +141,9 @@ export type MainToHost =
   | { type: 'setHostSetting'; id: DeviceId; name: 'micMode'; value: MicMode }
   | { type: 'setHostSetting'; id: DeviceId; name: 'duckPercent'; value: number }
   | { type: 'setStemModes'; id: DeviceId; modes: StemMode[] }
+  | { type: 'setMicModes'; modes: MicMode[] }
+  | { type: 'setMicModel'; mode: MicMode; name: string }
+  | { type: 'setEnhancement'; value: string | null }
   | { type: 'setTheme'; theme: Theme }
   | { type: 'setLanguage'; code: string }
   | { type: 'openBluetoothSettings' | 'openAddDevice' | 'getStarted' | 'minimize' | 'close' | 'beginDrag' };

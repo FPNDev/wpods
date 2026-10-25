@@ -100,3 +100,12 @@ span.wp-menu__glyph { display: grid; place-items: center; }
 .wp-slider .wp-slider__input[aria-disabled="true"]::-webkit-slider-thumb { transform: none; }
 /* The busy spinner: hidden, it still keeps its space, so showing it never moves the layout. */
 .wp-busy:not(.is-busy) { visibility: hidden; }
+/* Mic lists (enhancement, mic modes): the row whose stage loads shows the spinner in its check slot. */
+.wp-choice.is-loading .wp-row__check { display: none; }
+.wp-choice > .wp-spinner { color: var(--accent-text); }
+/* Mic modes: weight meter (4 bars, filled per weight; not measured = all hollow, dashed) before the usage hint. */
+.wp-weight { display: flex; align-items: center; gap: var(--space-2); }
+.wp-meter { display: inline-flex; flex: none; gap: var(--space-half); }
+.wp-meter__bar { width: 4px; height: 10px; border-radius: 1px; background: var(--fill-sunken); box-sizing: border-box; }
+.wp-meter__bar.is-on { background: var(--text-secondary); }
+.wp-meter--unmeasured > .wp-meter__bar { background: transparent; border: 1px dashed var(--text-tertiary); }

@@ -8,9 +8,11 @@ import { t, type LabelKey } from './i18n';
 import { Glyph, Icon } from './icons';
 import { createControls } from './pages/controls';
 import { createEmpty } from './pages/empty';
+import { createEnhancement } from './pages/enhancement';
 import { createFirstRun } from './pages/firstRun';
 import { createHome } from './pages/home';
 import { createLanguage } from './pages/language';
+import { createMicModes } from './pages/micModes';
 import type { Ctx, Page, PageName } from './pages/page';
 import { createPairGuide } from './pages/pairGuide';
 import { createWindowsSettings } from './pages/windowsSettings';
@@ -28,6 +30,8 @@ const ROUTES: Record<PageName, Route> = {
   windows: { create: createWindowsSettings, title: 'windows.title', parent: 'home' },
   language: { create: createLanguage, title: 'lang.title', parent: 'windows' },
   pair: { create: createPairGuide, title: 'pair.title', parent: 'home' },
+  enhancement: { create: createEnhancement, title: 'mic.enhancement', parent: 'home' },
+  micModes: { create: createMicModes, title: 'mic.modes', parent: 'windows' },
 };
 
 const built = new Map<PageName, Built>();
