@@ -1,0 +1,88 @@
+Native libraries and models shipped with WPods (built or fetched by native\build-ffmpeg.ps1, native\build-rnnoise.ps1,
+native\build-helper.ps1, native\build-deepfilter.ps1, native\build-webrtc-apm.ps1, native\fetch-models.ps1 and
+native\export-models.ps1 with the script in native\export\). Licenses and copyright notices: see THIRD-PARTY-NOTICES.txt.
+
+FFmpeg 7.1.5 (LGPL v2.1 or later, see THIRD-PARTY-NOTICES.txt)
+  Source:  https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz
+  SHA-256: DE668509CAF9E35E3CD162473441FDB29538C6D96ED080292B3CF9E6FC5D558F
+           (signature ffmpeg-7.1.5.tar.xz.asc verified once against FFmpeg release key FCF986EA15E6E293A5644F10B4322F04D67658D8)
+  Output:  avcodec-61.dll, avutil-59.dll, swresample-5.dll (unmodified source)
+  Toolchain: MSVC 14.51 x64, NASM, MSYS2 make
+  Configure flags:
+    --toolchain=msvc --arch=x86_64 --target-os=win64
+    --enable-shared --disable-static
+    --disable-autodetect --enable-w32threads
+    --disable-programs --disable-doc --disable-debug
+    --disable-avformat --disable-avfilter --disable-avdevice --disable-swscale --disable-postproc
+    --disable-network --disable-pixelutils --disable-iamf
+    --disable-everything --enable-decoder=aac
+    --enable-small --optflags=-O2
+    --extra-cflags=-MT --extra-ldflags=-NODEFAULTLIB:libucrt.lib --extra-libs=ucrt.lib
+  No --enable-gpl, no --enable-nonfree. License reported by configure: LGPL version 2.1 or later.
+  Corresponding source: the tarball above plus build-ffmpeg.ps1 / build-ffmpeg.sh.
+
+RNNoise 0.2 (BSD-3-Clause, see THIRD-PARTY-NOTICES.txt)
+  Source:  https://github.com/xiph/rnnoise/releases/download/v0.2/rnnoise-0.2.tar.gz
+  SHA-256: 90FCE4B00B9FF24C08DBFE31B82FFD43BAE383D85C5535676D28B0A2B11C0D37
+  Model:   default model bundled in the release tarball (src/rnnoise_data.c), covered by the same hash
+  Output:  rnnoise.dll (unmodified source)
+  Toolchain: MSVC 14.51 x64, /O2 /MT (hybrid CRT: /NODEFAULTLIB:libucrt.lib ucrt.lib)
+  SIMD: SSE2 baseline + SSE4.1 / AVX2 kernels chosen at runtime by RNNoise's x86 RTCD (RNN_ENABLE_X86_RTCD)
+
+DeepFilterNet 3 C API, libDF v0.5.6 (MIT OR Apache-2.0, see THIRD-PARTY-NOTICES.txt)
+  Source:  https://github.com/Rikorose/DeepFilterNet/archive/978576aa8400552a4ce9730838c635aa30db5e61.tar.gz
+           (tag v0.5.6, commit 978576aa8400552a4ce9730838c635aa30db5e61)
+  SHA-256: 61A0E88025B70643805ED1E0C29B9B07693B538BE538DD189972FC15C1212075
+  Model:   models/DeepFilterNet3_onnx.tar.gz from the same tarball (pretrained weights, same license), shipped as a
+           separate file next to the exe and loaded by df_create(path, atten_lim)
+  Output:  deepfilter.dll (= crate deep_filter's df.dll, unmodified source) + DeepFilterNet3_onnx.tar.gz
+  Toolchain: Rust 1.79.0 x86_64-pc-windows-msvc (newer rustc rejects time 0.3.28 from the tag's Cargo.lock), MSVC linker
+  Command: cargo rustc --profile release-lto --locked -p deep_filter --lib --no-default-features --features capi
+           --crate-type cdylib (upstream profile: fat LTO, strip, panic=abort)
+  CRT: RUSTFLAGS -C target-feature=+crt-static + /NODEFAULTLIB:libucrt.lib ucrt.lib (static vcruntime + system UCRT)
+  Statically linked Rust crates and their licenses: see THIRD-PARTY-NOTICES.txt (all permissive: MIT / Apache-2.0 /
+  BSD-0 / Zlib / Unlicense / CC0 / Unicode-DFS-2016; no copyleft)
+
+webrtc-audio-processing 2.1 (BSD-3-Clause, see THIRD-PARTY-NOTICES.txt)
+with abseil-cpp 20240722.0 (Apache-2.0, see THIRD-PARTY-NOTICES.txt)
+  Source:  https://freedesktop.org/software/pulseaudio/webrtc-audio-processing/webrtc-audio-processing-2.1.tar.xz
+  SHA-256: AE9302824B2038D394F10213CAB05312C564A038434269F11DBF68F511F9F9FE (= published .sha256sum)
+  abseil:  fetched by meson from the release's subprojects\abseil-cpp.wrap (wrapdb 20240722.0-3):
+           https://github.com/abseil/abseil-cpp/releases/download/20240722.0/abseil-cpp-20240722.0.tar.gz
+           SHA-256: F50E5AC311A81382DA7FA75B97310E4B9006474F9560AC46F54A9967F07D4AE3 (meson build-file patch
+           12DD8DF1488A314C53E3751ABD2750CF233B830651D168B6A9F15E7D0CF71F7B), both checked by meson
+  Output:  webrtc_apm.dll = static webrtc-audio-processing + abseil (unmodified source) + WPods C API wrapper
+           native\webrtc-apm\webrtc_apm.cc (wapm_create / wapm_process / wapm_destroy). Built by
+           native\build-webrtc-apm.ps1
+  Toolchain: meson 1.6.1 + ninja 1.11.1.3 (PyPI, venv), MSVC 14.51 x64, buildtype release, static libraries, /MT
+             (hybrid CRT: /NODEFAULTLIB:libucrt.lib ucrt.lib), main project /std:c++20 (MSVC rejects upstream's
+             designated initializers under c++17), abseil c++17
+
+ONNX Runtime 1.31.0, CPU execution provider, win-x64 release build (MIT, see THIRD-PARTY-NOTICES.txt)
+  Source:  https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-1.31.0.zip
+  SHA-256: 3958D8A44984160692C1B4FFD0DE3CB48F8C39F9D34BB31E433DB06E30B82195 (= GitHub release asset digest)
+           (commit 402979ac1bef89dcd55add41eaa7277c407599eb)
+  Output:  onnxruntime.dll copied unmodified from lib\ of the archive by native\fetch-models.ps1 (no build);
+           called through its C API (OrtGetApiBase), no managed package
+  The LICENSE and ThirdPartyNotices.txt of the release archive are reproduced verbatim in THIRD-PARTY-NOTICES.txt.
+
+ONNX speech-enhancement models (pretrained weights, unmodified), fetched by native\fetch-models.ps1 into models\ with
+the SHA-256 hashes listed in that script:
+  DPDFNet (Ceva, Apache-2.0, see THIRD-PARTY-NOTICES.txt): dpdfnet2_48khz_hr.onnx, dpdfnet8_48khz_hr.onnx from
+    https://huggingface.co/Ceva-IP/DPDFNet (revision dd6818d00f50c836fed43a6243ebe49116de5964, folder onnx\);
+    license per the model card and https://github.com/ceva-ip/DPDFNet (commit 9bd9844a227bb6aa57e55588d8d0e961fcff1c46)
+  FastEnhancer (MIT, see THIRD-PARTY-NOTICES.txt): fastenhancer48k_{t,b,s,m,l}.onnx = release onnx-48khz-v1
+    fastenhancer_{t,b,s,m,l}.onnx of https://github.com/aask1357/fastenhancer (license at commit
+    85d98a689a85b956dec384f258b075859ca50263); fevd_gtcrn_spec.onnx = release onnx-vd-v1.0.0 gtcrn.spec.onnx
+    (GTCRN model trained by the FastEnhancer authors)
+  GTCRN (MIT, see THIRD-PARTY-NOTICES.txt): gtcrn_simple.onnx from https://github.com/Xiaobin-Rong/gtcrn
+    (commit 502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73, stream\onnx_models; DNS3-trained checkpoint)
+
+Exported ONNX model (no ONNX download exists): built by native\export-models.ps1, which downloads the pinned sources
+and weights (SHA-256 in that script) and runs native\export\export_nsnet2.py in a pinned Python 3.11 venv under
+.build\native\ (the script's header documents the wrapper, the contract and its numerical check):
+  NSNet2 (weights CC BY 4.0, code MIT, see THIRD-PARTY-NOTICES.txt): nsnet2_48k.onnx =
+    NSNet2-baseline/nsnet2-20ms-48k-baseline.onnx of https://github.com/microsoft/DNS-Challenge
+    (commit 5582dcf5ba43155621de72a035eb54a7d233af14) with the GRU states made graph inputs / outputs by
+    native\export\export_nsnet2.py (weights unchanged)
+  venv-export: Python 3.11, numpy 2.2.6, onnx 1.19.0, onnxruntime 1.23.0 (full pinned list in native\export-models.ps1)

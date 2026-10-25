@@ -1,0 +1,45 @@
+WPODS TERMS OF USE
+
+WPods is a free, open-source Windows app that connects to Apple AirPods and lets you use their features on a Windows PC. It includes its own Bluetooth audio drivers.
+
+By installing or using WPods you agree to these terms. If you do not agree, do not install or use WPods.
+
+1. License
+
+WPods is free software, licensed under the GNU General Public License, version 3 (GPL-3.0). Copyright (C) 2026 fpndev (rimjoeh) <rimjoeh@gmail.com>. You may use, copy, modify and share WPods under the terms of that license. The full license text is installed with WPods as LICENSE.txt. Nothing in these terms limits the rights the GPL-3.0 gives you.
+
+2. Not affiliated with Apple
+
+WPods is an independent project. It is not made, affiliated with, sponsored, endorsed or supported by Apple Inc.
+
+3. Trademarks
+
+Apple, AirPods, AirPods Pro, AirPods Max, iPhone, iPad and Mac are trademarks of Apple Inc., registered in the U.S. and other countries. Feature names such as Noise Cancellation, Transparency, Adaptive, Conversation Awareness, Personalized Volume, Hearing Aid, Standard, Voice Isolation and Wide Spectrum are Apple's names. WPods uses these names only to describe which AirPods and features it works with, and claims no rights to them.
+
+4. WPods' own features
+
+Where WPods runs its own processing under one of Apple's names, such as the mic modes, it is WPods' own implementation and not Apple's technology.
+
+5. Third-party software
+
+WPods includes libraries and noise-reduction models made by others. They belong to their authors and are used under their own licenses. WPods claims no ownership of them. Their copyright notices and licenses are installed with WPods as THIRD-PARTY-NOTICES.txt.
+
+6. What the author owns
+
+The WPods code, user interface and drivers are the author's own work, licensed to you under the GPL-3.0 as described in section 1.
+
+7. Drivers
+
+WPods installs kernel drivers on your PC. You install and use them at your own risk.
+
+8. NO WARRANTY
+
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, WPODS IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF WPODS, INCLUDING ITS DRIVERS, IS WITH YOU. SHOULD WPODS PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY SERVICING, REPAIR OR CORRECTION.
+
+9. LIMITATION OF LIABILITY
+
+IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING WILL THE AUTHOR, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS WPODS AS PERMITTED BY THE GPL-3.0, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OR INABILITY TO USE WPODS OR ITS DRIVERS (INCLUDING BUT NOT LIMITED TO LOSS OF DATA OR DATA BEING RENDERED INACCURATE, LOSSES SUSTAINED BY YOU OR THIRD PARTIES, DAMAGE TO YOUR PC OR YOUR AIRPODS, OR A FAILURE OF WPODS TO OPERATE WITH ANY OTHER PROGRAMS OR DEVICES), EVEN IF THE AUTHOR OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+10. Requests from rights holders
+
+If you hold rights to something in WPods and want it changed or removed, email rimjoeh@gmail.com. Requests are handled promptly, including removal.
