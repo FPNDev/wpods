@@ -20,7 +20,8 @@ NTA2DPVM.sys=1
 %ProviderName%=Models,NTamd64.10.0...22000
 
 [Models.NTamd64.10.0...22000]
-%DeviceDescription%=NTA2DPVM_Install,Root\NTA2DPVM
+; Hardware ID deliberately not "Root\...": Windows Voice Clarity skips devices whose hardware ID matches "ROOT\*".
+%DeviceDescription%=NTA2DPVM_Install,WPods\NTA2DPVM
 
 [NTA2DPVM_Install.NT]
 CopyFiles=NTA2DPVM_Files

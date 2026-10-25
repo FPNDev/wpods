@@ -8,7 +8,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $infNames = 'ntapd.inf', 'nta2dpvm.inf'
-$hardwareId = 'Root\NTA2DPVM'
+$hardwareId = 'WPods\NTA2DPVM'
+# Hardware ID of NTA2DPVM devnodes created by older builds: the current package no longer matches it.
+$legacyHardwareId = 'Root\NTA2DPVM'
 $record = Join-Path $PSScriptRoot 'installed.txt' # published names (oemNN.inf) of the packages this install owns
 $cer = Join-Path $PSScriptRoot 'NTAPD\WPods-TestSigning.cer'
 $thumbprint = [Security.Cryptography.X509Certificates.X509Certificate2]::new($cer).Thumbprint
@@ -25,15 +27,15 @@ function Get-StorePackages {
     $packages
 }
 
-function Get-Nta2dpvm {
-    Get-PnpDevice | Where-Object { $_.HardwareID -contains $hardwareId }
+function Get-Nta2dpvm([string]$Id = $hardwareId) {
+    Get-PnpDevice | Where-Object { $_.HardwareID -contains $Id }
 }
 
 if ($Uninstall) {
     $failed = $false
     $restart = $false
     try {
-        foreach ($device in Get-Nta2dpvm) {
+        foreach ($device in @(Get-Nta2dpvm) + @(Get-Nta2dpvm $legacyHardwareId)) {
             pnputil /remove-device $device.InstanceId | Out-Host
             $failed = $failed -or ($LASTEXITCODE -notin 0, 3010)
             $restart = $restart -or ($LASTEXITCODE -eq 3010)
@@ -158,6 +160,12 @@ foreach ($certStore in $certStores) {
 }
 try {
     $ntapd = Add-DriverPackage NTAPD
+    foreach ($device in Get-Nta2dpvm $legacyHardwareId) {
+        pnputil /remove-device $device.InstanceId | Out-Host
+        if ($LASTEXITCODE -notin 0, 3010) {
+            throw "pnputil /remove-device $($device.InstanceId) failed ($LASTEXITCODE)"
+        }
+    }
     $nta2dpvm = Install-Nta2dpvm
     # Code 14 (CM_PROB_NEED_RESTART): the running driver could not be unloaded for the update; a fresh devnode
     # loads the new driver without a reboot.

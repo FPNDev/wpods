@@ -23,7 +23,9 @@ function Add-DriverPackage([string]$Inf) {
 Add-DriverPackage (Join-Path $packages 'NTAPD\NTAPD.inf')
 
 # NTA2DPVM is root-enumerated: the ROOT\NTA2DPVM\nnnn devnode is created once (what devcon install does).
-$hardwareId = 'Root\NTA2DPVM'
+$hardwareId = 'WPods\NTA2DPVM'
+# Hardware ID of NTA2DPVM devnodes created by older builds: the current package no longer matches it.
+$legacyHardwareId = 'Root\NTA2DPVM'
 Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -73,8 +75,8 @@ public static class RootDevnode
 }
 '@
 
-function Get-Nta2dpvm {
-    Get-PnpDevice | Where-Object { $_.HardwareID -contains $hardwareId }
+function Get-Nta2dpvm([string]$Id = $hardwareId) {
+    Get-PnpDevice | Where-Object { $_.HardwareID -contains $Id }
 }
 
 function Install-Nta2dpvm {
@@ -84,6 +86,9 @@ function Install-Nta2dpvm {
     Add-DriverPackage (Join-Path $packages 'NTA2DPVM\NTA2DPVM.inf')
 }
 
+foreach ($legacy in Get-Nta2dpvm $legacyHardwareId) {
+    pnputil /remove-device $legacy.InstanceId | Out-Host
+}
 Install-Nta2dpvm
 # When the running driver could not be unloaded for an update (code 14, CM_PROB_NEED_RESTART), a fresh
 # devnode loads the new driver without a reboot.
