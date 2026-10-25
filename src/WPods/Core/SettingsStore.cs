@@ -50,7 +50,7 @@ public sealed record UiPrefs
 public sealed record DeviceModel(string Number, string Name);
 
 /// <summary>
-/// %LOCALAPPDATA%\WPods\settings.json (host settings, model, reported capabilities, stem modes, ear detection and mic side per MAC + last-used MAC) and keys.bin (proximity keys,
+/// %LOCALAPPDATA%\WPods\settings.json (host settings, model, reported capabilities, stem modes, ear detection, mic side, last seen pod-saved settings and Windows pairing date per MAC + last-used MAC) and keys.bin (proximity keys,
 /// DPAPI CurrentUser). Loaded once; every change is written atomically. Thread-safe.
 /// </summary>
 public sealed class SettingsStore
@@ -72,6 +72,7 @@ public sealed class SettingsStore
     private readonly Dictionary<ulong, bool> _earDetection = [];
     private readonly Dictionary<ulong, MicSide> _micSide = [];
     private readonly Dictionary<ulong, PodSettings> _podSettings = [];
+    private readonly Dictionary<ulong, DateTime> _pairingDates = [];
     private ulong _lastUsed;
     private UiPrefs _ui = UiPrefs.Default;
 
@@ -200,7 +201,7 @@ public sealed class SettingsStore
         }
     }
 
-    /// <summary>Capabilities the pair reported on its last attach; None if it was never attached.</summary>
+    /// <summary>Every capability the pair reported on any attach; None if it was never attached.</summary>
     internal DeviceCapabilities GetCapabilities(ulong address)
     {
         lock (_lock)
@@ -271,6 +272,34 @@ public sealed class SettingsStore
             }
             _capabilities[address] = capabilities;
             SaveSettings();
+        }
+    }
+
+    /// <summary>
+    /// Records the install date of the pair's Windows device entry (<see cref="Native.GetDeviceInstallDate"/>). A date
+    /// other than the stored one means the pair was removed and paired again: its remembered capabilities and pod-saved
+    /// settings are cleared and true is returned. The first date is only stored.
+    /// </summary>
+    internal bool SetPairingDate(ulong address, DateTime date)
+    {
+        lock (_lock)
+        {
+            bool known = _pairingDates.TryGetValue(address, out DateTime stored);
+            if (known && stored == date)
+            {
+                return false;
+            }
+            _pairingDates[address] = date;
+            if (known)
+            {
+                _capabilities.Remove(address);
+                _podSettings.Remove(address);
+            }
+            SaveSettings();
+            Log.Info("settings", known
+                ? $"{Mac.Format(address)}: paired again (Windows entry {stored:o} -> {date:o}); remembered capabilities and pod settings cleared"
+                : $"{Mac.Format(address)}: pairing date {date:o} stored");
+            return known;
         }
     }
 
@@ -427,6 +456,13 @@ public sealed class SettingsStore
                     _podSettings[address] = settings;
                 }
             }
+            foreach ((string mac, DateTime date) in file.PairingDates)
+            {
+                if (Mac.TryParse(mac, out ulong address))
+                {
+                    _pairingDates[address] = date.ToUniversalTime();
+                }
+            }
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -519,6 +555,10 @@ public sealed class SettingsStore
         {
             file.PodSettings[Mac.Format(address)] = settings;
         }
+        foreach ((ulong address, DateTime date) in _pairingDates)
+        {
+            file.PairingDates[Mac.Format(address)] = date;
+        }
         WriteAtomic(_settingsPath, JsonSerializer.SerializeToUtf8Bytes(file, SettingsJson.Default.SettingsFile));
     }
 
@@ -591,6 +631,8 @@ internal sealed class SettingsFile
     public Dictionary<string, MicSide> MicSide { get; set; } = [];
     /// <summary>Last seen pod-saved settings per pair, for display only (optional; older files have none).</summary>
     public Dictionary<string, PodSettings> PodSettings { get; set; } = [];
+    /// <summary>Install date (UTC) of each pair's Windows device entry, for re-pair detection (optional; older files have none).</summary>
+    public Dictionary<string, DateTime> PairingDates { get; set; } = [];
 }
 
 internal sealed class LegacyRecord

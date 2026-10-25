@@ -168,7 +168,6 @@ public sealed class DeviceState
     private readonly byte[] _settings = CreateSettings();
     private readonly Battery[] _batteries = new Battery[4];
     private byte _hearingAidEnabled = NotReported;
-    private DeviceCapabilities _observed;
     private DeviceCapabilities _baseline;
     // AAP battery component of the primary bud (Aap.LeftComponent / RightComponent / HeadphoneComponent); 0 = unknown.
     private byte _primaryPod;
@@ -181,7 +180,7 @@ public sealed class DeviceState
     // Latest listening mode the device reported (applied or not); 0 = none yet.
     private byte _deviceMode;
 
-    /// <param name="remembered">Reported on the last attach.</param>
+    /// <param name="remembered">Reported on any earlier attach.</param>
     /// <param name="baseline">Baseline of the last known model.</param>
     /// <param name="rememberedSettings">See <see cref="RememberedSettings"/>.</param>
     internal DeviceState(DeviceCapabilities remembered, DeviceCapabilities baseline, PodSettings rememberedSettings)
@@ -198,8 +197,8 @@ public sealed class DeviceState
     public DeviceCapabilities Capabilities { get; private set; }
 
     /// <summary>
-    /// Until the initial report ends: the set remembered from the last attach plus what this attach reported so far.
-    /// Afterwards: exactly what this attach reported (growing if the device reports more later). This part is persisted.
+    /// The set remembered from earlier attaches plus what this attach reported: only grows, never drops a capability
+    /// the device did not report this time. This part is persisted.
     /// </summary>
     internal DeviceCapabilities Reported { get; private set; }
 
@@ -271,18 +270,11 @@ public sealed class DeviceState
 
     internal DeviceChange Observe(DeviceCapabilities capabilities)
     {
-        _observed |= capabilities;
-        Reported = InitialReportDone ? _observed : Reported | capabilities;
+        Reported |= capabilities;
         return UpdateCapabilities();
     }
 
-    /// <summary>Drops remembered capabilities this attach did not report.</summary>
-    internal DeviceChange FinishInitialReport()
-    {
-        InitialReportDone = true;
-        Reported = _observed;
-        return UpdateCapabilities();
-    }
+    internal void FinishInitialReport() => InitialReportDone = true;
 
     /// <summary>The pod-saved settings this session reported or wrote; <paramref name="fallback"/>'s value for each other one.</summary>
     internal PodSettings GetPodSettings(PodSettings fallback) => new()

@@ -22,7 +22,7 @@ public enum IdleReason
 
 /// <summary>
 /// A paired AirPods device for the device list. <see cref="ModelName"/> comes from <see cref="Models"/>;
-/// <see cref="Capabilities"/> is the live set while attached, else the set reported on the last attach plus the
+/// <see cref="Capabilities"/> is the live set while attached, else every capability any attach reported plus the
 /// model baseline. <see cref="StemModes"/> is the stored stem press-and-hold cycle (written on every attach).
 /// </summary>
 public sealed record KnownDevice(
@@ -100,8 +100,9 @@ public sealed class ConnectionManager : IAsyncDisposable
     {
         Log.Info("conn", $"start, lastUsed={Mac.Format(Settings.LastUsed)}");
         _link.LinkChanged += OnLinkChanged;
-        _link.DevicesChanged += () => DevicesChanged?.Invoke();
+        _link.DevicesChanged += OnLinkDevicesChanged;
         _link.Start();
+        CheckPairings();
         // The initial enumeration raises no events; subscribers created before Start need the first list.
         DevicesChanged?.Invoke();
         _ = Task.Run(() => OnLinkAsync(0));
@@ -311,6 +312,52 @@ public sealed class ConnectionManager : IAsyncDisposable
         finally
         {
             _gate.Release();
+        }
+    }
+
+    // A pair was added or removed (CM notification thread): relay, then check for re-pairs off that thread.
+    private void OnLinkDevicesChanged()
+    {
+        DevicesChanged?.Invoke();
+        _ = Task.Run(() =>
+        {
+            if (CheckPairings())
+            {
+                DevicesChanged?.Invoke();
+            }
+        });
+    }
+
+    // Re-pair check of every listed pair; true when one's remembered data was cleared.
+    private bool CheckPairings()
+    {
+        bool cleared = false;
+        foreach (LinkDevice device in _link.Snapshot())
+        {
+            cleared |= CheckPairing(device.Address);
+        }
+        return cleared;
+    }
+
+    // Compares the install date of the pair's Windows device entry with the stored one: a different date means it was
+    // removed and paired again, and its remembered capabilities and pod-saved settings are cleared (true). No readable
+    // date (no present entry, e.g. radio off) changes nothing.
+    private bool CheckPairing(ulong address)
+    {
+        if (Native.GetDeviceInstallDate(address) is not { } date)
+        {
+            Log.Info("conn", $"pairing date of {Mac.Format(address)}: not readable, unchanged");
+            return false;
+        }
+        try
+        {
+            return Settings.SetPairingDate(address, date);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Checked again on the next enumeration or attach.
+            Log.Warn("conn", $"pairing date not saved: {e.Message}");
+            return false;
         }
     }
 
@@ -579,6 +626,8 @@ public sealed class ConnectionManager : IAsyncDisposable
             return false;
         }
         Log.Info("conn", $"attach {Mac.Format(address)} ({reason}): opened");
+        // Before the session reads the remembered capabilities and pod-saved settings.
+        CheckPairing(address);
         var session = new AapSession(address, handle, Settings);
         session.Changed += change =>
         {

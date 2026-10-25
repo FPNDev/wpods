@@ -564,7 +564,8 @@ public sealed class AapSession : IAsyncDisposable
             }
             lock (_stateLock)
             {
-                Changed?.Invoke(State.FinishInitialReport() | DeviceChange.InitialReport);
+                State.FinishInitialReport();
+                Changed?.Invoke(DeviceChange.InitialReport);
                 SavePodSettings(DeviceChange.InitialReport);
             }
             SaveCapabilities();
