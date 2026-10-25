@@ -8,3 +8,4 @@ x64/
 dist/
 ui/node_modules/
 src/WPods/web/
+*.code-workspace
