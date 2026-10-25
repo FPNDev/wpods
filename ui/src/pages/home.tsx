@@ -80,6 +80,8 @@ export const createHome = (ctx: Ctx): Page => {
   const ncLocked = Note({ label: 'common.connectToChange', id: 'ncLocked' });
   const ncOneBud = Note({ label: 'nc.oneBudNote', id: 'ncOneBud' });
   ncOneBud.hidden = true;
+  const ncOutOfEar = Note({ label: 'nc.outOfEarNote', id: 'ncOutOfEar' });
+  ncOutOfEar.hidden = true;
   const nc = createSegmented<ListeningMode>({
     name: 'nc',
     legend: 'nc.title',
@@ -216,7 +218,7 @@ export const createHome = (ctx: Ctx): Page => {
       <section class="wp-group" ref={ncGroup}>
         <h2 class="wp-group__title"><span l:text="nc.title" />{ncBusy.spin}</h2>
         <div class="wp-list">
-          <div class="wp-row wp-row--stack">{ncLocked}{nc.el}{ncOneBud}</div>
+          <div class="wp-row wp-row--stack">{ncLocked}{nc.el}{ncOneBud}{ncOutOfEar}</div>
         </div>
       </section>
 
@@ -321,17 +323,27 @@ export const createHome = (ctx: Ctx): Page => {
     setHidden(ncLocked, !!st);
     /* Round 17: NC and Adaptive need both buds unless "Noise cancellation with one AirPod" is on: locked when fewer
        than 2 buds are present OR exactly one is in ear. Off and Transparency stay available. */
+    /* With no bud in an ear (one out or in the case) the AirPods force Transparency and ignore mode writes until a
+       bud goes back in: every mode is locked. */
+    let outOfEar = false;
+    if (st && !caps.has('singleBattery')) {
+      const { left, right } = st.ear;
+      outOfEar = left !== 'inEar' && right !== 'inEar'
+        && (left === 'out' || left === 'inCase' || right === 'out' || right === 'inCase');
+    }
     let oneIn = false;
-    if (st && !caps.has('singleBattery') && st.oneBudAnc !== true) {
+    if (st && !outOfEar && !caps.has('singleBattery') && st.oneBudAnc !== true) {
       const present = Number(budPresent(st, 'left')) + Number(budPresent(st, 'right'));
       const inEar = Number(st.ear.left === 'inEar') + Number(st.ear.right === 'inEar');
       oneIn = present < 2 || inEar === 1;
     }
     setHidden(ncOneBud, !oneIn);
+    setHidden(ncOutOfEar, !outOfEar);
     ncBusy.set(!!st && st.checking, !!st && !st.ready);
     for (const mode of ['off', 'noiseCancellation', 'transparency', 'adaptive'] as const) {
       const needsBoth = mode === 'noiseCancellation' || mode === 'adaptive';
-      nc.lockItem(mode, !st || (oneIn && needsBoth), !st ? 'ncLocked' : oneIn && needsBoth ? 'ncOneBud' : null);
+      nc.lockItem(mode, !st || outOfEar || (oneIn && needsBoth),
+        !st ? 'ncLocked' : outOfEar ? 'ncOutOfEar' : oneIn && needsBoth ? 'ncOneBud' : null);
     }
     nc.set(st ? st.listeningMode : d.saved.listeningMode);
   };

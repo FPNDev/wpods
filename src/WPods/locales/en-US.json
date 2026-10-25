@@ -70,6 +70,7 @@
     "nc.transparency": "Transparency",
     "nc.adaptive": "Adaptive",
     "nc.oneBudNote": "Noise Cancellation needs both AirPods in, or turn on \"Noise cancellation with one AirPod\".",
+    "nc.outOfEarNote": "Put an AirPod in your ear to change noise control.",
     "mic.title": "Microphone",
     "mic.status.notActive": "Not active",
     "mic.status.starting": "Starting…",

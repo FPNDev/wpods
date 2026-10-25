@@ -70,6 +70,7 @@
     "nc.transparency": "Прозорість",
     "nc.adaptive": "Адаптивний",
     "nc.oneBudNote": "Для шумозаглушення вставте обидва AirPods або ввімкніть \"Шумозаглушення з одним AirPod\".",
+    "nc.outOfEarNote": "Щоб змінити керування шумом, вставте AirPod у вухо.",
     "mic.title": "Мікрофон",
     "mic.status.notActive": "Неактивний",
     "mic.status.starting": "Запуск…",
