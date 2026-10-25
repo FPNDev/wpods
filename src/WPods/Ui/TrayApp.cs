@@ -221,7 +221,7 @@ internal sealed partial class TrayApp : ApplicationContext
         }
         if ((change & DeviceChange.InitialReport) != 0)
         {
-            dirty |= Dirty.Checking;
+            dirty |= Dirty.Checking | Dirty.ListeningMode | Dirty.Settings;
         }
         if (dirty != Dirty.None)
         {
@@ -282,13 +282,18 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             return;
         }
-        AapSession? session = _connections.Session;
+        // Shown, not attached: an automatic re-attach after no initial report keeps showing the closed session.
+        AapSession? session = _connections.ShownSession;
         if (session != _session)
         {
             Log.Info("ui", $"session {(_session is null ? "none" : Mac.Format(_session.Address))} -> {(session is null ? "none" : Mac.Format(session.Address))}");
             _session = session;
             _sessionStatus = SessionStatus.Initializing;
-            Array.Clear(_lowNotified);
+            // An automatic re-attach of the same pair keeps the low-battery state: no repeated toast.
+            if (session?.State.IsCarryOver != true)
+            {
+                Array.Clear(_lowNotified);
+            }
             dirty |= Dirty.Session | Dirty.Devices | Dirty.Status;
         }
         if ((dirty & Dirty.Offers) != 0)
@@ -601,22 +606,25 @@ internal sealed partial class TrayApp : ApplicationContext
         }
         else
         {
+            // After an automatic re-attach, the replaced session's battery and ear until this one reports (as the page).
+            DeviceState battery = state.BatterySource;
+            DeviceState ear = state.EarSource;
             Battery shown;
             TrayDevice device;
-            if (state.HeadphoneBattery.Percent is not null || IsMax(_session.Address))
+            if (battery.HeadphoneBattery.Percent is not null || IsMax(_session.Address))
             {
-                shown = state.HeadphoneBattery;
+                shown = battery.HeadphoneBattery;
                 device = TrayDevice.Max;
             }
             else
             {
-                Battery left = state.LeftBattery;
-                Battery right = state.RightBattery;
+                Battery left = battery.LeftBattery;
+                Battery right = battery.RightBattery;
                 bool budsReported = left.Percent is not null || right.Percent is not null;
-                bool budsInCase = state.PrimaryEar == EarStatus.InCase && state.SecondaryEar == EarStatus.InCase;
-                if ((budsInCase || !budsReported) && state.CaseBattery.Percent is not null)
+                bool budsInCase = ear.PrimaryEar == EarStatus.InCase && ear.SecondaryEar == EarStatus.InCase;
+                if ((budsInCase || !budsReported) && battery.CaseBattery.Percent is not null)
                 {
-                    shown = state.CaseBattery;
+                    shown = battery.CaseBattery;
                     device = TrayDevice.Case;
                 }
                 else
@@ -654,11 +662,12 @@ internal sealed partial class TrayApp : ApplicationContext
     private string Tooltip(DeviceState state)
     {
         string name = state.Name ?? DeviceName(_session!.Address);
+        DeviceState battery = state.BatterySource;
         var parts = new StringBuilder();
-        AppendPart(parts, "battery.left", state.LeftBattery);
-        AppendPart(parts, "battery.right", state.RightBattery);
-        AppendPart(parts, "battery.case", state.CaseBattery);
-        AppendPart(parts, "battery.max", state.HeadphoneBattery);
+        AppendPart(parts, "battery.left", battery.LeftBattery);
+        AppendPart(parts, "battery.right", battery.RightBattery);
+        AppendPart(parts, "battery.case", battery.CaseBattery);
+        AppendPart(parts, "battery.max", battery.HeadphoneBattery);
         string tip = parts.Length == 0 ? name : name + "\n" + parts;
         return tip.Length <= 127 ? tip : tip[..127];
     }

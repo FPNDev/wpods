@@ -179,6 +179,10 @@ public sealed class DeviceState
     private int _holdSerial;
     // Latest listening mode the device reported (applied or not); 0 = none yet.
     private byte _deviceMode;
+    // A battery packet arrived in this session.
+    private bool _batteryReported;
+    // UI display only: the session this one replaced in an automatic re-attach (CarryOver).
+    private DeviceState? _previous;
 
     /// <param name="remembered">Reported on any earlier attach.</param>
     /// <param name="baseline">Baseline of the last known model.</param>
@@ -202,7 +206,7 @@ public sealed class DeviceState
     /// </summary>
     internal DeviceCapabilities Reported { get; private set; }
 
-    /// <summary>The initial report has ended: 1 s after the device's first 0x09 setting, or its timeout.</summary>
+    /// <summary>The initial report has ended: 1 s after the device's first 0x09 setting.</summary>
     public bool InitialReportDone { get; private set; }
 
     /// <summary>
@@ -275,6 +279,18 @@ public sealed class DeviceState
     }
 
     internal void FinishInitialReport() => InitialReportDone = true;
+
+    /// <summary>Automatic re-attach: the UI keeps showing <paramref name="previous"/>'s battery and ear until this session reports its own.</summary>
+    internal void CarryOver(DeviceState previous) => _previous = previous;
+
+    /// <summary>This session replaced one of the same pair in an automatic re-attach (<see cref="CarryOver"/>).</summary>
+    internal bool IsCarryOver => _previous is not null;
+
+    /// <summary>UI display only: the state whose batteries to show (this one, or the replaced session's until the first battery report).</summary>
+    internal DeviceState BatterySource => _batteryReported || _previous is null ? this : _previous.BatterySource;
+
+    /// <summary>UI display only: the state whose ear status to show (this one, or the replaced session's until a bud's status is known).</summary>
+    internal DeviceState EarSource => LeftEar is not null || RightEar is not null || _previous is null ? this : _previous.EarSource;
 
     /// <summary>The pod-saved settings this session reported or wrote; <paramref name="fallback"/>'s value for each other one.</summary>
     internal PodSettings GetPodSettings(PodSettings fallback) => new()
@@ -391,7 +407,10 @@ public sealed class DeviceState
     /// <summary>True when hold <paramref name="serial"/> is still the latest request.</summary>
     internal bool IsCurrentHold(int serial) => serial == _holdSerial;
 
-    /// <summary>Stores a battery entry for AAP component 01/02/04/08; false if unknown or unchanged.</summary>
+    /// <summary>
+    /// Stores a battery entry for AAP component 01/02/04/08; false if unknown, or unchanged and not the session's first
+    /// battery entry (the first one always counts, it ends <see cref="BatterySource"/>'s carry-over).
+    /// </summary>
     internal bool SetBattery(byte component, Battery battery)
     {
         int slot = component switch
@@ -402,7 +421,13 @@ public sealed class DeviceState
             0x08 => Case,
             _ => -1,
         };
-        if (slot < 0 || _batteries[slot] == battery)
+        if (slot < 0)
+        {
+            return false;
+        }
+        bool first = !_batteryReported;
+        _batteryReported = true;
+        if (_batteries[slot] == battery && !first)
         {
             return false;
         }

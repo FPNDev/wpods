@@ -14,8 +14,9 @@ public enum IdleReason
     /// </summary>
     UserDisconnected,
     /// <summary>
-    /// The link is up but the attach and every fast retry failed. WPods keeps trying every 30 s, and at once on the
-    /// next link-up, case opening (<see cref="ConnectionManager.OnCaseOpened"/>) or user Connect.
+    /// The link is up but the attach and every fast retry failed (WPods keeps trying every 30 s), or 3 sessions in a
+    /// row got no initial settings report (no further automatic attempt). Both: tried again at once on the next
+    /// link-up, case opening (<see cref="ConnectionManager.OnCaseOpened"/>) or user Connect.
     /// </summary>
     AttachGaveUp,
 }
@@ -53,6 +54,9 @@ public sealed class ConnectionManager : IAsyncDisposable
     // After the fast retries: as long as Windows keeps the link up, WPods keeps trying (only a user Disconnect or
     // another attached pair holds a linked pair back). One fail-fast CreateFile per 30 s.
     private static readonly TimeSpan SlowRetryDelay = TimeSpan.FromSeconds(30);
+    // Sessions in a row that may end without an initial settings report (SessionEnd.NoInitialReport) before the pair
+    // is marked AttachGaveUp: the first one plus 2 reopenings.
+    private const int NoReportSessions = 3;
 
     private readonly BluetoothLink _link = new();
     // Serializes every attach/detach decision; _session writes, _retries, _retrySerial and _disposed are guarded by it.
@@ -63,6 +67,9 @@ public sealed class ConnectionManager : IAsyncDisposable
     private readonly Dictionary<ulong, IdleReason> _idle = [];
     private readonly Dictionary<ulong, TaskCompletionSource> _linkDownWaits = [];
     private AapSession? _session;
+    // The session closed for an automatic re-attach after no initial report (ReattachAfterNoReportLocked), shown until
+    // the next session of the pair attaches or the re-attach ends; set only while WatchAsync holds the gate.
+    private AapSession? _reattaching;
     private long _retrySerial;
     private bool _disposed;
 
@@ -75,6 +82,12 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     /// <summary>The attached session, or null.</summary>
     public AapSession? Session => Volatile.Read(ref _session);
+
+    /// <summary>
+    /// The session the UI shows: <see cref="Session"/>, or during an automatic re-attach after no initial report the
+    /// closed one, so the pair keeps its connected / checking look until the next session attaches. UI display only.
+    /// </summary>
+    public AapSession? ShownSession => Session ?? Volatile.Read(ref _reattaching);
 
     public ulong LastUsed => Settings.LastUsed;
 
@@ -110,7 +123,7 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     public List<KnownDevice> GetDevices()
     {
-        AapSession? session = Session;
+        AapSession? session = ShownSession;
         var list = new List<KnownDevice>();
         foreach (LinkDevice device in _link.Snapshot())
         {
@@ -629,6 +642,10 @@ public sealed class ConnectionManager : IAsyncDisposable
         // Before the session reads the remembered capabilities and pod-saved settings.
         CheckPairing(address);
         var session = new AapSession(address, handle, Settings);
+        if (_reattaching is { } previous && previous.Address == address)
+        {
+            session.CarryOver(previous);
+        }
         session.Changed += change =>
         {
             if ((change & DeviceChange.Identity) != 0)
@@ -656,13 +673,19 @@ public sealed class ConnectionManager : IAsyncDisposable
         AapSession session = _session!;
         Log.Info("conn", $"detach {Mac.Format(session.Address)} ({reason}), status={session.State.Status}");
         Volatile.Write(ref _session, null);
+        // A completed initial report ends a run of sessions without one (ReattachAfterNoReportLocked).
+        if (session.State.InitialReportDone && _retries.TryGetValue(session.Address, out AttachRetry? retry))
+        {
+            retry.NoReports = 0;
+        }
         await session.DisposeAsync().ConfigureAwait(false);
         Detached?.Invoke(session);
         DevicesChanged?.Invoke();
     }
 
-    // Session ended on its own (read error, 1167 or end of stream). Link still up -> retry the same pair (the count
-    // restarts only when the session had reached Ready, so open-then-fail loops stay bounded); else fallback.
+    // Session ended on its own (read error, 1167, end of stream or no initial report). Link still up -> retry the same
+    // pair (the count restarts only when the session had reached Ready, so open-then-fail loops stay bounded; no initial
+    // report has its own count, ReattachAfterNoReportLocked); else fallback.
     private async Task WatchAsync(AapSession session)
     {
         SessionEnd end = await session.Completion.ConfigureAwait(false);
@@ -681,7 +704,23 @@ public sealed class ConnectionManager : IAsyncDisposable
                 return;
             }
             bool ready = session.State.Status == SessionStatus.Ready;
-            await DetachLocked(end == SessionEnd.LinkLost ? "read error 1167" : "read error").ConfigureAwait(false);
+            bool reattach = end == SessionEnd.NoInitialReport && CanAutoAttach(address);
+            if (reattach)
+            {
+                // Shown (ShownSession) until the re-attach ends, so the UI never sees the pair detached in between.
+                Volatile.Write(ref _reattaching, session);
+            }
+            await DetachLocked(end switch
+            {
+                SessionEnd.LinkLost => "read error 1167",
+                SessionEnd.NoInitialReport => "no initial report",
+                _ => "read error",
+            }).ConfigureAwait(false);
+            if (reattach)
+            {
+                ReattachAfterNoReportLocked(address);
+                return;
+            }
             if (CanAutoAttach(address))
             {
                 Log.Info("conn", $"session end with the link still up (end={end}, wasReady={ready}): retrying attach");
@@ -698,6 +737,36 @@ public sealed class ConnectionManager : IAsyncDisposable
         finally
         {
             _gate.Release();
+        }
+    }
+
+    // The session got no initial settings report: reopen only the AAP session (the Bluetooth audio link stays up) at
+    // once, NoReportSessions sessions in a row at most; then mark the pair AttachGaveUp without a slow retry. The run
+    // is counted in the pair's AttachRetry, so it restarts with every new series (link up or down, user Connect or
+    // Disconnect, fallback attach), when a Ready session ends with a read error, and when a session that completed
+    // its initial report is detached (DetachLocked).
+    private void ReattachAfterNoReportLocked(ulong address)
+    {
+        if (!_retries.TryGetValue(address, out AttachRetry? retry))
+        {
+            retry = new AttachRetry();
+            _retries[address] = retry;
+        }
+        if (++retry.NoReports >= NoReportSessions)
+        {
+            Log.Warn("conn", $"attach {Mac.Format(address)}: no initial report in {NoReportSessions} sessions in a row; giving up");
+            Volatile.Write(ref _reattaching, null);
+            _retries.Remove(address);
+            SetIdle(address, IdleReason.AttachGaveUp, "no initial report");
+            AttachOtherUpLocked(address);
+            return;
+        }
+        bool attached = AttachLocked(address, $"no initial report, session {retry.NoReports + 1}/{NoReportSessions}", newSeries: false);
+        Volatile.Write(ref _reattaching, null);
+        if (!attached)
+        {
+            // Opening failed: the pair now shows as detached while the fast retries run.
+            DevicesChanged?.Invoke();
         }
     }
 
@@ -825,6 +894,8 @@ public sealed class ConnectionManager : IAsyncDisposable
     private sealed class AttachRetry
     {
         public int Attempts { get; set; }
+        // Sessions in a row that ended without an initial report (ReattachAfterNoReportLocked).
+        public int NoReports { get; set; }
         // Identifies the pending delay; a newer schedule or a reset makes older delays no-ops.
         public long Serial { get; set; }
     }

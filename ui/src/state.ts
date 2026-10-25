@@ -115,7 +115,8 @@ const applyBattery = (battery: Batteries): void => {
 const applyState = (state: State | null): void => {
   store.state = state;
   store.stateCaps = new Set(state?.caps);
-  store.lowSaid.clear();
+  /* lowSaid is kept: a new snapshot for the same attached pair (re-attach) never repeats the low-battery announce;
+     applyDevices clears it when the attached pair changes. */
   if (state) {
     applyBattery(state.battery);
   }

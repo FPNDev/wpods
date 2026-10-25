@@ -91,15 +91,23 @@ internal sealed class MessageWriter
         w.WriteEndObject();
     }
 
-    public static void WriteBatteries(Utf8JsonWriter w, DeviceState s) =>
-        WriteBatteries(w, "battery", s.LeftBattery, s.RightBattery, s.CaseBattery, s.HeadphoneBattery);
+    /// <summary>"battery"; after an automatic re-attach the replaced session's until this one reports.</summary>
+    public static void WriteBatteries(Utf8JsonWriter w, DeviceState s)
+    {
+        DeviceState b = s.BatterySource;
+        WriteBatteries(w, "battery", b.LeftBattery, b.RightBattery, b.CaseBattery, b.HeadphoneBattery);
+    }
 
-    /// <summary>"ear": per bud (null until the primary bud is known, always null for AirPods Max).</summary>
+    /// <summary>
+    /// "ear": per bud (null until the primary bud is known, always null for AirPods Max); after an automatic re-attach
+    /// the replaced session's until this one knows a bud.
+    /// </summary>
     public static void WriteEar(Utf8JsonWriter w, DeviceState s)
     {
+        DeviceState e = s.EarSource;
         w.WriteStartObject("ear");
-        WriteEar(w, "left", s.LeftEar);
-        WriteEar(w, "right", s.RightEar);
+        WriteEar(w, "left", e.LeftEar);
+        WriteEar(w, "right", e.RightEar);
         w.WriteEndObject();
     }
 

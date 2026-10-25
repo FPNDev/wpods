@@ -13,6 +13,8 @@ internal enum SessionEnd
     LinkLost,
     /// <summary>Any other read error or end of stream while the session was open.</summary>
     Failed,
+    /// <summary>Closed by the session itself: no 0x09 setting within InitialReportTimeout (the initial report never came).</summary>
+    NoInitialReport,
 }
 
 /// <summary>
@@ -30,7 +32,8 @@ public sealed class AapSession : IAsyncDisposable
     private static readonly TimeSpan KeysTimeout = TimeSpan.FromSeconds(3);
     // Live (AirPods Pro 2): the full 0x09 settings report (~17 settings in ~90 ms, no end marker) arrives within
     // ~90 ms of the handshake reply on some attaches, but 4-31 s later on others (log 2026-10-22). The initial
-    // report ends 1 s after the first 0x09 (never before 1 s after the notification request), or after the timeout.
+    // report ends 1 s after the first 0x09 (never before 1 s after the notification request); without one within the
+    // timeout the session closes itself (SessionEnd.NoInitialReport) and ConnectionManager reopens it.
     private static readonly TimeSpan InitialReportWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan InitialReportTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan HeartRateFirstReadingTimeout = TimeSpan.FromSeconds(12);
@@ -47,6 +50,8 @@ public sealed class AapSession : IAsyncDisposable
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     // Serializes the 0x34 + 0x1A pair (attach write and SetStemModesAsync) so they never interleave.
     private readonly SemaphoreSlim _stemGate = new(1, 1);
+    // Serializes SetHeartRateAsync (user toggles and the restart after a re-attach).
+    private readonly SemaphoreSlim _heartRateGate = new(1, 1);
     private readonly CancellationTokenSource _life = new();
     private readonly Lock _stateLock = new();
     private CancellationTokenSource _writeTimeout = new();
@@ -62,6 +67,10 @@ public sealed class AapSession : IAsyncDisposable
     private DeviceCapabilities _savedReported;
     // Pod-saved settings last written to settings; guarded by _stateLock.
     private PodSettings _savedPodSettings;
+    // Set before _life is cancelled when no initial report came; the read loop then ends with NoInitialReport.
+    private bool _noInitialReport;
+    // Heart rate ran in the session this one replaced (CarryOver): started again once Ready.
+    private bool _resumeHeartRate;
     // Read loop: 0x58 mic audio packets are logged as one count per second.
     private int _audioCount;
     private long _audioWindowStart;
@@ -92,6 +101,17 @@ public sealed class AapSession : IAsyncDisposable
     public event Action<DeviceChange>? Changed;
 
     internal Task<SessionEnd> Completion => _readLoop;
+
+    /// <summary>
+    /// Automatic re-attach after no initial report (ConnectionManager), before <see cref="Start"/>: the UI keeps showing
+    /// <paramref name="previous"/>'s battery and ear until this session reports its own, and heart rate is started
+    /// again once Ready if it was not Off there.
+    /// </summary>
+    internal void CarryOver(AapSession previous)
+    {
+        State.CarryOver(previous.State);
+        _resumeHeartRate = previous.State.HeartRate != HeartRateStatus.Off;
+    }
 
     internal void Start()
     {
@@ -313,7 +333,8 @@ public sealed class AapSession : IAsyncDisposable
 
     /// <summary>
     /// Starts (up to 3 attempts, 12 s each for a first reading) or stops the heart-rate stream. Stopping cancels
-    /// and awaits any running start sequence first, so it can never re-enable the stream. Call from one thread.
+    /// and awaits any running start sequence first, so it can never re-enable the stream. Calls are serialized (user
+    /// toggles and the restart after a re-attach): the last one wins and two start sequences never run at once.
     /// </summary>
     public async Task<bool> SetHeartRateAsync(bool on)
     {
@@ -321,24 +342,32 @@ public sealed class AapSession : IAsyncDisposable
         {
             throw new InvalidOperationException("Heart-rate streaming is only enabled for a device that reports AirPods Pro 3 support.");
         }
-        if (_heartRateCts is { } previous)
+        await _heartRateGate.WaitAsync().ConfigureAwait(false);
+        try
         {
-            _heartRateCts = null;
-            await previous.CancelAsync().ConfigureAwait(false);
-            await _heartRateTask.ConfigureAwait(false);
-            previous.Dispose();
+            if (_heartRateCts is { } previous)
+            {
+                _heartRateCts = null;
+                await previous.CancelAsync().ConfigureAwait(false);
+                await _heartRateTask.ConfigureAwait(false);
+                previous.Dispose();
+            }
+            if (on)
+            {
+                SetHeartRateStatus(HeartRateStatus.Starting, clearReading: false);
+                var cts = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
+                _heartRateCts = cts;
+                _heartRateTask = RunHeartRateAsync(cts.Token);
+                return true;
+            }
+            SetHeartRateStatus(HeartRateStatus.Off, clearReading: true);
+            return await WriteAsync(Aap.HeartRateStream(++_streamSequence, Aap.HeartRateService, 0)).ConfigureAwait(false)
+                && await WriteAsync(Aap.HeartRateStream(++_streamSequence, Aap.HeartRateLegacyService, 0)).ConfigureAwait(false);
         }
-        if (on)
+        finally
         {
-            SetHeartRateStatus(HeartRateStatus.Starting, clearReading: false);
-            var cts = CancellationTokenSource.CreateLinkedTokenSource(_life.Token);
-            _heartRateCts = cts;
-            _heartRateTask = RunHeartRateAsync(cts.Token);
-            return true;
+            _heartRateGate.Release();
         }
-        SetHeartRateStatus(HeartRateStatus.Off, clearReading: true);
-        return await WriteAsync(Aap.HeartRateStream(++_streamSequence, Aap.HeartRateService, 0)).ConfigureAwait(false)
-            && await WriteAsync(Aap.HeartRateStream(++_streamSequence, Aap.HeartRateLegacyService, 0)).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -374,7 +403,7 @@ public sealed class AapSession : IAsyncDisposable
         }
         catch (Exception) when (ct.IsCancellationRequested)
         {
-            return SessionEnd.Closed;
+            return _noInitialReport ? SessionEnd.NoInitialReport : SessionEnd.Closed;
         }
         catch (IOException e) when ((e.HResult & 0xFFFF) == Native.ErrorDeviceNotConnected)
         {
@@ -513,6 +542,18 @@ public sealed class AapSession : IAsyncDisposable
             }
             SetStatus(SessionStatus.Ready);
             _ = FinishInitialReportAsync(firstSetting.Task, ct);
+            if (_resumeHeartRate)
+            {
+                Log.Info("aap", "init: starting heart rate again (it ran in the session this one replaced)");
+                try
+                {
+                    await SetHeartRateAsync(true).ConfigureAwait(false);
+                }
+                catch (InvalidOperationException e)
+                {
+                    Log.Warn("aap", $"init: heart rate not started: {e.Message}");
+                }
+            }
             await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
             await WriteStemModesOnAttachAsync(ct).ConfigureAwait(false);
             bool earDetection = _settings.GetEarDetection(Address);
@@ -546,22 +587,22 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // Ends the initial report (capabilities final, "checking" off) InitialReportWindow after the device's first 0x09
-    // setting, counted from Ready when it came earlier; without one within InitialReportTimeout, ends it then.
+    // Ends the initial report ("checking" off) InitialReportWindow after the device's first 0x09 setting, counted from
+    // Ready when it came earlier. Without one within InitialReportTimeout the session closes itself (NoInitialReport).
     private async Task FinishInitialReportAsync(Task firstSetting, CancellationToken ct)
     {
         try
         {
             long start = Environment.TickCount64;
-            if (await WaitAsync(firstSetting, InitialReportTimeout, ct).ConfigureAwait(false))
+            if (!await WaitAsync(firstSetting, InitialReportTimeout, ct).ConfigureAwait(false))
             {
-                Log.Info("aap", $"init: first 0x09 setting {Environment.TickCount64 - start} ms after Ready");
-                await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
+                Log.Warn("aap", $"init: no 0x09 setting within {InitialReportTimeout.TotalSeconds:0} s; closing the session");
+                _noInitialReport = true;
+                await _life.CancelAsync().ConfigureAwait(false);
+                return;
             }
-            else
-            {
-                Log.Warn("aap", $"init: no 0x09 setting within {InitialReportTimeout.TotalSeconds:0} s; initial report ends without one");
-            }
+            Log.Info("aap", $"init: first 0x09 setting {Environment.TickCount64 - start} ms after Ready");
+            await Task.Delay(InitialReportWindow, ct).ConfigureAwait(false);
             lock (_stateLock)
             {
                 State.FinishInitialReport();
