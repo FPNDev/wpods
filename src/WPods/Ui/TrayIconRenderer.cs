@@ -19,7 +19,8 @@ internal readonly record struct TrayGlyph(int Size, bool LightTaskbar, bool Conn
 /// <summary>
 /// Draws the TrayIcon design (WPods.tray() in the design bundle) with GDI+: track ring, battery arc from 12 o'clock
 /// clockwise with round caps, the device glyph (or a bolt while charging), and the mic dot cut out of everything with a gap.
-/// Each rendition (16, 20, 24, 32 px) has its own pixel-fitted geometry; other sizes use the largest rendition that fits, centred.
+/// Each rendition (16, 20, 24, 32 px) has its own geometry (the largest one that fits the size is used), scaled so the
+/// ring's outer edge touches the icon's edges: Windows adds the tray padding itself.
 /// </summary>
 internal static unsafe partial class TrayIconRenderer
 {
@@ -72,9 +73,12 @@ internal static unsafe partial class TrayIconRenderer
     {
         int index = glyph.Size >= 32 ? 3 : glyph.Size >= 24 ? 2 : glyph.Size >= 20 ? 1 : 0;
         Geometry g = Renditions[index];
-        int rendition = 16 + index * 4 + (index == 3 ? 4 : 0);
-        int size = Math.Max(glyph.Size, rendition);
-        float offset = (size - rendition) / 2;
+        int size = glyph.Size;
+        float scale = size / 2f / (g.R + g.W / 2);
+        using var fit = new Matrix();
+        fit.Translate(size / 2f, size / 2f);
+        fit.Scale(scale, scale);
+        fit.Translate(-g.C, -g.C);
         Palette k = glyph.LightTaskbar ? ForLightTaskbar : ForDarkTaskbar;
         bool on = glyph.Connected;
         int level = Math.Clamp(glyph.Level, 0, 100);
@@ -85,7 +89,7 @@ internal static unsafe partial class TrayIconRenderer
         {
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            graphics.TranslateTransform(offset, offset);
+            graphics.Transform = fit;
             var ring = new RectangleF(g.C - g.R, g.C - g.R, 2 * g.R, 2 * g.R);
             using (var track = new Pen(k.Track, g.W))
             {
@@ -126,13 +130,15 @@ internal static unsafe partial class TrayIconRenderer
         {
             using var hole = new GraphicsPath();
             float r = g.DotR + g.Gap;
-            hole.AddEllipse(offset + g.DotX - r, offset + g.DotY - r, 2 * r, 2 * r);
+            hole.AddEllipse(g.DotX - r, g.DotY - r, 2 * r, 2 * r);
+            hole.Transform(fit);
             Erase(bitmap, hole);
             using Graphics graphics = Graphics.FromImage(bitmap);
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.Transform = fit;
             using var dot = new SolidBrush(k.Orange);
-            graphics.FillEllipse(dot, offset + g.DotX - g.DotR, offset + g.DotY - g.DotR, 2 * g.DotR, 2 * g.DotR);
+            graphics.FillEllipse(dot, g.DotX - g.DotR, g.DotY - g.DotR, 2 * g.DotR, 2 * g.DotR);
         }
         return ToIcon(bitmap);
     }
