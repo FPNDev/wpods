@@ -14,7 +14,6 @@ VersionInfoVersion={#AppVersion}
 UninstallDisplayName=WPods
 UninstallDisplayIcon={app}\WPods.exe
 DefaultDirName={autopf}\WPods
-DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64os
