@@ -1,0 +1,35 @@
+{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fswiss\fcharset0 Segoe UI;}}
+\viewkind4\uc1\pard\sa180\f0\fs22
+{\b\fs32 IMPORTANT: WPods needs Windows Test Mode}\par
+Please read this before you install.\par
+WPods installs its own kernel drivers. They are test-signed by the WPods project, not signed by Microsoft.\par
+To load them, Setup turns on Windows test signing (Test Mode). A restart is needed.\par
+Test Mode requires Secure Boot to be off. If it is on, Setup stops and explains how to turn it off: restart into UEFI/BIOS, set Secure Boot to Disabled, save, then run Setup again. Have your BitLocker recovery key ready before changing Secure Boot.\par
+{\b Security:} while Test Mode is on, Windows loads any test-signed kernel driver, not only WPods' drivers. This lowers a Windows security protection for as long as Test Mode stays on.\par
+{\b BitLocker:} Setup suspends BitLocker for one restart, so turning on test signing does not trigger a recovery prompt.\par
+{\b The Test Mode watermark:} with Test Mode on, Windows shows a "Test Mode" watermark in the corner of your desktop. WPods leaves it alone. If it bothers you, you can hide it with no-test-mode-wm (https://github.com/FPNDev/no-test-mode-wm). It is a separate, unofficial tool that hooks into Windows Explorer, so it may stop working after Windows updates. Read its README before you use it.\par
+{\b This is reversible.} Uninstalling WPods can turn Test Mode off for you, or you can turn it off yourself: run bcdedit /set testsigning off in an administrator command prompt, then restart. Once Test Mode is off, you can turn Secure Boot back on.\par
+You do this at your own risk. WPods comes with no warranty, as described in the no-warranty and liability terms below.\par
+WPods is a free, open-source Windows app that connects to Apple AirPods and lets you use their features on a Windows PC. It includes its own Bluetooth audio drivers.\par
+By installing or using WPods you agree to these terms. If you do not agree, do not install or use WPods.\par
+{\b\fs24 1. License}\par
+WPods is free software, licensed under the GNU General Public License, version 3 (GPL-3.0). Copyright (C) 2026 fpndev (rimjoeh) <rimjoeh@gmail.com>. You may use, copy, modify and share WPods under the terms of that license. The full license text is installed with WPods as LICENSE.txt. Nothing in these terms limits the rights the GPL-3.0 gives you.\par
+{\b\fs24 2. Not affiliated with Apple}\par
+WPods is an independent project. It is not made, affiliated with, sponsored, endorsed or supported by Apple Inc.\par
+{\b\fs24 3. Trademarks}\par
+Apple, AirPods, AirPods Pro, AirPods Max, iPhone, iPad and Mac are trademarks of Apple Inc., registered in the U.S. and other countries. Feature names such as Noise Cancellation, Transparency, Adaptive, Conversation Awareness, Personalized Volume, Hearing Aid, Standard, Voice Isolation and Wide Spectrum are Apple's names. WPods uses these names only to describe which AirPods and features it works with, and claims no rights to them.\par
+{\b\fs24 4. WPods' own features}\par
+Where WPods runs its own processing under one of Apple's names, such as the mic modes, it is WPods' own implementation and not Apple's technology.\par
+{\b\fs24 5. Third-party software}\par
+WPods includes libraries and noise-reduction models made by others. They belong to their authors and are used under their own licenses. WPods claims no ownership of them. Their copyright notices and licenses are installed with WPods as THIRD-PARTY-NOTICES.txt.\par
+{\b\fs24 6. What the author owns}\par
+The WPods code, user interface and drivers are the author's own work, licensed to you under the GPL-3.0 as described in section 1.\par
+{\b\fs24 7. Drivers and test mode}\par
+WPods installs its own kernel-mode drivers on your PC. They are test-signed by the WPods project and are not signed by Microsoft. So that Windows can load them, Setup turns on Windows test signing (test mode), which needs a restart and needs Secure Boot to be off; if Secure Boot is on, Setup stops and explains how to turn it off, and installation cannot continue until it is off. While test mode is on, Windows will load any test-signed kernel driver, not only WPods' own, which lowers a Windows security protection for as long as test mode stays on. Windows shows a "Test Mode" watermark on the desktop while test mode is on; WPods does not add or remove it, but a separate open-source tool to hide it is available at https://github.com/FPNDev/no-test-mode-wm (use it at your own risk). This is reversible: uninstalling WPods can turn test mode back off, and you can turn test signing off yourself from an administrator command prompt with bcdedit /set testsigning off, which restores the default protection. You install and use the drivers, and run your PC in test mode, at your own risk.\par
+{\b\fs24 8. NO WARRANTY}\par
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, WPODS IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE. THE ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF WPODS, INCLUDING ITS DRIVERS, IS WITH YOU. SHOULD WPODS PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY SERVICING, REPAIR OR CORRECTION.\par
+{\b\fs24 9. LIMITATION OF LIABILITY}\par
+IN NO EVENT UNLESS REQUIRED BY APPLICABLE LAW OR AGREED TO IN WRITING WILL THE AUTHOR, OR ANY OTHER PARTY WHO MODIFIES AND/OR CONVEYS WPODS AS PERMITTED BY THE GPL-3.0, BE LIABLE TO YOU FOR DAMAGES, INCLUDING ANY GENERAL, SPECIAL, INCIDENTAL OR CONSEQUENTIAL DAMAGES ARISING OUT OF THE USE OR INABILITY TO USE WPODS OR ITS DRIVERS (INCLUDING BUT NOT LIMITED TO LOSS OF DATA OR DATA BEING RENDERED INACCURATE, LOSSES SUSTAINED BY YOU OR THIRD PARTIES, DAMAGE TO YOUR PC OR YOUR AIRPODS, OR A FAILURE OF WPODS TO OPERATE WITH ANY OTHER PROGRAMS OR DEVICES), EVEN IF THE AUTHOR OR OTHER PARTY HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.\par
+{\b\fs24 10. Requests from rights holders}\par
+If you hold rights to something in WPods and want it changed or removed, email rimjoeh@gmail.com. Requests are handled promptly, including removal.\par
+}

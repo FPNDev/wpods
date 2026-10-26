@@ -1,33 +1,28 @@
-/* Mic modes (Windows settings, app-wide, never locked): the not-Apple's-processing note, which modes show on Home (at
-   least MODE_MIN stays on), then one group per mode, in Apple order, picking the model it runs; every model row shows
-   its weight and added delay. Groups of turned-off modes stay. The model loading for the effective mode spins. */
-import { createChoiceList } from '../components/choiceList';
-import { Note } from '../components/common';
-import { WeightMeter } from '../components/weightMeter';
-import { setText } from '../dom';
-import { post } from '../host';
-import { bindText, labelsVersion, t } from '../i18n';
-import type { MicMode, MicOption } from '../protocol';
-import { applyMicConfig, current, effectiveMode, live, store } from '../state';
-import { Choice, createCheck, createLoading, type Mark } from './enhancement';
-import type { Ctx, Page } from './page';
+import { createChoiceList } from "../components/choiceList";
+import { Note } from "../components/common";
+import { WeightMeter } from "../components/weightMeter";
+import { setText } from "../dom";
+import { post } from "../host";
+import { bindText, labelsVersion, t } from "../i18n";
+import type { MicMode, MicOption } from "../protocol";
+import { applyMicConfig, current, effectiveMode, live, store } from "../state";
+import { Choice, createCheck, createLoading, type Mark } from "./enhancement";
+import type { Ctx, Page } from "./page";
 
 type Hint = { el: HTMLSpanElement; option: MicOption };
 type ModelGroup = { rows: Map<string, HTMLButtonElement>; check: Mark };
 
-const MODES: MicMode[] = ['standard', 'voiceIsolation', 'wideSpectrum'];
+const MODES: MicMode[] = ["standard", "voiceIsolation", "wideSpectrum"];
 const MODE_MIN = 1;
-/* The model id that runs no model at all: localized title and description, no meter. */
-const RAW = 'raw';
+const RAW = "raw";
 
 export const createMicModes = (ctx: Ctx): Page => {
-  /* A click that would leave fewer than MODE_MIN modes on is ignored, like the press-and-hold modes list. */
   const modes = createChoiceList<MicMode>({
-    role: 'checkbox',
+    role: "checkbox",
     items: [
-      { value: 'standard', label: 'mic.standard' },
-      { value: 'voiceIsolation', label: 'mic.voiceIsolation' },
-      { value: 'wideSpectrum', label: 'mic.wideSpectrum' },
+      { value: "standard", label: "mic.standard" },
+      { value: "voiceIsolation", label: "mic.voiceIsolation" },
+      { value: "wideSpectrum", label: "mic.wideSpectrum" },
     ],
     onPick: (mode) => {
       const enabled = store.micEnabled;
@@ -42,10 +37,11 @@ export const createMicModes = (ctx: Ctx): Page => {
         }
       }
       applyMicConfig({ ...store.micConfig, modes: next });
-      post({ type: 'setMicModes', modes: next });
-      ctx.update('mic');
+      post({ type: "setMicModes", modes: next });
+      ctx.update("mic");
     },
   });
+
   const groups = {} as Record<MicMode, ModelGroup>;
   const hints: Hint[] = [];
   const load = createLoading();
@@ -54,10 +50,19 @@ export const createMicModes = (ctx: Ctx): Page => {
   let modeList!: HTMLDivElement;
   const el = (
     <div class="wp-page">
-      {Note({ label: 'mic.note' })}
+      {Note({ label: "mic.note" })}
       <section class="wp-group">
-        <h2 class="wp-group__title" id="micModesTitle" l:text="mic.modesGroup" />
-        <div class="wp-list" role="group" aria-labelledby="micModesTitle" ref={modeList} />
+        <h2
+          class="wp-group__title"
+          id="micModesTitle"
+          l:text="mic.modesGroup"
+        />
+        <div
+          class="wp-list"
+          role="group"
+          aria-labelledby="micModesTitle"
+          ref={modeList}
+        />
         <p class="wp-group__foot" l:text="mic.modesGroupDesc" />
       </section>
     </div>
@@ -70,23 +75,43 @@ export const createMicModes = (ctx: Ctx): Page => {
     el.append(
       <section class="wp-group">
         <h2 class="wp-group__title" id={titleId} l:text={`mic.${mode}`} />
-        <div class="wp-list" role="radiogroup" aria-labelledby={titleId} ref={list} />
+        <div
+          class="wp-list"
+          role="radiogroup"
+          aria-labelledby={titleId}
+          ref={list}
+        />
       </section>,
     );
     const rows = new Map<string, HTMLButtonElement>();
     for (const option of store.micCatalog[mode]) {
       const pick = (): void => {
         store.micConfig.models[mode] = option.id;
-        post({ type: 'setMicModel', mode, name: option.id });
-        ctx.update('mic');
+        post({ type: "setMicModel", mode, name: option.id });
+        ctx.update("mic");
       };
       let row: HTMLButtonElement;
       if (option.id === RAW) {
-        row = Choice(bindText('mic.raw'), pick, <span class="wp-row__desc">{bindText('mic.rawDesc')}</span> as HTMLSpanElement);
+        row = Choice(
+          bindText("mic.raw"),
+          pick,
+          (
+            <span class="wp-row__desc">{bindText("mic.rawDesc")}</span>
+          ) as HTMLSpanElement,
+        );
       } else {
-        const hint = <span /> as HTMLSpanElement;
+        const hint = (<span />) as HTMLSpanElement;
         hints.push({ el: hint, option });
-        row = Choice(option.name, pick, <span class="wp-row__desc wp-weight">{WeightMeter(option.weight)}{hint}</span> as HTMLSpanElement);
+        row = Choice(
+          option.name,
+          pick,
+          (
+            <span class="wp-row__desc wp-weight">
+              {WeightMeter(option.weight)}
+              {hint}
+            </span>
+          ) as HTMLSpanElement,
+        );
       }
       rows.set(option.id, row);
       list.append(row);
@@ -95,15 +120,27 @@ export const createMicModes = (ctx: Ctx): Page => {
   }
 
   const renderHints = (): void => {
-    const format = new Intl.NumberFormat(document.documentElement.lang, { maximumFractionDigits: 1 });
+    const format = new Intl.NumberFormat(document.documentElement.lang, {
+      maximumFractionDigits: 1,
+    });
     for (const { el: hint, option } of hints) {
       const delay = format.format(option.latencyMs);
       const threads = option.threads;
       if (option.cores === 0) {
-        setText(hint, threads > 1 ? t('mic.usageThreadsNotMeasured', { threads, delay }) : t('mic.usageNotMeasured', { delay }));
+        setText(
+          hint,
+          threads > 1
+            ? t("mic.usageThreadsNotMeasured", { threads, delay })
+            : t("mic.usageNotMeasured", { delay }),
+        );
       } else {
         const pct = format.format(option.cores * 100);
-        setText(hint, threads > 1 ? t('mic.usageThreads', { threads, pct, delay }) : t('mic.usage', { pct, delay }));
+        setText(
+          hint,
+          threads > 1
+            ? t("mic.usageThreads", { threads, pct, delay })
+            : t("mic.usage", { pct, delay }),
+        );
       }
     }
   };
@@ -121,7 +158,11 @@ export const createMicModes = (ctx: Ctx): Page => {
     }
     const d = current();
     const loadingId = store.micLoading.mode;
-    load(d && live(d) && loadingId !== null ? groups[effectiveMode(d.host.micMode)].rows.get(loadingId) ?? null : null);
+    load(
+      d && live(d) && loadingId !== null
+        ? (groups[effectiveMode(d.host.micMode)].rows.get(loadingId) ?? null)
+        : null,
+    );
   };
 
   return { el, sections: { mic: render } };

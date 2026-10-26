@@ -872,10 +872,6 @@ internal sealed class LegacyRecord
     public string? MicMode { get; set; }
 }
 
-/// <summary>
-/// MicMode as its member name; on read also migrates the removed test modes (Round 19): VoiceIso1/VoiceIso2 ->
-/// Standard, VoiceIso3/VoiceIso4 -> VoiceIsolation. The migrated value is written back on the next save.
-/// </summary>
 internal sealed class MicModeJsonConverter : JsonConverter<MicMode>
 {
     public override MicMode Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

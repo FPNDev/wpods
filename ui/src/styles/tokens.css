@@ -1,5 +1,5 @@
-/* WPods Design System - generated from tokens.json */
-:root, [data-theme="light"] {
+:root,
+[data-theme="light"] {
   --bg-window: #f2f2f4;
   --surface-card: #ffffff;
   --surface-card-hover: #f7f7f9;
@@ -48,10 +48,14 @@
   --art-detail: #3a3a40;
   --art-metal: #c9cbd1;
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-segment: 0 1px 2px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
-  --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
-  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.06);
-  --shadow-window: 0 16px 40px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  --shadow-segment:
+    0 1px 2px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  --shadow-thumb:
+    0 1px 3px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  --shadow-flyout:
+    0 8px 24px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --shadow-window:
+    0 16px 40px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.08);
 }
 [data-theme="dark"] {
   --bg-window: #1c1c1f;
@@ -104,8 +108,10 @@
   --shadow-card: none;
   --shadow-segment: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.5);
-  --shadow-flyout: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
-  --shadow-window: 0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --shadow-flyout:
+    0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-window:
+    0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.07);
 }
 :root {
   --space-1: 4px;
@@ -149,17 +155,73 @@
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-enter: cubic-bezier(0, 0, 0, 1);
   --ease-exit: cubic-bezier(0.3, 0, 1, 1);
-  --font-text: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --font-small: "Segoe UI Variable Small", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-text:
+    "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui,
+    sans-serif;
+  --font-display:
+    "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui,
+    sans-serif;
+  --font-small:
+    "Segoe UI Variable Small", "Segoe UI Variable", "Segoe UI", system-ui,
+    sans-serif;
 }
-.t-display { font-family: var(--font-display); font-size: 28px; line-height: 36px; font-weight: 600; }
-.t-title { font-family: var(--font-display); font-size: 20px; line-height: 28px; font-weight: 600; }
-.t-numeral { font-family: var(--font-display); font-size: 32px; line-height: 36px; font-weight: 600; }
-.t-subtitle { font-family: var(--font-text); font-size: 16px; line-height: 22px; font-weight: 600; }
-.t-body { font-family: var(--font-text); font-size: 14px; line-height: 20px; font-weight: 400; }
-.t-body-strong { font-family: var(--font-text); font-size: 14px; line-height: 20px; font-weight: 600; }
-.t-label { font-family: var(--font-text); font-size: 13px; line-height: 18px; font-weight: 400; }
-.t-percent { font-family: var(--font-text); font-size: 15px; line-height: 20px; font-weight: 600; }
-.t-caption { font-family: var(--font-small); font-size: 12px; line-height: 16px; font-weight: 400; }
-.t-caption-strong { font-family: var(--font-small); font-size: 12px; line-height: 16px; font-weight: 600; }
+.t-display {
+  font-family: var(--font-display);
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 600;
+}
+.t-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+.t-numeral {
+  font-family: var(--font-display);
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: 600;
+}
+.t-subtitle {
+  font-family: var(--font-text);
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+}
+.t-body {
+  font-family: var(--font-text);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+.t-body-strong {
+  font-family: var(--font-text);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.t-label {
+  font-family: var(--font-text);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+}
+.t-percent {
+  font-family: var(--font-text);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.t-caption {
+  font-family: var(--font-small);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}
+.t-caption-strong {
+  font-family: var(--font-small);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}

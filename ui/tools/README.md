@@ -9,18 +9,18 @@ the output contains `querySelector`, `getElementById`, `getElementsBy*`, `innerH
 
 ## Rules
 
-| Write | Becomes |
-|---|---|
-| `<div>...</div>` (lowercase tag) | `document.createElement("div")`; SVG tags (`svg`, `g`, `path`, `circle`, `ellipse`, `rect`, `line`, `polyline`, `polygon`) use `createElementNS` |
-| `class="a"` / `class={expr}` | `el.className = ...` (SVG: `setAttribute("class", ...)`) |
-| `name="v"` / `name={expr}` / bare `name` | `el.setAttribute("name", ...)` (bare = `""`) |
-| `onclick={fn}` (lowercase DOM event name after `on`) | `el.addEventListener("click", fn)` |
-| `ref={target}` | `target = el` (any assignable expression; declare `let target!: HTMLSpanElement`) |
-| `l:text={key}` | `el.append(bindText(key))`: a text node bound to a label key |
-| `l:aria-label={key}`, `l:placeholder={key}` | `bindAttr(el, "aria-label", key)` |
-| text children | one text child: `el.textContent = "..."`; mixed: one `el.append(...)` call |
-| `{expr}` child | `el.append(expr)` (a Node or a string; never null/arrays) |
-| `<Comp a="1" />` (capitalized) | `Comp({ a: "1" })`, the returned element is appended; no children, no `ref`, no `l:` |
+| Write                                                | Becomes                                                                                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `<div>...</div>` (lowercase tag)                     | `document.createElement("div")`; SVG tags (`svg`, `g`, `path`, `circle`, `ellipse`, `rect`, `line`, `polyline`, `polygon`) use `createElementNS` |
+| `class="a"` / `class={expr}`                         | `el.className = ...` (SVG: `setAttribute("class", ...)`)                                                                                         |
+| `name="v"` / `name={expr}` / bare `name`             | `el.setAttribute("name", ...)` (bare = `""`)                                                                                                     |
+| `onclick={fn}` (lowercase DOM event name after `on`) | `el.addEventListener("click", fn)`                                                                                                               |
+| `ref={target}`                                       | `target = el` (any assignable expression; declare `let target!: HTMLSpanElement`)                                                                |
+| `l:text={key}`                                       | `el.append(bindText(key))`: a text node bound to a label key                                                                                     |
+| `l:aria-label={key}`, `l:placeholder={key}`          | `bindAttr(el, "aria-label", key)`                                                                                                                |
+| text children                                        | one text child: `el.textContent = "..."`; mixed: one `el.append(...)` call                                                                       |
+| `{expr}` child                                       | `el.append(expr)` (a Node or a string; never null/arrays)                                                                                        |
+| `<Comp a="1" />` (capitalized)                       | `Comp({ a: "1" })`, the returned element is appended; no children, no `ref`, no `l:`                                                             |
 
 - A JSX expression evaluates to its root element (typed `Element`; cast the root, e.g. `<div /> as HTMLDivElement`,
   or use `ref` for typed handles).

@@ -1,33 +1,40 @@
-/* Light / Dark / Auto (prefers-color-scheme, which WebView2 ties to the Windows app mode) and the optional Windows
-   accent colour (design guidelines/20): AccentDark1 in light, AccentLight2 in dark, only when it reaches 4.5:1. */
-import type { AccentRamp, Theme } from './protocol';
+import type { AccentRamp, Theme } from "./protocol";
 
 type Rgb = [number, number, number];
 type ThemeTokens = { card: string; onAccent: string };
 
 const root = document.documentElement;
-const darkQuery = matchMedia('(prefers-color-scheme: dark)');
-const ACCENT_VARS = ['--accent', '--accent-hover', '--accent-pressed', '--on-accent', '--accent-text', '--focus-ring'];
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+const ACCENT_VARS = [
+  "--accent",
+  "--accent-hover",
+  "--accent-pressed",
+  "--on-accent",
+  "--accent-text",
+  "--focus-ring",
+];
 const WEIGHTS = [0.2126, 0.7152, 0.0722];
 
-let themePref: Theme = 'auto';
+let themePref: Theme = "auto";
 let useAccent = false;
 let ramp: AccentRamp | null = null;
-let tokens: Record<'light' | 'dark', ThemeTokens> | null = null;
+let tokens: Record<"light" | "dark", ThemeTokens> | null = null;
 
-/* Token values per theme, read once from probe elements (the light and dark rules apply to them directly). */
-const readTokens = (): Record<'light' | 'dark', ThemeTokens> => {
-  const read = (theme: 'light' | 'dark'): ThemeTokens => {
-    const probe = document.createElement('div');
+const readTokens = (): Record<"light" | "dark", ThemeTokens> => {
+  const read = (theme: "light" | "dark"): ThemeTokens => {
+    const probe = document.createElement("div");
     probe.dataset.theme = theme;
     probe.hidden = true;
     document.body.append(probe);
     const cs = getComputedStyle(probe);
-    const out = { card: cs.getPropertyValue('--surface-card').trim(), onAccent: cs.getPropertyValue('--on-accent').trim() };
+    const out = {
+      card: cs.getPropertyValue("--surface-card").trim(),
+      onAccent: cs.getPropertyValue("--on-accent").trim(),
+    };
     probe.remove();
     return out;
   };
-  return { light: read('light'), dark: read('dark') };
+  return { light: read("light"), dark: read("dark") };
 };
 
 const rgb = (hex: string): Rgb | null => {
@@ -42,7 +49,8 @@ const luminance = (hex: string): number => {
   let sum = 0;
   for (const [i, v] of (rgb(hex) ?? [0, 0, 0]).entries()) {
     const s = v / 255;
-    sum += WEIGHTS[i] * (s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4);
+    sum +=
+      WEIGHTS[i] * (s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4);
   }
   return sum;
 };
@@ -52,15 +60,26 @@ const contrast = (a: string, b: string): number => {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 };
 
-/* The six accent overrides for this theme, or null when the ramp can't pass 4.5:1 (the default accent stays). */
-const pickAccent = (r: AccentRamp, t: Record<'light' | 'dark', ThemeTokens>, theme: 'light' | 'dark'): string[] | null => {
-  const steps = [r.dark3, r.dark2, r.dark1, r.accent, r.light1, r.light2, r.light3];
+const pickAccent = (
+  r: AccentRamp,
+  t: Record<"light" | "dark", ThemeTokens>,
+  theme: "light" | "dark",
+): string[] | null => {
+  const steps = [
+    r.dark3,
+    r.dark2,
+    r.dark1,
+    r.accent,
+    r.light1,
+    r.light2,
+    r.light3,
+  ];
   for (const s of steps) {
     if (!rgb(s)) {
       return null;
     }
   }
-  const dark = theme === 'dark';
+  const dark = theme === "dark";
   const at = dark ? 5 : 2;
   const accent = steps[at];
   let on: string | null = null;
@@ -78,14 +97,22 @@ const pickAccent = (r: AccentRamp, t: Record<'light' | 'dark', ThemeTokens>, the
   const card = t[theme].card;
   for (let i = at; i >= 0 && i < steps.length; i += dark ? 1 : -1) {
     if (contrast(steps[i], card) >= 4.5) {
-      return [accent, steps[dark ? 6 : 3], steps[dark ? 4 : 1], on, steps[i], steps[i]];
+      return [
+        accent,
+        steps[dark ? 6 : 3],
+        steps[dark ? 4 : 1],
+        on,
+        steps[i],
+        steps[i],
+      ];
     }
   }
   return null;
 };
 
 const apply = (): void => {
-  const theme = themePref === 'auto' ? (darkQuery.matches ? 'dark' : 'light') : themePref;
+  const theme =
+    themePref === "auto" ? (darkQuery.matches ? "dark" : "light") : themePref;
   if (root.dataset.theme !== theme) {
     root.dataset.theme = theme;
   }
@@ -99,8 +126,8 @@ const apply = (): void => {
     }
   }
 };
-darkQuery.addEventListener('change', () => {
-  if (themePref === 'auto') {
+darkQuery.addEventListener("change", () => {
+  if (themePref === "auto") {
     apply();
   }
 });
@@ -108,8 +135,11 @@ darkQuery.addEventListener('change', () => {
 export const getTheme = (): Theme => themePref;
 export const getUseAccent = (): boolean => useAccent;
 
-/* Any subset; applies once. */
-export const setThemePrefs = (p: { theme?: Theme; useAccent?: boolean; accent?: AccentRamp | null }): void => {
+export const setThemePrefs = (p: {
+  theme?: Theme;
+  useAccent?: boolean;
+  accent?: AccentRamp | null;
+}): void => {
   if (p.theme !== undefined) {
     themePref = p.theme;
   }

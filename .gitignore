@@ -11,3 +11,4 @@ src/WPods/web/
 *.code-workspace
 ERRORS.md
 REVIEW.md
+actions-runner

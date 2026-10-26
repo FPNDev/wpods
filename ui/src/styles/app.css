@@ -1,121 +1,344 @@
-/* App layer over ds/bundle.css: only what the components don't provide. Tokens only. */
+[hidden] {
+  display: none !important;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+body {
+  background: var(--bg-window);
+  overflow: hidden;
+}
 
-[hidden] { display: none !important; }
-html, body { margin: 0; height: 100%; }
-body { background: var(--bg-window); overflow: hidden; }
+.wp-window {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.wp-titlebar {
+  user-select: none;
+}
+[dir="rtl"] .wp-back .wp-icon {
+  transform: scaleX(-1);
+}
 
-/* The host window is the window: Windows draws its corners and shadow (DWM), so the shell fills the viewport. */
-.wp-window { width: 100%; height: 100%; min-height: 0; max-height: none; border-radius: 0; box-shadow: none; }
-.wp-titlebar { user-select: none; }
-[dir="rtl"] .wp-back .wp-icon { transform: scaleX(-1); }
+.wp-page {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.wp-page-back {
+  animation: wp-push-back var(--dur-slow) var(--ease-enter);
+}
+@keyframes wp-push-back {
+  from {
+    transform: translateX(calc(var(--space-6) * -1));
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
 
-/* Pages: one in the body at a time; push in, and reverse when going back. */
-.wp-page { flex: 1 0 auto; display: flex; flex-direction: column; gap: var(--space-4); }
-.wp-page-back { animation: wp-push-back var(--dur-slow) var(--ease-enter); }
-@keyframes wp-push-back { from { transform: translateX(calc(var(--space-6) * -1)); opacity: 0; } to { transform: none; opacity: 1; } }
+.wp-list > .wp-row:not(:not([hidden]) ~ .wp-row)::before {
+  content: none;
+}
+.wp-list > .wp-row:focus-visible::before {
+  content: none;
+}
 
-/* First row of a list that has no visible row before it draws no separator. */
-.wp-list > .wp-row:not(:not([hidden]) ~ .wp-row)::before { content: none; }
-/* A focused row's inset ring covers its separator line, so the line (painted above the ring) is dropped. */
-.wp-list > .wp-row:focus-visible::before { content: none; }
+.wp-hero__switch {
+  position: relative;
+  max-width: 100%;
+}
+.wp-hero__switch > .wp-menu {
+  top: var(--control-h-lg);
+  left: 50%;
+  translate: -50% 0;
+  text-align: start;
+}
+span.wp-menu__glyph {
+  display: grid;
+  place-items: center;
+}
+.wp-menu__text {
+  min-width: 0;
+}
+.wp-menu__ext {
+  color: var(--text-tertiary);
+}
+.wp-status:not(.wp-status--busy) > .wp-spinner,
+.wp-status--busy > .wp-status__dot {
+  display: none;
+}
 
-/* Hero: switcher anchor and menu placement (design: 40 below, centred). */
-.wp-hero__switch { position: relative; max-width: 100%; }
-.wp-hero__switch > .wp-menu { top: var(--control-h-lg); left: 50%; translate: -50% 0; text-align: start; }
-span.wp-menu__glyph { display: grid; place-items: center; }
-.wp-menu__text { min-width: 0; }
-.wp-menu__ext { color: var(--text-tertiary); }
-.wp-status:not(.wp-status--busy) > .wp-spinner, .wp-status--busy > .wp-status__dot { display: none; }
+.wp-chip > .wp-spinner,
+.wp-chip > .wp-icon,
+.wp-chip > .wp-chip__dot {
+  display: none;
+}
+.wp-chip[data-state="starting"] > .wp-spinner,
+.wp-chip[data-state="problem"] > .wp-icon,
+.wp-chip[data-state="notActive"] > .wp-chip__dot,
+.wp-chip[data-state="live"] > .wp-chip__dot {
+  display: block;
+}
 
-/* Microphone chip: one element, parts shown per state. */
-.wp-chip > .wp-spinner, .wp-chip > .wp-icon, .wp-chip > .wp-chip__dot { display: none; }
-.wp-chip[data-state="starting"] > .wp-spinner, .wp-chip[data-state="problem"] > .wp-icon,
-.wp-chip[data-state="notActive"] > .wp-chip__dot, .wp-chip[data-state="live"] > .wp-chip__dot { display: block; }
+.wp-steps__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.wp-steps__grow {
+  flex: 1;
+  min-width: 0;
+}
+.wp-disclaimer {
+  width: 100%;
+  max-width: 320px;
+  box-sizing: border-box;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.wp-disclaimer > h2 {
+  margin: 0;
+}
 
-/* First run: the startup fact carries its switch. */
-.wp-steps__row { display: flex; align-items: center; gap: var(--space-3); }
-.wp-steps__grow { flex: 1; min-width: 0; }
-/* First run: the not-an-Apple-app disclaimer card, as wide as the facts. */
-.wp-disclaimer { width: 100%; max-width: 320px; box-sizing: border-box; padding: var(--space-4); display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
-.wp-disclaimer > h2 { margin: 0; }
+.wp-legal-foot {
+  text-align: center;
+}
+.wp-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent-text);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.wp-link:hover,
+.wp-link:focus-visible {
+  text-decoration: underline;
+}
 
-/* Legal footer (Home, No AirPods): one centred line with an inline link. */
-.wp-legal-foot { text-align: center; }
-.wp-link { appearance: none; border: 0; padding: 0; background: none; font: inherit; color: var(--accent-text); cursor: pointer; border-radius: var(--radius-sm); }
-.wp-link:hover, .wp-link:focus-visible { text-decoration: underline; }
+.wp-toast {
+  pointer-events: none;
+}
+.wp-toast button {
+  pointer-events: auto;
+}
 
-/* Toast: only its buttons take the pointer, so it never blocks the controls under it (it closes itself, or x). */
-.wp-toast { pointer-events: none; }
-.wp-toast button { pointer-events: auto; }
-
-/* Nearby popup window: the card is the window (Windows draws corners and shadow). */
-.wp-popup--window { width: 100%; box-sizing: border-box; border-radius: 0; box-shadow: none; }
-.wp-popup__view { display: contents; }
-.wp-popup__id { max-width: 100%; }
-.wp-popup__head { margin-top: var(--space-2); }
-.wp-popup__mark { margin-top: var(--space-4); }
-.wp-popup__spacer { height: var(--space-2); }
-.wp-pick__text { min-width: 0; }
-.wp-btn:not(.is-loading) > .wp-spinner { display: none; }
+.wp-popup--window {
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 0;
+  box-shadow: none;
+}
+.wp-popup__view {
+  display: contents;
+}
+.wp-popup__id {
+  max-width: 100%;
+}
+.wp-popup__head {
+  margin-top: var(--space-2);
+}
+.wp-popup__mark {
+  margin-top: var(--space-4);
+}
+.wp-popup__spacer {
+  height: var(--space-2);
+}
+.wp-pick__text {
+  min-width: 0;
+}
+.wp-btn:not(.is-loading) > .wp-spinner {
+  display: none;
+}
 
 /* Focus (user rule): a keyboard-focused control shows the design's focus ring AND its hover effect.
    The rings come from bundle.css; these add each control's hover look while focused (pressed still wins). */
-.wp-btn--primary:focus-visible:not(:active) { background: var(--accent-hover); }
-.wp-btn--secondary:focus-visible:not(:active) { background: var(--fill-control-hover); }
-.wp-btn--subtle:focus-visible:not(:active) { background: var(--fill-subtle-hover); }
-.wp-iconbtn:focus-visible:not(:active) { background: var(--fill-subtle-hover); color: var(--text-primary); }
-.wp-iconbtn--close:focus-visible:not(:active) { background: var(--close-hover); color: var(--on-danger); }
-.wp-devswitch:focus-visible:not(:active), .wp-menu__item:focus-visible:not(:active) { background: var(--fill-subtle-hover); }
-.wp-row--nav:focus-visible:not(:active), .wp-choice:focus-visible:not(:active), .wp-pick:focus-visible:not(:active) { background: var(--surface-card-hover); }
-.wp-switch__input:focus-visible + .wp-switch__track { background: var(--fill-control-hover); }
-.wp-switch__input:focus-visible:checked + .wp-switch__track { background: var(--accent-hover); box-shadow: inset 0 0 0 1px var(--accent-hover); }
-.wp-seg__input:focus-visible:not(:checked) + .wp-seg__face { background: var(--fill-subtle-hover); color: var(--text-primary); }
-.wp-slider__input:focus-visible::-webkit-slider-thumb { transform: scale(1.1); }
-.wp-slider__input:focus-visible:active::-webkit-slider-thumb { transform: scale(0.9); }
-.wp-search__input:focus-visible { border-color: var(--border-strong); }
-/* Focus rings follow the element's own radius and are never clipped (Round 19). Lists clip to radius-lg, so their
-   rows draw the ring inset and the first / last VISIBLE row takes the list's corner radius (hidden rows, such as
-   lock notes, don't count): top-rounded, bottom-rounded, fully rounded (only row) or square (middle rows). */
-.wp-list > :not([hidden]):not(:not([hidden]) ~ *) { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
-.wp-list > :not([hidden]):not(:has(~ :not([hidden]))) { border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg); }
-/* Menu items and segment faces touch their neighbours: the ring goes inside so a neighbour never paints over it. */
-.wp-menu__item:focus-visible { outline-offset: calc(var(--focus-w) * -1); }
-.wp-seg__input:focus-visible + .wp-seg__face { outline-offset: calc(var(--focus-w) * -1); }
+.wp-btn--primary:focus-visible:not(:active) {
+  background: var(--accent-hover);
+}
+.wp-btn--secondary:focus-visible:not(:active) {
+  background: var(--fill-control-hover);
+}
+.wp-btn--subtle:focus-visible:not(:active) {
+  background: var(--fill-subtle-hover);
+}
+.wp-iconbtn:focus-visible:not(:active) {
+  background: var(--fill-subtle-hover);
+  color: var(--text-primary);
+}
+.wp-iconbtn--close:focus-visible:not(:active) {
+  background: var(--close-hover);
+  color: var(--on-danger);
+}
+.wp-devswitch:focus-visible:not(:active),
+.wp-menu__item:focus-visible:not(:active) {
+  background: var(--fill-subtle-hover);
+}
+.wp-row--nav:focus-visible:not(:active),
+.wp-choice:focus-visible:not(:active),
+.wp-pick:focus-visible:not(:active) {
+  background: var(--surface-card-hover);
+}
+.wp-switch__input:focus-visible + .wp-switch__track {
+  background: var(--fill-control-hover);
+}
+.wp-switch__input:focus-visible:checked + .wp-switch__track {
+  background: var(--accent-hover);
+  box-shadow: inset 0 0 0 1px var(--accent-hover);
+}
+.wp-seg__input:focus-visible:not(:checked) + .wp-seg__face {
+  background: var(--fill-subtle-hover);
+  color: var(--text-primary);
+}
+.wp-slider__input:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+.wp-slider__input:focus-visible:active::-webkit-slider-thumb {
+  transform: scale(0.9);
+}
+.wp-search__input:focus-visible {
+  border-color: var(--border-strong);
+}
+.wp-list > :not([hidden]):not(:not([hidden]) ~ *) {
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+}
+.wp-list > :not([hidden]):not(:has(~ :not([hidden]))) {
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+.wp-menu__item:focus-visible {
+  outline-offset: calc(var(--focus-w) * -1);
+}
+.wp-seg__input:focus-visible + .wp-seg__face {
+  outline-offset: calc(var(--focus-w) * -1);
+}
 
-/* Long single-word labels (long Ukrainian words) break instead of overflowing the segment. */
-.wp-seg__label { hyphens: auto; overflow-wrap: break-word; }
+.wp-seg__label {
+  hyphens: auto;
+  overflow-wrap: anywhere;
+}
 
-/* ChoiceList rows that can't change (not connected). */
-.wp-choice:disabled { cursor: not-allowed; background: transparent; }
-.wp-choice:disabled .wp-row__title, .wp-choice:disabled .wp-row__check { color: var(--text-disabled); }
-.wp-slider__input:is(:disabled, [aria-disabled="true"]) ~ .wp-slider__value { color: var(--text-disabled); }
-.wp-slider:has(> .wp-slider__input:is(:disabled, [aria-disabled="true"])) > .wp-slider__icon { color: var(--text-disabled); }
+.wp-choice:disabled {
+  cursor: not-allowed;
+  background: transparent;
+}
+.wp-choice:disabled .wp-row__title,
+.wp-choice:disabled .wp-row__check {
+  color: var(--text-disabled);
+}
+.wp-slider__input:is(:disabled, [aria-disabled="true"]) ~ .wp-slider__value {
+  color: var(--text-disabled);
+}
+.wp-slider:has(> .wp-slider__input:is(:disabled, [aria-disabled="true"]))
+  > .wp-slider__icon {
+  color: var(--text-disabled);
+}
 
 /* Busy pod-saved controls (aria-disabled, not disabled, so keyboard focus stays): the disabled look of bundle.css and
    no hover or pressed change; a keyboard-focused one still shows the focus ring. The switch track rules also cover
    :disabled, so a disabled checked switch keeps its disabled look under the pointer too. */
-.wp-switch .wp-switch__input:is(:disabled, [aria-disabled="true"]) + .wp-switch__track { background: var(--fill-control); box-shadow: inset 0 0 0 1px var(--text-disabled); }
-.wp-switch .wp-switch__input:is(:disabled, [aria-disabled="true"]):checked + .wp-switch__track { background: var(--accent-disabled); box-shadow: inset 0 0 0 1px var(--accent-disabled); }
-.wp-switch:has(.wp-switch__input[aria-disabled="true"]) { cursor: not-allowed; }
-.wp-switch:has(.wp-switch__input[aria-disabled="true"]):active .wp-switch__thumb { transform: none; }
-.wp-switch:has(.wp-switch__input[aria-disabled="true"]:checked):active .wp-switch__thumb { transform: translateX(calc(16px * var(--wp-dir, 1))); }
-.wp-seg__item > .wp-seg__input[aria-disabled="true"] + .wp-seg__face { color: var(--text-disabled); background: transparent; box-shadow: none; }
-.wp-seg__item > .wp-seg__input[aria-disabled="true"]:checked + .wp-seg__face { background: var(--fill-segment); box-shadow: var(--shadow-segment); color: var(--text-disabled); }
-.wp-seg__input[aria-disabled="true"] + .wp-seg__face .wp-seg__disc { background: var(--fill-control); color: var(--text-disabled); }
-.wp-seg__item:has(.wp-seg__input[aria-disabled="true"]) { cursor: not-allowed; }
-.wp-slider__input[aria-disabled="true"] { cursor: not-allowed; }
-.wp-slider__input[aria-disabled="true"]::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--text-disabled) var(--v), var(--fill-sunken) var(--v)); }
-.wp-slider .wp-slider__input[aria-disabled="true"]::-webkit-slider-thumb { transform: none; }
-/* The busy spinner: hidden, it still keeps its space, so showing it never moves the layout. */
-.wp-busy:not(.is-busy) { visibility: hidden; }
-/* !important: the reduced-motion rule in bundle.css forces the spin with !important. */
-.wp-busy:not(.is-busy) > .wp-spinner { animation: none !important; }
-/* Mic lists (enhancement, mic modes): the row whose stage loads shows the spinner in its check slot. */
-.wp-choice.is-loading .wp-row__check { display: none; }
-.wp-choice > .wp-spinner { color: var(--accent-text); }
-/* Mic modes: weight meter (4 bars, filled per weight; not measured = all hollow, dashed) before the usage hint. */
-.wp-weight { display: flex; align-items: center; gap: var(--space-2); }
-.wp-meter { display: inline-flex; flex: none; gap: var(--space-half); }
-.wp-meter__bar { width: 4px; height: 10px; border-radius: 1px; background: var(--fill-sunken); box-sizing: border-box; }
-.wp-meter__bar.is-on { background: var(--text-secondary); }
-.wp-meter--unmeasured > .wp-meter__bar { background: transparent; border: 1px dashed var(--text-tertiary); }
+.wp-switch
+  .wp-switch__input:is(:disabled, [aria-disabled="true"])
+  + .wp-switch__track {
+  background: var(--fill-control);
+  box-shadow: inset 0 0 0 1px var(--text-disabled);
+}
+.wp-switch
+  .wp-switch__input:is(:disabled, [aria-disabled="true"]):checked
+  + .wp-switch__track {
+  background: var(--accent-disabled);
+  box-shadow: inset 0 0 0 1px var(--accent-disabled);
+}
+.wp-switch:has(.wp-switch__input[aria-disabled="true"]) {
+  cursor: not-allowed;
+}
+.wp-switch:has(.wp-switch__input[aria-disabled="true"]):active
+  .wp-switch__thumb {
+  transform: none;
+}
+.wp-switch:has(.wp-switch__input[aria-disabled="true"]:checked):active
+  .wp-switch__thumb {
+  transform: translateX(calc(16px * var(--wp-dir, 1)));
+}
+.wp-seg__item > .wp-seg__input[aria-disabled="true"] + .wp-seg__face {
+  color: var(--text-disabled);
+  background: transparent;
+  box-shadow: none;
+}
+.wp-seg__item > .wp-seg__input[aria-disabled="true"]:checked + .wp-seg__face {
+  background: var(--fill-segment);
+  box-shadow: var(--shadow-segment);
+  color: var(--text-disabled);
+}
+.wp-seg__input[aria-disabled="true"] + .wp-seg__face .wp-seg__disc {
+  background: var(--fill-control);
+  color: var(--text-disabled);
+}
+.wp-seg__item:has(.wp-seg__input[aria-disabled="true"]) {
+  cursor: not-allowed;
+}
+.wp-slider__input[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+.wp-slider__input[aria-disabled="true"]::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--text-disabled) var(--v),
+    var(--fill-sunken) var(--v)
+  );
+}
+.wp-slider .wp-slider__input[aria-disabled="true"]::-webkit-slider-thumb {
+  transform: none;
+}
+.wp-busy:not(.is-busy) {
+  visibility: hidden;
+}
+.wp-busy:not(.is-busy) > .wp-spinner {
+  animation: none !important;
+}
+.wp-choice.is-loading .wp-row__check {
+  display: none;
+}
+.wp-choice > .wp-spinner {
+  color: var(--accent-text);
+}
+.wp-weight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.wp-meter {
+  display: inline-flex;
+  flex: none;
+  gap: var(--space-half);
+}
+.wp-meter__bar {
+  width: 4px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--fill-sunken);
+  box-sizing: border-box;
+}
+.wp-meter__bar.is-on {
+  background: var(--text-secondary);
+}
+.wp-meter--unmeasured > .wp-meter__bar {
+  background: transparent;
+  border: 1px dashed var(--text-tertiary);
+}

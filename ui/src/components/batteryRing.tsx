@@ -1,28 +1,38 @@
-/* BatteryRing component: one ring per part, built once and updated in place; createBatteries holds the four parts. */
-import { setAttr, setHidden, setText } from '../dom';
-import { labelsVersion, t } from '../i18n';
-import { Glyph, Icon } from '../icons';
-import type { Batteries, Battery } from '../protocol';
+import { setAttr, setHidden, setText } from "../dom";
+import { labelsVersion, t } from "../i18n";
+import { Glyph, Icon } from "../icons";
+import type { Batteries, Battery } from "../protocol";
 
-type Part = 'left' | 'right' | 'case' | 'max';
-type CaseGlyph = 'case-pro' | 'case';
-type Ring = { update: (bat: Battery, ear: string, caseGlyph: CaseGlyph) => void };
+type Part = "left" | "right" | "case" | "max";
+type CaseGlyph = "case-pro" | "case";
+type Ring = {
+  update: (bat: Battery, ear: string, caseGlyph: CaseGlyph) => void;
+};
 type BatteryRings = {
   el: HTMLDivElement;
-  /* Returns whether any part is shown. `ears` = localized ear text per bud ('' = none). */
-  update: (bat: Batteries | null, ears: { left: string; right: string }, caseGlyph: CaseGlyph) => boolean;
+  update: (
+    bat: Batteries | null,
+    ears: { left: string; right: string },
+    caseGlyph: CaseGlyph,
+  ) => boolean;
 };
 
 const RING_C = 2 * Math.PI * 23;
-const GLYPH = { left: 'bud-left', right: 'bud-right', max: 'max' } as const;
+const GLYPH = { left: "bud-left", right: "bud-right", max: "max" } as const;
 
-const createRing = (part: Part, compact: boolean, parent: HTMLElement): Ring => {
+const createRing = (
+  part: Part,
+  compact: boolean,
+  parent: HTMLElement,
+): Ring => {
   let fill!: SVGCircleElement;
   let bolt!: HTMLDivElement;
   let pct!: HTMLDivElement;
-  let caseGlyph: CaseGlyph = 'case-pro';
-  let glyph: Element = <Glyph name={part === 'case' ? caseGlyph : GLYPH[part]} />;
-  let key = '';
+  let caseGlyph: CaseGlyph = "case-pro";
+  let glyph: Element = (
+    <Glyph name={part === "case" ? caseGlyph : GLYPH[part]} />
+  );
+  let key = "";
   const el = (
     <div class="wp-battery" role="img" hidden>
       <div class="wp-ring">
@@ -31,7 +41,9 @@ const createRing = (part: Part, compact: boolean, parent: HTMLElement): Ring => 
           <circle class="wp-ring__fill" cx="26" cy="26" r="23" ref={fill} />
         </svg>
         <div class="wp-ring__glyph">{glyph}</div>
-        <div class="wp-ring__bolt" hidden ref={bolt}><Icon name="bolt" /></div>
+        <div class="wp-ring__bolt" hidden ref={bolt}>
+          <Icon name="bolt" />
+        </div>
       </div>
       <div class="wp-battery__pct" aria-hidden="true" ref={pct} />
     </div>
@@ -40,8 +52,12 @@ const createRing = (part: Part, compact: boolean, parent: HTMLElement): Ring => 
   let label: HTMLDivElement | null = null;
   let earLine: HTMLDivElement | null = null;
   if (!compact) {
-    label = <div class="wp-battery__label" aria-hidden="true" /> as HTMLDivElement;
-    earLine = <div class="wp-battery__ear" aria-hidden="true" hidden /> as HTMLDivElement;
+    label = (
+      <div class="wp-battery__label" aria-hidden="true" />
+    ) as HTMLDivElement;
+    earLine = (
+      <div class="wp-battery__ear" aria-hidden="true" hidden />
+    ) as HTMLDivElement;
     el.append(label, earLine);
   }
 
@@ -51,7 +67,7 @@ const createRing = (part: Part, compact: boolean, parent: HTMLElement): Ring => 
       if (!bat) {
         return;
       }
-      if (part === 'case' && nextCase !== caseGlyph) {
+      if (part === "case" && nextCase !== caseGlyph) {
         caseGlyph = nextCase;
         const next = <Glyph name={nextCase} />;
         glyph.replaceWith(next);
@@ -62,44 +78,57 @@ const createRing = (part: Part, compact: boolean, parent: HTMLElement): Ring => 
         return;
       }
       key = nextKey;
-      const level = bat.charging ? 'charging' : bat.pct < 10 ? 'low' : bat.pct < 30 ? 'warn' : 'ok';
+      const level = bat.charging
+        ? "charging"
+        : bat.pct < 10
+          ? "low"
+          : bat.pct < 30
+            ? "warn"
+            : "ok";
       el.className = `wp-battery wp-battery--${level}`;
-      fill.setAttribute('stroke-dasharray', `${(RING_C * Math.max(0, Math.min(100, bat.pct)) / 100).toFixed(2)} ${RING_C.toFixed(2)}`);
+      fill.setAttribute(
+        "stroke-dasharray",
+        `${((RING_C * Math.max(0, Math.min(100, bat.pct))) / 100).toFixed(2)} ${RING_C.toFixed(2)}`,
+      );
       setHidden(bolt, !bat.charging);
       const name = t(`battery.${part}`);
-      setText(pct, t('battery.pct', { pct: bat.pct }));
+      setText(pct, t("battery.pct", { pct: bat.pct }));
       if (label && earLine) {
-        /* The case's second line says it charges; buds show where they are. */
-        const second = part === 'case' ? (bat.charging ? t('battery.charging') : '') : ear;
+        const second =
+          part === "case" ? (bat.charging ? t("battery.charging") : "") : ear;
         setText(label, name);
         setText(earLine, second);
         setHidden(earLine, !second);
       }
-      let sr = t('battery.sr', { part: name, pct: bat.pct });
+      let sr = t("battery.sr", { part: name, pct: bat.pct });
       if (bat.charging) {
-        sr += `, ${t('battery.charging').toLowerCase()}`;
+        sr += `, ${t("battery.charging").toLowerCase()}`;
       }
       if (ear) {
         sr += `, ${ear.toLowerCase()}`;
       }
-      setAttr(el, 'aria-label', sr);
+      setAttr(el, "aria-label", sr);
     },
   };
 };
 
 export const createBatteries = (compact: boolean): BatteryRings => {
-  const el = <div class={compact ? 'wp-batteries wp-batteries--compact' : 'wp-batteries'} /> as HTMLDivElement;
-  const left = createRing('left', compact, el);
-  const right = createRing('right', compact, el);
-  const box = createRing('case', compact, el);
-  const max = createRing('max', compact, el);
+  const el = (
+    <div
+      class={compact ? "wp-batteries wp-batteries--compact" : "wp-batteries"}
+    />
+  ) as HTMLDivElement;
+  const left = createRing("left", compact, el);
+  const right = createRing("right", compact, el);
+  const box = createRing("case", compact, el);
+  const max = createRing("max", compact, el);
   return {
     el,
     update: (bat, ears, caseGlyph) => {
       left.update(bat?.left ?? null, ears.left, caseGlyph);
       right.update(bat?.right ?? null, ears.right, caseGlyph);
-      box.update(bat?.case ?? null, '', caseGlyph);
-      max.update(bat?.headphone ?? null, '', caseGlyph);
+      box.update(bat?.case ?? null, "", caseGlyph);
+      max.update(bat?.headphone ?? null, "", caseGlyph);
       return !!bat && !!(bat.left || bat.right || bat.case || bat.headphone);
     },
   };

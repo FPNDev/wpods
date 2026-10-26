@@ -41,7 +41,7 @@ public sealed class AapSession : IAsyncDisposable
     private static readonly TimeSpan InitialReportTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan HeartRateFirstReadingTimeout = TimeSpan.FromSeconds(12);
     // After a listening-mode request, device reports of other modes (echoes of earlier requests) are ignored until
-    // the device reports the requested mode or this passes (Round 17: ~1.5 s; observed resync after 200-300 ms).
+    // the device reports the requested mode or this passes
     private static readonly TimeSpan ListeningModeHold = TimeSpan.FromSeconds(1.5);
     private const int HeartRateAttempts = 3;
     private const uint HeartRatePeriodUs = 1_000_000;
@@ -95,7 +95,7 @@ public sealed class AapSession : IAsyncDisposable
         _savedPodSettings = settings.GetPodSettings(address);
         State = new DeviceState(settings.GetCapabilities(address), baseline, _savedPodSettings);
         _savedReported = State.Reported;
-        // The AirPods never report 0x0A, 0x01 or 0x34 (per-host settings, Round 20/21 probes and attach logs), so the
+        // The AirPods never report 0x0A, 0x01 or 0x34, so the
         // stored values are the state from the start and are written on attach; a device report of 0x0A or 0x01
         // replaces them (OnPacket).
         State.SetSetting(Aap.EarDetectionId, Aap.Bool(settings.GetEarDetection(address)));
@@ -525,7 +525,6 @@ public sealed class AapSession : IAsyncDisposable
         {
             SaveCapabilities();
         }
-        // A device-reported ear detection value wins over the stored one (Round 20).
         if (Aap.IsSetting(packet) && packet[6] == Aap.EarDetectionId && packet[7] is 0x01 or 0x02)
         {
             Log.Info("aap", $"device reports ear detection {(packet[7] == 0x01 ? "on" : "off")}; stored");

@@ -1,6 +1,3 @@
-# Pushing a v* tag builds dist\WPods-Setup.exe on the self-hosted runner and attaches it to a draft release.
-# The tag must match $Version in build.ps1 (v0.3.0 for '0.3.0'). The release body is left empty to be written
-# on GitHub before publishing.
 name: Release
 
 on:

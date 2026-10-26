@@ -1,4 +1,3 @@
-/* Page stylesheet: design tokens, design-system components, app layer (bundled into web/app.css). */
 @import "./tokens.css";
 @import "./bundle.css";
 @import "./app.css";

@@ -479,7 +479,6 @@ internal sealed partial class TrayApp
             }
             catch (Exception e) when (e is Win32Exception or InvalidOperationException)
             {
-                // Hands-Free could not be changed (Round 14): toast and switch back.
                 Log.Warn("ui", $"host setting {name} failed: {e.Message}");
                 SendToast("handsFreeFailed", address);
                 await RevertHandsFreeAsync(address, current);

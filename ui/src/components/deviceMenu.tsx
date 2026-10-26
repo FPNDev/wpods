@@ -1,14 +1,11 @@
-/* Device switcher in the hero: the name as a menu button (several pairs) or plain text (one pair), and the menu
-   (role="menu", menuitemradio per pair, then "Pair new AirPods..."). Items are updated in place while it is open. */
-import { setAttr, setHidden, setText } from '../dom';
-import { t } from '../i18n';
-import { Glyph, Icon } from '../icons';
-import type { Device, DeviceId } from '../protocol';
+import { setAttr, setHidden, setText } from "../dom";
+import { t } from "../i18n";
+import { Glyph, Icon } from "../icons";
+import type { Device, DeviceId } from "../protocol";
 
 type DeviceMenu = {
   el: HTMLDivElement;
   button: HTMLButtonElement;
-  /* Updates the shown name; updates the items when open. */
   render: (devices: Device[], selected: Device) => void;
 };
 
@@ -20,7 +17,10 @@ type Item = {
   index: number;
 };
 
-export const createDeviceMenu = (o: { onPick: (id: DeviceId) => void; onPair: () => void }): DeviceMenu => {
+export const createDeviceMenu = (o: {
+  onPick: (id: DeviceId) => void;
+  onPair: () => void;
+}): DeviceMenu => {
   let button!: HTMLButtonElement;
   let buttonName!: HTMLSpanElement;
   let staticBox!: HTMLSpanElement;
@@ -44,18 +44,30 @@ export const createDeviceMenu = (o: { onPick: (id: DeviceId) => void; onPair: ()
   const createItem = (d: Device): Item => {
     let title!: HTMLSpanElement;
     let meta!: HTMLSpanElement;
-    const check = <Icon name="check" class="wp-menu__check" /> as SVGSVGElement;
+    const check = (
+      <Icon name="check" class="wp-menu__check" />
+    ) as SVGSVGElement;
     const btn = (
-      <button type="button" class="wp-menu__item" role="menuitemradio" tabindex="-1"
+      <button
+        type="button"
+        class="wp-menu__item"
+        role="menuitemradio"
+        tabindex="-1"
         onfocus={() => {
           focusAt = item.index;
         }}
         onclick={() => {
           close(true);
           o.onPick(d.id);
-        }}>
-        <span class="wp-menu__glyph"><Glyph name={d.art === 'max' ? 'max' : 'pair'} /></span>
-        <span class="wp-menu__text"><span class="wp-menu__title" ref={title} /><span class="wp-menu__meta" ref={meta} /></span>
+        }}
+      >
+        <span class="wp-menu__glyph">
+          <Glyph name={d.art === "max" ? "max" : "pair"} />
+        </span>
+        <span class="wp-menu__text">
+          <span class="wp-menu__title" ref={title} />
+          <span class="wp-menu__meta" ref={meta} />
+        </span>
         {check}
       </button>
     ) as HTMLButtonElement;
@@ -94,7 +106,7 @@ export const createDeviceMenu = (o: { onPick: (id: DeviceId) => void; onPair: ()
       item.index = i;
       setText(item.title, d.name);
       setText(item.meta, t(`status.${d.conn}`));
-      setAttr(item.btn, 'aria-checked', String(checked));
+      setAttr(item.btn, "aria-checked", String(checked));
       setHidden(item.check, !checked);
       if (prev.nextSibling !== item.btn) {
         menu.insertBefore(item.btn, prev.nextSibling);
@@ -123,7 +135,7 @@ export const createDeviceMenu = (o: { onPick: (id: DeviceId) => void; onPair: ()
     }
     open = false;
     setHidden(menu, true);
-    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute("aria-expanded", "false");
     if (refocus) {
       button.focus();
     }
@@ -132,13 +144,18 @@ export const createDeviceMenu = (o: { onPick: (id: DeviceId) => void; onPair: ()
     open = true;
     syncItems();
     setHidden(menu, false);
-    button.setAttribute('aria-expanded', 'true');
+    button.setAttribute("aria-expanded", "true");
     focusItem(checkedAt < 0 ? items.length : checkedAt);
   };
 
   const el = (
     <div class="wp-hero__switch">
-      <button type="button" class="wp-devswitch" aria-haspopup="menu" aria-expanded="false" ref={button}
+      <button
+        type="button"
+        class="wp-devswitch"
+        aria-haspopup="menu"
+        aria-expanded="false"
+        ref={button}
         onclick={() => {
           if (open) {
             close(true);
@@ -147,32 +164,40 @@ export const createDeviceMenu = (o: { onPick: (id: DeviceId) => void; onPair: ()
           }
         }}
         onkeydown={(e) => {
-          if (e.key === 'ArrowDown' && !open) {
+          if (e.key === "ArrowDown" && !open) {
             e.preventDefault();
             openMenu();
-          } else if (e.key === 'Escape' && open) {
+          } else if (e.key === "Escape" && open) {
             e.stopPropagation();
             close(true);
           }
-        }}>
+        }}
+      >
         <span class="wp-devswitch__name" ref={buttonName} />
         <Icon name="chevron-down" />
       </button>
-      <span class="wp-devswitch wp-devswitch--static" ref={staticBox}><span class="wp-devswitch__name" ref={staticName} /></span>
-      <div class="wp-menu" role="menu" l:aria-label="home.yourAirPods" hidden ref={menu}
+      <span class="wp-devswitch wp-devswitch--static" ref={staticBox}>
+        <span class="wp-devswitch__name" ref={staticName} />
+      </span>
+      <div
+        class="wp-menu"
+        role="menu"
+        l:aria-label="home.yourAirPods"
+        hidden
+        ref={menu}
         onkeydown={(e) => {
           let next: number | null = null;
-          if (e.key === 'ArrowDown') {
+          if (e.key === "ArrowDown") {
             next = focusAt + 1;
-          } else if (e.key === 'ArrowUp') {
+          } else if (e.key === "ArrowUp") {
             next = focusAt - 1;
-          } else if (e.key === 'Home') {
+          } else if (e.key === "Home") {
             next = 0;
-          } else if (e.key === 'End') {
+          } else if (e.key === "End") {
             next = items.length;
-          } else if (e.key === 'Tab') {
+          } else if (e.key === "Tab") {
             close(false);
-          } else if (e.key === 'Escape') {
+          } else if (e.key === "Escape") {
             e.preventDefault();
             e.stopPropagation();
             close(true);
@@ -181,17 +206,24 @@ export const createDeviceMenu = (o: { onPick: (id: DeviceId) => void; onPair: ()
             e.preventDefault();
             focusItem(next);
           }
-        }}>
+        }}
+      >
         <div class="wp-menu__label" l:text="home.yourAirPods" ref={label} />
         <div class="wp-menu__sep" role="separator" />
-        <button type="button" class="wp-menu__item wp-menu__item--compact" role="menuitem" tabindex="-1" ref={pair}
+        <button
+          type="button"
+          class="wp-menu__item wp-menu__item--compact"
+          role="menuitem"
+          tabindex="-1"
+          ref={pair}
           onfocus={() => {
             focusAt = items.length;
           }}
           onclick={() => {
             close(false);
             o.onPair();
-          }}>
+          }}
+        >
           <Icon name="plus" class="wp-menu__glyph" />
           <span class="wp-menu__title" l:text="menu.pairNew" />
           <Icon name="external" class="wp-menu__ext" />
@@ -200,7 +232,7 @@ export const createDeviceMenu = (o: { onPick: (id: DeviceId) => void; onPair: ()
     </div>
   ) as HTMLDivElement;
 
-  document.addEventListener('pointerdown', (e) => {
+  document.addEventListener("pointerdown", (e) => {
     if (open && !el.contains(e.target as Node)) {
       close(false);
     }

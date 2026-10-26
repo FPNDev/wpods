@@ -4,23 +4,6 @@ using Timer = System.Threading.Timer;
 
 namespace WPods.Audio;
 
-/// <summary>
-/// Automatic ear detection pause/resume on the host (Round 21 rules, Apple texts: support.apple.com 108764, AirPods
-/// User Guide, iPhone User Guide iOS 14 "If you return one to your ear within 15 seconds, play resumes
-/// automatically"), driven by the number of buds in ear:
-/// - fewer buds in ear (2 -> 1, 1 -> 0, 2 -> 0): pause EVERY playing Windows media session (wpn_media_pause_all; the
-///   native helper remembers exactly those sessions);
-/// - more buds in ear while sessions are remembered: resume them (2 -> 1 -> 2 has no time limit);
-/// - in-ear count reaches 0 while sessions are remembered: one 15 s timer starts; a bud back in ear before it fires
-///   resumes, otherwise the sessions are forgotten;
-/// - never Play on a removal; resume only plays sessions that are still paused while nothing else plays, and the
-///   helper forgets them by itself when the user plays one or another app starts playing.
-/// Acts only while the attached pair's Ear detection setting is on and the AirPods are the default Windows render
-/// endpoint (wpn_audio_is_default_output); a resume skipped for that reason forgets. Detach, a session change and
-/// turning Ear detection off forget too. The media calls are synchronous WinRT calls, so the work runs on one
-/// thread-pool worker at a time; the latest in-ear count wins (collapsing quick changes gives the same end state).
-/// Create before <see cref="ConnectionManager.Start"/>.
-/// </summary>
 public sealed partial class EarPause
 {
     private const int Unknown = -1;
