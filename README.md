@@ -147,21 +147,8 @@ For the app:
 
 Every model shows battery. Features show only when your model supports them.
 
-| Model                 | Ear detection | Noise control | Adaptive | Conversation awareness | Personalized Volume | Press controls | Hearing Aid | Heart rate |
-| --------------------- | ------------- | ------------- | -------- | ---------------------- | ------------------- | -------------- | ----------- | ---------- |
-| AirPods (1st gen)     | Yes           | No            | No       | No                     | No                  | No             | No          | No         |
-| AirPods (2nd gen)     | Yes           | No            | No       | No                     | No                  | No             | No          | No         |
-| AirPods (3rd gen)     | Yes           | No            | No       | No                     | No                  | Yes            | No          | No         |
-| AirPods 4             | Yes           | No            | No       | No                     | Yes                 | Yes            | No          | No         |
-| AirPods 4 (ANC)       | Yes           | Yes           | Yes      | Yes                    | Yes                 | Yes            | No          | No         |
-| AirPods 5             | Yes           | Yes           | Yes      | Yes                    | Yes                 | Yes            | No          | No         |
-| AirPods Pro (1st gen) | Yes           | Yes           | No       | No                     | No                  | Yes            | No          | No         |
-| AirPods Pro 2         | Yes           | Yes           | Yes      | Yes                    | Yes                 | Yes            | Yes         | No         |
-| AirPods Pro 3         | Yes           | Yes           | Yes      | Yes                    | Yes                 | Yes            | Yes         | Yes        |
-| AirPods Max (1st gen) | Yes           | Yes           | No       | No                     | No                  | Yes            | No          | No         |
-| AirPods Max 2         | Yes           | Yes           | Yes      | Yes                    | Yes                 | Yes            | No          | No         |
+Supports AirPods (1st, 2nd and 3rd gen), AirPods 4 and 4 (ANC), AirPods 5, AirPods Pro (1st gen), Pro 2 and Pro 3, and AirPods Max (1st gen) and Max 2.
 
-- **Press controls** means press speed, press-and-hold duration and tone volume (on AirPods Max: the controls they support).
 - "Noise cancellation with one AirPod" works on AirPods 4 (ANC), AirPods 5 and all AirPods Pro.
 - "Allow 'Off' in listening modes" works on AirPods Pro 2 and AirPods Pro 3.
 - AirPods (1st gen) and AirPods (2nd gen) also support the microphone side setting.
