@@ -22,8 +22,6 @@ def main():
     graph = model.graph
     bins = graph.input[0].type.tensor_type.shape.dim[2].dim_value
     grus = [n for n in graph.node if n.op_type == "GRU"]
-    state_inputs = []
-    state_outputs = []
     for i, gru in enumerate(grus):
         hidden = next(a.i for a in gru.attribute if a.name == "hidden_size")
         name_in, name_out = f"h{i}_in", f"h{i}_out"
@@ -34,16 +32,14 @@ def main():
                 if value == old:
                     node.input[k] = name_out
         gru.output[1] = name_out
-        state_inputs.append(helper.make_tensor_value_info(name_in, TensorProto.FLOAT, [1, 1, hidden]))
-        state_outputs.append(helper.make_tensor_value_info(name_out, TensorProto.FLOAT, [1, 1, hidden]))
+        graph.input.append(helper.make_tensor_value_info(name_in, TensorProto.FLOAT, [1, 1, hidden]))
+        graph.output.append(helper.make_tensor_value_info(name_out, TensorProto.FLOAT, [1, 1, hidden]))
 
     for value in (graph.input[0], graph.output[0]):
         dims = value.type.tensor_type.shape.dim
         del dims[:]
         for size in (1, 1, bins):
             dims.add().dim_value = size
-    graph.input.extend(state_inputs)
-    graph.output.extend(state_outputs)
 
     # Drop nodes whose outputs nothing uses any more (the zero-state builders).
     while True:

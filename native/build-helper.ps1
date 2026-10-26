@@ -1,6 +1,7 @@
 # Builds wpods_native.dll (x64, MSVC /O2 /guard:cf, C++/WinRT from Windows SDK 10.0.28000.0, hybrid CRT: static vcruntime + system UCRT).
 # Output: .build\native\bin\wpods_native.dll (import lib: .build\native\obj\helper\wpods_native.lib)
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot\common.ps1"
 
 $Sdk = '10.0.28000.0'
 
@@ -20,15 +21,7 @@ if (-not (Test-Path "$cppwinrt\winrt\base.h")) {
 }
 
 # MSVC x64 environment, pinned to the SDK above.
-$vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vs) {
-    throw 'MSVC x64 toolset not found'
-}
-foreach ($line in (cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" $Sdk >nul 2>nul && set")) {
-    if ($line -match '^([^=]+)=(.*)$') {
-        Set-Item "env:$($Matches[1])" $Matches[2]
-    }
-}
+Import-Msvc $Sdk
 
 cl /nologo /c /std:c++20 /permissive- /W4 /WX /O2 /EHsc /MT /Gy /Gw /guard:cf /Brepro /DNOMINMAX /DWINRT_NO_SOURCE_LOCATION `
     "/I$cppwinrt" "/Fo$obj\" "$src\wpods_native.cpp"

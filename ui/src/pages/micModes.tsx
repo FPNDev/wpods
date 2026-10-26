@@ -1,4 +1,4 @@
-import { createChoiceList } from "../components/choiceList";
+import { Choice, createChoiceList } from "../components/choiceList";
 import { Note } from "../components/common";
 import { WeightMeter } from "../components/weightMeter";
 import { setText } from "../dom";
@@ -6,7 +6,7 @@ import { post } from "../host";
 import { bindText, labelsVersion, t } from "../i18n";
 import type { MicMode, MicOption } from "../protocol";
 import { applyMicConfig, current, effectiveMode, live, store } from "../state";
-import { Choice, createCheck, createLoading, type Mark } from "./enhancement";
+import { createCheck, createLoading, type Mark } from "./enhancement";
 import type { Ctx, Page } from "./page";
 
 type Hint = { el: HTMLSpanElement; option: MicOption };
@@ -15,10 +15,11 @@ type ModelGroup = { rows: Map<string, HTMLButtonElement>; check: Mark };
 const MODES: MicMode[] = ["standard", "voiceIsolation", "wideSpectrum"];
 const MODE_MIN = 1;
 const RAW = "raw";
+// MMAC/s from which the hint shows GMAC/s.
+const GMAC = 1000;
 
 export const createMicModes = (ctx: Ctx): Page => {
   const modes = createChoiceList<MicMode>({
-    role: "checkbox",
     items: [
       { value: "standard", label: "mic.standard" },
       { value: "voiceIsolation", label: "mic.voiceIsolation" },
@@ -93,6 +94,7 @@ export const createMicModes = (ctx: Ctx): Page => {
       let row: HTMLButtonElement;
       if (option.id === RAW) {
         row = Choice(
+          "radio",
           bindText("mic.raw"),
           pick,
           (
@@ -103,6 +105,7 @@ export const createMicModes = (ctx: Ctx): Page => {
         const hint = (<span />) as HTMLSpanElement;
         hints.push({ el: hint, option });
         row = Choice(
+          "radio",
           option.name,
           pick,
           (
@@ -126,11 +129,20 @@ export const createMicModes = (ctx: Ctx): Page => {
     for (const { el: hint, option } of hints) {
       const delay = format.format(option.latencyMs);
       const threads = option.threads;
+      const mmacs = option.mmacs;
+      let compute: string;
+      if (mmacs === 0) {
+        compute = t("mic.computeDsp");
+      } else if (mmacs >= GMAC) {
+        compute = `${format.format(mmacs / GMAC)} GMAC/s`;
+      } else {
+        compute = `${format.format(mmacs)} MMAC/s`;
+      }
       setText(
         hint,
         threads > 1
-          ? t("mic.usageThreads", { threads, delay })
-          : t("mic.usage", { delay }),
+          ? t("mic.usageThreads", { threads, compute, delay })
+          : t("mic.usage", { compute, delay }),
       );
     }
   };

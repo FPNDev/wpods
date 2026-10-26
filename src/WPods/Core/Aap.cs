@@ -63,13 +63,13 @@ internal static class Aap
         (modes & ~(StemModes.Off | StemModes.NoiseCancellation | StemModes.Transparency | StemModes.Adaptive)) == 0
         && BitOperations.PopCount((uint)modes) >= 2;
 
-    public static byte[] Setting(byte id, byte value) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, id, value, 0x00, 0x00, 0x00];
+    public static byte[] Setting(byte id, byte value, byte extra = 0x00) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, id, value, extra, 0x00, 0x00];
 
     /// <summary>0x1F: byte 8 = 0x50, as AirPods Pro 2 report it (live: 09 00 1F 50 50 00 00).</summary>
-    public static byte[] ToneVolume(byte volume) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, ToneVolumeId, volume, 0x50, 0x00, 0x00];
+    public static byte[] ToneVolume(byte volume) => Setting(ToneVolumeId, volume, 0x50);
 
     /// <summary>0x2C: byte 7 = enrolled (always 01 when sent), byte 8 = enabled.</summary>
-    public static byte[] HearingAid(bool on) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, HearingAidId, 0x01, Bool(on), 0x00, 0x00];
+    public static byte[] HearingAid(bool on) => Setting(HearingAidId, 0x01, Bool(on));
 
     public static byte[] HeartRateStream(byte sequence, byte service, uint periodUs) =>
     [
@@ -160,11 +160,10 @@ internal static class Aap
                 encKey = key;
             }
         }
-        if (irk.IsEmpty || encKey.IsEmpty)
+        if (!irk.IsEmpty && !encKey.IsEmpty)
         {
-            return true;
+            keys = new ProximityKeys(irk.ToArray(), encKey.ToArray());
         }
-        keys = new ProximityKeys(irk.ToArray(), encKey.ToArray());
         return true;
     }
 

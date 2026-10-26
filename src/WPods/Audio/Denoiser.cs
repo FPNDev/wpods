@@ -17,7 +17,6 @@ internal sealed unsafe partial class Denoiser : IDisposable
         _state = rnnoise_create(null);
         if (_state is null)
         {
-            Dispose();
             throw new InvalidOperationException("RNNoise could not be initialized.");
         }
     }

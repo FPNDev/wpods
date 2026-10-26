@@ -46,6 +46,15 @@ export const setDisabled = (
   }
 };
 
+export const createAnnouncer = (el: Element): ((text: string) => void) => {
+  let frame = 0;
+  return (text) => {
+    cancelAnimationFrame(frame);
+    setText(el, "");
+    frame = requestAnimationFrame(() => setText(el, text));
+  };
+};
+
 export const createFrame = (render: () => void): (() => void) => {
   let scheduled = false;
   const frame = (): void => {

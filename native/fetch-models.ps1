@@ -5,6 +5,7 @@
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
 $ProgressPreference = 'SilentlyContinue'
+. "$PSScriptRoot\common.ps1"
 
 $OrtVersion = '1.31.0'
 $OrtUrl = "https://github.com/microsoft/onnxruntime/releases/download/v$OrtVersion/onnxruntime-win-x64-$OrtVersion.zip"
@@ -33,31 +34,12 @@ $bin = "$root\bin"
 $modelDir = "$bin\models"
 New-Item -ItemType Directory -Force $dl, $bin, $modelDir | Out-Null
 
-# Downloads url to path unless path already has the expected hash.
-function Get-Pinned([string]$Url, [string]$Path, [string]$Sha256) {
-    if ((Test-Path $Path) -and (Get-FileHash $Path -Algorithm SHA256).Hash -eq $Sha256) {
-        return
-    }
-    Invoke-WebRequest $Url -OutFile $Path
-    $hash = (Get-FileHash $Path -Algorithm SHA256).Hash
-    if ($hash -ne $Sha256) {
-        Remove-Item $Path
-        throw "SHA-256 mismatch for $Url`: got $hash, expected $Sha256"
-    }
-}
-
 $archive = "$dl\onnxruntime-win-x64-$OrtVersion.zip"
 Get-Pinned $OrtUrl $archive $OrtSha256
-$src = "$root\src\onnxruntime"
-if (Test-Path $src) {
-    Remove-Item -Recurse -Force $src
-}
-New-Item -ItemType Directory $src | Out-Null
-& "$env:SystemRoot\System32\tar.exe" -xf $archive -C $src "onnxruntime-win-x64-$OrtVersion/lib/onnxruntime.dll"
+& "$env:SystemRoot\System32\tar.exe" -xf $archive -C $bin --strip-components 2 "onnxruntime-win-x64-$OrtVersion/lib/onnxruntime.dll"
 if ($LASTEXITCODE) {
     throw 'tar failed'
 }
-Copy-Item "$src\onnxruntime-win-x64-$OrtVersion\lib\onnxruntime.dll" "$bin\onnxruntime.dll" -Force
 Write-Host "Fetched $bin\onnxruntime.dll ($((Get-Item "$bin\onnxruntime.dll").Length) bytes)"
 
 foreach ($name in $Models.Keys) {

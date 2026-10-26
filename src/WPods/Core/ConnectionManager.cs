@@ -22,12 +22,12 @@ public enum IdleReason
 }
 
 /// <summary>
-/// A paired AirPods device for the device list. <see cref="ModelName"/> comes from <see cref="Models"/>;
-/// <see cref="Capabilities"/> is the live set while attached, else every capability any attach reported plus the
-/// model baseline. <see cref="StemModes"/> is the stored stem press-and-hold cycle (written on every attach).
+/// A paired AirPods device for the device list. <see cref="Capabilities"/> is the live set while attached, else every
+/// capability any attach reported plus the model baseline. <see cref="StemModes"/> is the stored stem press-and-hold
+/// cycle (written on every attach).
 /// </summary>
 public sealed record KnownDevice(
-    ulong Address, string Name, string? ModelNumber, string? ModelName, bool LinkUp, bool HasKeys, bool Attached, DeviceCapabilities Capabilities,
+    ulong Address, string Name, string? ModelNumber, bool LinkUp, bool HasKeys, bool Attached, DeviceCapabilities Capabilities,
     IdleReason Idle, StemModes StemModes);
 
 /// <summary>
@@ -103,9 +103,6 @@ public sealed class ConnectionManager : IAsyncDisposable
     /// <summary>The result of <see cref="GetDevices"/> changed (pairing, link, attach, identity, keys, <see cref="KnownDevice.Idle"/>).</summary>
     public event Action? DevicesChanged;
 
-    /// <summary>Opening NTAPD failed with a Win32 error other than 1167 (e.g. 32: another app holds the channel).</summary>
-    public event Action<ulong, int>? AttachFailed;
-
     /// <summary>Applying the Hands-Free policy on attach failed.</summary>
     public event Action<ulong, Exception>? HandsFreeFailed;
 
@@ -129,13 +126,12 @@ public sealed class ConnectionManager : IAsyncDisposable
         {
             bool attached = session?.Address == device.Address;
             string? modelNumber = (attached ? session!.State.ModelNumber : null) ?? Settings.GetModel(device.Address)?.Number;
-            AirPodsModel? model = modelNumber is null ? null : Models.FromModelNumber(modelNumber) ?? Models.Unknown;
             string name = attached ? session!.State.Name ?? device.Name : device.Name;
             DeviceCapabilities capabilities = attached
                 ? session!.State.Capabilities
-                : Settings.GetCapabilities(device.Address) | (model?.Capabilities ?? DeviceCapabilities.None);
+                : Settings.GetCapabilities(device.Address) | (Models.FromModelNumber(modelNumber)?.Capabilities ?? DeviceCapabilities.None);
             list.Add(new KnownDevice(
-                device.Address, name, modelNumber, model?.Name, device.Up, Settings.HasKeys(device.Address), attached, capabilities,
+                device.Address, name, modelNumber, device.Up, Settings.HasKeys(device.Address), attached, capabilities,
                 attached ? IdleReason.None : GetIdle(device.Address), Settings.GetStemModes(device.Address)));
         }
         return list;
@@ -629,11 +625,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         {
             handle.Dispose();
             Log.Warn("conn", $"attach {Mac.Format(address)} ({reason}): open failed, Win32 error {error}, linkUp={_link.IsUp(address)}");
-            if (error != Native.ErrorDeviceNotConnected)
-            {
-                AttachFailed?.Invoke(address, error);
-            }
-            else
+            if (error == Native.ErrorDeviceNotConnected)
             {
                 // The driver sees no ACL: correct a stale "up" so the next real link-up raises an event again.
                 _link.Recheck(address);

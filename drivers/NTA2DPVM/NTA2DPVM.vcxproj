@@ -25,7 +25,6 @@
   <PropertyGroup>
     <OutDir>$(ProjectDir)..\..\.build\drivers\out\NTA2DPVM\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)..\..\.build\drivers\obj\NTA2DPVM\$(Configuration)\</IntDir>
-    <TargetName>NTA2DPVM</TargetName>
     <SignMode>Off</SignMode>
   </PropertyGroup>
   <ItemDefinitionGroup>

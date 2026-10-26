@@ -1,6 +1,6 @@
 import { applyCommon } from "./common";
 import { createToast } from "./components/toast";
-import { createFrame, setHidden, setText } from "./dom";
+import { createAnnouncer, createFrame, setHidden, setText } from "./dom";
 import { listen, post } from "./host";
 import { t, type LabelKey } from "./i18n";
 import { Glyph, Icon } from "./icons";
@@ -78,7 +78,6 @@ let pageTitle!: HTMLSpanElement;
 let appTitle!: HTMLDivElement;
 let body!: HTMLDivElement;
 let announce!: HTMLDivElement;
-let announceFrame = 0;
 const toast = createToast((action) => {
   if (action === "openSettings") {
     post({ type: "openBluetoothSettings" });
@@ -144,6 +143,7 @@ const shell = (
   </div>
 );
 document.body.append(shell);
+const announcer = createAnnouncer(announce);
 
 const pageOf = (name: PageName): Built => {
   let b = built.get(name);
@@ -210,9 +210,7 @@ const render = (): void => {
   if (store.announce) {
     const text = store.announce;
     store.announce = "";
-    cancelAnimationFrame(announceFrame);
-    setText(announce, "");
-    announceFrame = requestAnimationFrame(() => setText(announce, text));
+    announcer(text);
   }
   if (store.toast) {
     toast.show(store.toast, store.toastCode);

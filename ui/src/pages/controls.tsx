@@ -101,7 +101,6 @@ export const createControls = (ctx: Ctx): Page => {
      own cycle order. */
   const stemChecked = new Set<StemMode>();
   const stem = createChoiceList<StemMode>({
-    role: "checkbox",
     items: [
       { value: "off", label: "nc.off" },
       { value: "transparency", label: "nc.transparency" },
@@ -277,7 +276,7 @@ export const createControls = (ctx: Ctx): Page => {
     for (const m of modes) {
       stemChecked.add(m);
     }
-    stem.lock(locked, null);
+    stem.lock(locked);
     for (const m of STEM_ORDER) {
       stem.set(m, stemChecked.has(m));
     }
@@ -293,7 +292,7 @@ export const createControls = (ctx: Ctx): Page => {
   ): void => {
     setHidden(r.row, !shown);
     r.busy.set(checking, notReady);
-    r.seg.lock(locked, null);
+    r.seg.lock(locked);
     r.seg.set(value);
   };
 

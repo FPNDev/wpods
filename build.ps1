@@ -96,7 +96,7 @@ $publish = Join-Path $build 'publish'
 if (Test-Path $publish) {
     Remove-Item $publish -Recurse -Force
 }
-dotnet publish (Join-Path $root 'src\WPods\WPods.csproj') -c Release -r win-x64 -o $publish -p:Version=$Version
+dotnet publish (Join-Path $root 'src\WPods\WPods.csproj') -c Release -o $publish -p:Version=$Version
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed ($LASTEXITCODE)"
 }

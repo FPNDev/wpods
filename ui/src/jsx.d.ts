@@ -21,9 +21,7 @@ type HtmlAttrs<E> = Handlers<HTMLElementEventMap> &
     max?: string;
     step?: string;
     tabindex?: string;
-    lang?: string;
     hidden?: true;
-    disabled?: true;
     [aria: `aria-${string}`]: string;
   };
 
@@ -31,15 +29,27 @@ type SvgAttrs<E> = {
   ref?: E;
   class?: string;
   viewBox?: string;
-  role?: string;
   "aria-hidden"?: string;
   cx?: string;
   cy?: string;
   r?: string;
+  rx?: string;
+  ry?: string;
+  x?: string;
+  y?: string;
+  x1?: string;
+  y1?: string;
+  x2?: string;
+  y2?: string;
+  width?: string;
+  height?: string;
+  d?: string;
+  points?: string;
+  transform?: string;
   "stroke-dasharray"?: string;
 };
 
-type SvgTag = "svg" | "circle";
+type SvgTag = "svg" | "g" | "path" | "circle" | "ellipse" | "rect" | "line" | "polyline" | "polygon";
 
 declare global {
   namespace JSX {

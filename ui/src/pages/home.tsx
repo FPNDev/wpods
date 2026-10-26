@@ -5,7 +5,14 @@ import { createBusy, NavRow, Note } from "../components/common";
 import { createDeviceMenu } from "../components/deviceMenu";
 import { createSegmented } from "../components/segmented";
 import { createSwitchRow, type SwitchRow } from "../components/switchRow";
-import { setAttr, setClass, setDisabled, setHidden, setText } from "../dom";
+import {
+  setAttr,
+  setChecked,
+  setClass,
+  setDisabled,
+  setHidden,
+  setText,
+} from "../dom";
 import { post } from "../host";
 import { t, type LabelKey } from "../i18n";
 import { Art, Icon, Spinner } from "../icons";
@@ -606,11 +613,6 @@ export const createHome = (ctx: Ctx): Page => {
     }
     const mic = store.mic;
     setAttr(chip, "data-state", mic);
-    setAttr(
-      chip,
-      "class",
-      `wp-chip${mic === "live" ? " wp-chip--live" : mic === "problem" ? " wp-chip--problem" : ""}`,
-    );
     setText(chipLabel, t(`mic.status.${mic}`));
     setText(micDesc, t(`mic.desc.${mic}`));
     const st = live(d);
@@ -623,14 +625,14 @@ export const createHome = (ctx: Ctx): Page => {
     ] as const) {
       micMode.showItem(mode, enabled.has(mode));
     }
-    micMode.lock(!st, null);
+    micMode.lock(!st);
     micMode.set(effectiveMode(d.host.micMode));
     const loading = !!st && store.micLoading.mode !== null;
     setClass(micModeSpin, "is-busy", loading);
     setAttr(micMode.el, "aria-busy", loading ? "true" : null);
     setText(toEnhancement.desc, enhancementName(store.micConfig.enhancement));
     setHidden(micSideRow, !capsOf(d).has("micSide"));
-    micSide.lock(!st || !st.ready, null);
+    micSide.lock(!st || !st.ready);
     micSide.set((st ? st.micSide : d.saved.micSide) ?? "automatic");
   };
 
@@ -677,9 +679,7 @@ export const createHome = (ctx: Ctx): Page => {
         ),
       );
       f.busy?.set(checking, notReady || (def.key === "hearingAid" && checking));
-      if (f.input.checked !== (!reason && !!value)) {
-        f.input.checked = !reason && !!value;
-      }
+      setChecked(f.input, !reason && !!value);
       setDisabled(f.input, !st || reason || (!f.busy && notReady));
       setAttr(f.input, "aria-describedby", st && reason ? f.desc.id : null);
     }

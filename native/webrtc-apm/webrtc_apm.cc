@@ -5,10 +5,6 @@
 
 namespace {
 
-struct Apm {
-  rtc::scoped_refptr<webrtc::AudioProcessing> apm;
-};
-
 // Every stream: 48 kHz mono.
 const webrtc::StreamConfig kStream(48000, 1);
 
@@ -37,7 +33,7 @@ extern "C" __declspec(dllexport) void* wapm_create(int noise_level, int high_pas
   }
   apm->ApplyConfig(config);
   initialize(*apm);
-  return new Apm{apm};
+  return apm.release();
 }
 
 // AGC2 only (noise suppression off): adaptive != 0 enables the adaptive digital controller with the given
@@ -66,15 +62,17 @@ extern "C" __declspec(dllexport) void* wapm_create_agc2(int high_pass, int adapt
     return nullptr;
   }
   initialize(*apm);
-  return new Apm{apm};
+  return apm.release();
 }
 
 // frame: 480 samples, 48 kHz mono, -1..1, processed in place. Returns 0 on success (webrtc::AudioProcessing::kNoError).
 extern "C" __declspec(dllexport) int wapm_process(void* state, float* frame) {
   float* channels[1] = {frame};
-  return static_cast<Apm*>(state)->apm->ProcessStream(channels, kStream, kStream, channels);
+  return static_cast<webrtc::AudioProcessing*>(state)->ProcessStream(channels, kStream, kStream, channels);
 }
 
 extern "C" __declspec(dllexport) void wapm_destroy(void* state) {
-  delete static_cast<Apm*>(state);
+  if (state) {
+    static_cast<webrtc::AudioProcessing*>(state)->Release();
+  }
 }

@@ -13,24 +13,18 @@ namespace WPods.Audio.Enhance;
 internal static class VoiceEnhancements
 {
     // Without leveller.
-    public static IMicStage CleanEq() => new MicChain(CleanEqFilters(), new Gain(0.5f));
+    public static IMicStage CleanEq() => new MicChain(
+        new Equalizer(Hp(80f), Peak(275f, 1f, -3f), Peak(3500f, 0.9f, 2.5f)), new Gain(0.5f));
 
     // With leveller: the target puts speech at the loudness of Off; a trailing make-up gain restores what the
     // compressor after it takes off (raising the target instead would only push the compressor harder).
-    public static IMicStage AppleLike() => new MicChain(
+    public static IMicStage AppleInspired() => new MicChain(
         new Equalizer(Hp(90f), Peak(300f, 1f, -2f), Peak(3000f, 0.7f, 2f), HighShelf(10000f, 1.5f)),
-        new Leveller(LevellerTargetDb),
-        new DeEsser(DeEsserThresholdDb),
-        new Compressor(CompressorThresholdDb, 2.5f, 8f, 5f, 150f, makeUpDb: 0f),
-        new Expander(ExpanderThresholdDb - 3f, 2f, -10f),
+        new Leveller(targetDb: -23.6f),
+        new DeEsser(thresholdDb: -42f),
+        new Compressor(thresholdDb: -28f, 2.5f, 8f, 5f, 150f),
+        new Expander(thresholdDb: -48f, 2f, -10f),
         new Gain(3.9f));
-
-    private const float LevellerTargetDb = -23.6f;
-    private const float CompressorThresholdDb = -28f;
-    private const float DeEsserThresholdDb = -42f;
-    private const float ExpanderThresholdDb = -45f;
-
-    private static Equalizer CleanEqFilters() => new(Hp(80f), Peak(275f, 1f, -3f), Peak(3500f, 0.9f, 2.5f));
 
     private static Biquad Hp(float hz) => Biquad.HighPass(Level.SampleRate, hz, 0.7071f);
 

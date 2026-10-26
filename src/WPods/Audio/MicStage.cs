@@ -8,4 +8,8 @@ namespace WPods.Audio;
 internal interface IMicStage : IDisposable
 {
     void Process(Span<float> frame);
+
+    void IDisposable.Dispose()
+    {
+    }
 }

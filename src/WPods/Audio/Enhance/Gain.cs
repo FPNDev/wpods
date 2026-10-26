@@ -17,8 +17,4 @@ internal sealed class Gain : IMicStage
             frame[i] *= _gain;
         }
     }
-
-    public void Dispose()
-    {
-    }
 }

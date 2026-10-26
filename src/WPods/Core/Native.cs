@@ -7,10 +7,8 @@ namespace WPods.Core;
 internal static unsafe partial class Native
 {
     public const int ErrorSuccess = 0;
-    public const int ErrorSharingViolation = 32;
     public const int ErrorInvalidParameter = 87;
     public const int ErrorMoreData = 234;
-    public const int ErrorNoMoreItems = 259;
     public const int ErrorServiceDoesNotExist = 1060;
     public const int ErrorDeviceNotConnected = 1167;
     public const int ErrorNotFound = 1168;

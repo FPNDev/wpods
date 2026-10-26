@@ -9,6 +9,7 @@
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
 $ProgressPreference = 'SilentlyContinue'
+. "$PSScriptRoot\common.ps1"
 
 $Version = '2.1'
 $Url = "https://freedesktop.org/software/pulseaudio/webrtc-audio-processing/webrtc-audio-processing-$Version.tar.xz"
@@ -26,14 +27,7 @@ $venv = "$root\meson-venv"
 New-Item -ItemType Directory -Force $dl, $bin | Out-Null
 
 $archive = "$dl\webrtc-audio-processing-$Version.tar.xz"
-if (-not (Test-Path $archive) -or (Get-FileHash $archive -Algorithm SHA256).Hash -ne $Sha256) {
-    Invoke-WebRequest $Url -OutFile $archive
-    $hash = (Get-FileHash $archive -Algorithm SHA256).Hash
-    if ($hash -ne $Sha256) {
-        Remove-Item $archive
-        throw "SHA-256 mismatch for $Url`: got $hash, expected $Sha256"
-    }
-}
+Get-Pinned $Url $archive $Sha256
 
 # meson + ninja in a private venv.
 if (-not (Test-Path "$venv\Scripts\meson.exe") -or (& "$venv\Scripts\meson.exe" --version) -ne $MesonVersion) {
@@ -53,12 +47,7 @@ if (-not (Test-Path "$venv\Scripts\meson.exe") -or (& "$venv\Scripts\meson.exe" 
 }
 $env:PATH = "$venv\Scripts;$env:PATH"
 
-foreach ($dir in $src, $obj) {
-    if (Test-Path $dir) {
-        Remove-Item -Recurse -Force $dir
-    }
-    New-Item -ItemType Directory $dir | Out-Null
-}
+Reset-Dir $src, $obj
 & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $src
 if ($LASTEXITCODE) {
     throw 'tar failed'
@@ -66,15 +55,7 @@ if ($LASTEXITCODE) {
 $s = "$src\webrtc-audio-processing-$Version"
 
 # MSVC x64 environment.
-$vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vs) {
-    throw 'MSVC x64 toolset not found'
-}
-foreach ($line in (cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul 2>nul && set")) {
-    if ($line -match '^([^=]+)=(.*)$') {
-        Set-Item "env:$($Matches[1])" $Matches[2]
-    }
-}
+Import-Msvc
 
 # Static libraries, release (/O2), static vcruntime (/MT). C++20 instead of upstream's C++17 for the main project:
 # current MSVC rejects the C++20 designated initializers in agc2 code under /std:c++17 (error C7555); abseil keeps

@@ -1,7 +1,7 @@
 /* UI build: type-check (tsc --noEmit), then bundle with esbuild into src/WPods/web (generated, not committed).
    .tsx goes through our JSX -> DOM transform (tools/jsx-dom.mjs) first. Fails (exit 1) on any error. */
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { copyFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -26,7 +26,6 @@ if (tsc.status !== 0) {
 }
 
 await rm(out, { recursive: true, force: true });
-await mkdir(out, { recursive: true });
 const result = await build({
   entryPoints: {
     main: path.join(src, "main.tsx"),

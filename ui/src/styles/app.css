@@ -14,10 +14,6 @@ body {
 .wp-window {
   width: 100%;
   height: 100%;
-  min-height: 0;
-  max-height: none;
-  border-radius: 0;
-  box-shadow: none;
 }
 .wp-titlebar {
   user-select: none;
@@ -109,9 +105,6 @@ span.wp-menu__glyph {
   align-items: center;
   gap: var(--space-2);
 }
-.wp-disclaimer > h2 {
-  margin: 0;
-}
 
 .wp-legal-foot {
   text-align: center;
@@ -121,7 +114,6 @@ span.wp-menu__glyph {
   border: 0;
   padding: 0;
   background: none;
-  font: inherit;
   color: var(--accent-text);
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -138,12 +130,6 @@ span.wp-menu__glyph {
   pointer-events: auto;
 }
 
-.wp-popup--window {
-  width: 100%;
-  box-sizing: border-box;
-  border-radius: 0;
-  box-shadow: none;
-}
 .wp-popup__view {
   display: contents;
 }
@@ -211,9 +197,6 @@ span.wp-menu__glyph {
 .wp-slider__input:focus-visible:active::-webkit-slider-thumb {
   transform: scale(0.9);
 }
-.wp-search__input:focus-visible {
-  border-color: var(--border-strong);
-}
 .wp-list > :not([hidden]):not(:not([hidden]) ~ *) {
   border-top-left-radius: var(--radius-lg);
   border-top-right-radius: var(--radius-lg);
@@ -221,12 +204,6 @@ span.wp-menu__glyph {
 .wp-list > :not([hidden]):not(:has(~ :not([hidden]))) {
   border-bottom-left-radius: var(--radius-lg);
   border-bottom-right-radius: var(--radius-lg);
-}
-.wp-menu__item:focus-visible {
-  outline-offset: calc(var(--focus-w) * -1);
-}
-.wp-seg__input:focus-visible + .wp-seg__face {
-  outline-offset: calc(var(--focus-w) * -1);
 }
 
 .wp-seg__label {
@@ -250,9 +227,10 @@ span.wp-menu__glyph {
   color: var(--text-disabled);
 }
 
-/* Busy pod-saved controls (aria-disabled, not disabled, so keyboard focus stays): the disabled look of bundle.css and
-   no hover or pressed change; a keyboard-focused one still shows the focus ring. The switch track rules also cover
-   :disabled, so a disabled checked switch keeps its disabled look under the pointer too. */
+/* Disabled look of disabled and busy pod-saved controls (busy ones use aria-disabled, not disabled, so keyboard focus
+   stays): no hover or pressed change; a keyboard-focused one still shows the focus ring. A disabled checked switch
+   keeps its disabled look under the pointer too. The switch cursor and thumb rules for both states are in
+   bundle.css. */
 .wp-switch
   .wp-switch__input:is(:disabled, [aria-disabled="true"])
   + .wp-switch__track {
@@ -265,45 +243,41 @@ span.wp-menu__glyph {
   background: var(--accent-disabled);
   box-shadow: inset 0 0 0 1px var(--accent-disabled);
 }
-.wp-switch:has(.wp-switch__input[aria-disabled="true"]) {
-  cursor: not-allowed;
-}
-.wp-switch:has(.wp-switch__input[aria-disabled="true"]):active
-  .wp-switch__thumb {
-  transform: none;
-}
-.wp-switch:has(.wp-switch__input[aria-disabled="true"]:checked):active
-  .wp-switch__thumb {
-  transform: translateX(calc(16px * var(--wp-dir, 1)));
-}
-.wp-seg__item > .wp-seg__input[aria-disabled="true"] + .wp-seg__face {
+.wp-seg__item
+  > .wp-seg__input:is(:disabled, [aria-disabled="true"])
+  + .wp-seg__face {
   color: var(--text-disabled);
   background: transparent;
   box-shadow: none;
 }
-.wp-seg__item > .wp-seg__input[aria-disabled="true"]:checked + .wp-seg__face {
+.wp-seg__item
+  > .wp-seg__input:is(:disabled, [aria-disabled="true"]):checked
+  + .wp-seg__face {
   background: var(--fill-segment);
   box-shadow: var(--shadow-segment);
   color: var(--text-disabled);
 }
-.wp-seg__input[aria-disabled="true"] + .wp-seg__face .wp-seg__disc {
+.wp-seg__input:is(:disabled, [aria-disabled="true"])
+  + .wp-seg__face
+  .wp-seg__disc {
   background: var(--fill-control);
   color: var(--text-disabled);
 }
-.wp-seg__item:has(.wp-seg__input[aria-disabled="true"]) {
+.wp-seg__item:has(.wp-seg__input:is(:disabled, [aria-disabled="true"])) {
   cursor: not-allowed;
 }
-.wp-slider__input[aria-disabled="true"] {
+.wp-slider__input:is(:disabled, [aria-disabled="true"]) {
   cursor: not-allowed;
 }
-.wp-slider__input[aria-disabled="true"]::-webkit-slider-runnable-track {
+.wp-slider__input:is(:disabled, [aria-disabled="true"])::-webkit-slider-runnable-track {
   background: linear-gradient(
     to right,
     var(--text-disabled) var(--v),
     var(--fill-sunken) var(--v)
   );
 }
-.wp-slider .wp-slider__input[aria-disabled="true"]::-webkit-slider-thumb {
+.wp-slider
+  .wp-slider__input:is(:disabled, [aria-disabled="true"])::-webkit-slider-thumb {
   transform: none;
 }
 .wp-busy:not(.is-busy) {
@@ -337,8 +311,4 @@ span.wp-menu__glyph {
 }
 .wp-meter__bar.is-on {
   background: var(--text-secondary);
-}
-.wp-meter--unmeasured > .wp-meter__bar {
-  background: transparent;
-  border: 1px dashed var(--text-tertiary);
 }

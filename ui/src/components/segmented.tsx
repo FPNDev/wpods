@@ -9,7 +9,7 @@ export type Segmented<V extends string> = {
   el: HTMLFieldSetElement;
   set: (value: V | null) => void;
   lockItem: (value: V, disabled: boolean, describedBy: string | null) => void;
-  lock: (disabled: boolean, describedBy: string | null) => void;
+  lock: (disabled: boolean) => void;
   showItem: (value: V, shown: boolean) => void;
 };
 
@@ -90,9 +90,9 @@ export const createSegmented = <V extends string>(o: {
       }
     },
     lockItem,
-    lock: (disabled, describedBy) => {
+    lock: (disabled) => {
       for (const value of inputs.keys()) {
-        lockItem(value, disabled, describedBy);
+        lockItem(value, disabled, null);
       }
     },
     showItem: (value, shown) => {

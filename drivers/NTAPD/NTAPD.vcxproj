@@ -25,7 +25,6 @@
   <PropertyGroup>
     <OutDir>$(ProjectDir)..\..\.build\drivers\out\NTAPD\$(Configuration)\</OutDir>
     <IntDir>$(ProjectDir)..\..\.build\drivers\obj\NTAPD\$(Configuration)\</IntDir>
-    <TargetName>NTAPD</TargetName>
     <SignMode>Off</SignMode>
   </PropertyGroup>
   <ItemDefinitionGroup>

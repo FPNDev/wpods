@@ -9,7 +9,6 @@ type ToastAction = "reconnect" | "tryAgain" | "openSettings";
 type Toast = {
   el: HTMLDivElement;
   show: (id: ToastId, code: string | null) => void;
-  hide: () => void;
   relabel: () => void;
 };
 
@@ -47,7 +46,7 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
   };
   const el = (
     <div
-      class="wp-toast wp-toast--error"
+      class="wp-toast"
       role="alert"
       hidden
       onpointerenter={pause}
@@ -111,7 +110,6 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
       setHidden(el, false);
       arm();
     },
-    hide,
     relabel,
   };
 };

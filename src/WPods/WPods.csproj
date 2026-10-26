@@ -4,11 +4,8 @@
     <OutputType>WinExe</OutputType>
     <UseWindowsForms>true</UseWindowsForms>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>WPods</AssemblyName>
-    <RootNamespace>WPods</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\WPods.ico</ApplicationIcon>
-    <SelfContained>false</SelfContained>
     <PublishReadyToRun>true</PublishReadyToRun>
     <!-- DPI awareness is declared in app.manifest (process-wide, before any code) and also set via SetHighDpiMode. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>

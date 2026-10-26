@@ -22,7 +22,7 @@ internal enum HighBand
 /// </summary>
 internal sealed class BandSplit16k
 {
-    public const int FrameSize = 480;
+    private const int FrameSize = Denoiser.FrameSize;
     public const int Block = FrameSize / Resampler.Factor;
 
     private const int RoundTrip = Downsampler48To16.LatencySamples * Resampler.Factor + Upsampler16To48.LatencySamples;

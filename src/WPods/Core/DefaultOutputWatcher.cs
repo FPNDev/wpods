@@ -26,7 +26,7 @@ public sealed partial class DefaultOutputWatcher : IDisposable
 
     private readonly ConnectionManager _connections;
     private readonly Lock _lock = new();
-    // Set by the constructor, cleared by Dispose (same thread).
+    // Set by the constructor.
     private unsafe void* _enumerator;
     private unsafe void* _client;
     // Under _lock.
@@ -77,8 +77,6 @@ public sealed partial class DefaultOutputWatcher : IDisposable
         int hr = ((delegate* unmanaged<void*, void*, int>)Slot(_enumerator, 7))(_enumerator, _client);
         ComInterfaceMarshaller<IMMNotificationClient>.Free(_client);
         Release(_enumerator);
-        _client = null;
-        _enumerator = null;
         Log.Info("follow", $"stopped, unregister 0x{hr:X8}");
     }
 

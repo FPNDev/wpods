@@ -110,11 +110,7 @@ internal sealed class Localization
         {
             return english;
         }
-        foreach (string code in _files.Keys)
-        {
-            return code;
-        }
-        throw new InvalidOperationException("No locales loaded.");
+        return _files.Keys.First();
     }
 
     private string? FirstWithLanguage(string language)

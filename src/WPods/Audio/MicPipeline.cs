@@ -110,8 +110,8 @@ public sealed class MicPipeline
     {
         _connections = connections;
         _settings = connections.Settings;
-        _model = new StageSlot("mode model", (id, load, code) => ReportLocked(MicSlot.Mode, id, load, code));
-        _enhancement = new StageSlot("enhancement", (id, load, code) => ReportLocked(MicSlot.Enhancement, id, load, code));
+        _model = new StageSlot("mode model", _lock, (id, load, code) => ReportLocked(MicSlot.Mode, id, load, code));
+        _enhancement = new StageSlot("enhancement", _lock, (id, load, code) => ReportLocked(MicSlot.Enhancement, id, load, code));
         _timer = new Timer(static s => ((MicPipeline)s!).OnTimer(), this, Timeout.Infinite, Timeout.Infinite);
         _mic = new VirtualMic(OnCaptureChanged);
         connections.Attached += OnAttached;
@@ -389,8 +389,6 @@ public sealed class MicPipeline
         {
             // Problem (M1) until the next session, which retries.
             Log.Error("mic", "decoder init failed", e);
-            _decoder?.Dispose();
-            _decoder = null;
             lock (_lock)
             {
                 _nativeFailed = true;
@@ -510,8 +508,8 @@ public sealed class MicPipeline
     private void RequestStagesLocked(MicConfig config)
     {
         MicMode mode = config.EffectiveMode(_mode);
-        _model.RequestLocked(MicCatalog.FindModel(mode, config.Models[mode]), _lock);
-        _enhancement.RequestLocked(config.Enhancement is { } id ? MicCatalog.FindEnhancement(id) : null, _lock);
+        _model.RequestLocked(MicCatalog.FindModel(mode, config.Models[mode]));
+        _enhancement.RequestLocked(config.Enhancement is { } id ? MicCatalog.FindEnhancement(id) : null);
     }
 
     private void ReportLocked(MicSlot slot, string? id, StageLoad load, string? code) => StageChanged?.Invoke(_session?.Address ?? 0, slot, id, load, code);
@@ -610,7 +608,7 @@ public sealed class MicPipeline
     /// request is reported (loading, then ready or failed; a stale creation reports nothing) under the pipeline lock.
     /// The *Locked methods run under the pipeline lock; TakeSwap on the read loop (ResetLocked after it ended).
     /// </summary>
-    private sealed class StageSlot(string kind, Action<string?, StageLoad, string?> report)
+    private sealed class StageSlot(string kind, Lock gate, Action<string?, StageLoad, string?> report)
     {
         // Under the pipeline lock.
         private string? _requested;
@@ -628,7 +626,7 @@ public sealed class MicPipeline
         /// Starts creating the stage for <paramref name="option"/> (null = none; "raw" has no stage) unless it is
         /// already requested.
         /// </summary>
-        public void RequestLocked(MicOption? option, Lock gate)
+        public void RequestLocked(MicOption? option)
         {
             string? id = option?.Id;
             if (id == _requested)
@@ -645,7 +643,7 @@ public sealed class MicPipeline
             }
             Log.Info("mic", $"{kind} {id} loading");
             report(id, StageLoad.Loading, null);
-            _ = Task.Run(() => Create(option, generation, gate));
+            _ = Task.Run(() => Create(option, generation));
         }
 
         /// <summary>Detach (read loop ended): disposes the active and pending stages, drops creations in flight.</summary>
@@ -703,7 +701,7 @@ public sealed class MicPipeline
             }
         }
 
-        private void Create(MicOption option, int generation, Lock gate)
+        private void Create(MicOption option, int generation)
         {
             IMicStage stage;
             long start = Environment.TickCount64;

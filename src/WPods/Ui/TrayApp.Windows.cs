@@ -282,15 +282,9 @@ internal sealed partial class TrayApp
     {
         Array.Clear(_lastSent);
         PostVisibility(pane, true);
-        SendDevices();
-        Utf8JsonWriter w = _writer.Begin("state");
-        MessageWriter.WriteState(w, _session?.State);
-        PostMain(_writer.End());
-        w = _writer.Begin("mic");
-        w.WriteString("status", MessageWriter.Camel(_micStatus));
-        SendMain(Sent.Mic, _writer.End(), force: false);
+        SendMainDeltas(Dirty.Devices | Dirty.Session | Dirty.Mic, _session?.State);
         SendStartupPref();
-        w = _writer.Begin("accent");
+        Utf8JsonWriter w = _writer.Begin("accent");
         MessageWriter.WriteAccent(w, _accent);
         PostMain(_writer.End());
         w = _writer.Begin("micConfig");
@@ -313,12 +307,9 @@ internal sealed partial class TrayApp
             return session.Address;
         }
         ulong last = _connections.LastUsed;
-        foreach (KnownDevice device in _devices)
+        if (_devices.Exists(d => d.Address == last))
         {
-            if (device.Address == last)
-            {
-                return last;
-            }
+            return last;
         }
         return _devices.Count > 0 ? _devices[0].Address : null;
     }
@@ -368,7 +359,7 @@ internal sealed partial class TrayApp
         }
         if (!_popupParked)
         {
-            window.Pane.Post(OffersMessage("offers"));
+            window.Pane.Post(OffersMessage());
             return;
         }
         Log.Info("ui", $"popup: reuse ({_offers.Count} offers)");
@@ -397,7 +388,7 @@ internal sealed partial class TrayApp
         }
         Log.Info("ui", "popup: park");
         HidePopup();
-        window.Pane.Post(OffersMessage("offers"));
+        window.Pane.Post(OffersMessage());
         _popupParked = true;
         _popupSuspendPending = true;
         _popupTimer.Interval = (int)SuspendAfter.TotalMilliseconds;
@@ -542,9 +533,9 @@ internal sealed partial class TrayApp
         _popup!.Pane.Post(_writer.End());
     }
 
-    private string OffersMessage(string type)
+    private string OffersMessage()
     {
-        Utf8JsonWriter w = _writer.Begin(type);
+        Utf8JsonWriter w = _writer.Begin("offers");
         WriteOffers(w);
         return _writer.End();
     }

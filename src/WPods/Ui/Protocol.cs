@@ -149,15 +149,16 @@ internal sealed class MessageWriter
     /// Every device-side setting except the listening mode (fields of the "settings" message). Ear detection, mic
     /// side and allow off are per-host values (stored, set from attach on); the others are pod-saved, see <see cref="Shown"/>.
     /// </summary>
-    public static void WriteSettingFields(Utf8JsonWriter w, DeviceState s)
+    public static void WriteSettingFields(Utf8JsonWriter w, DeviceState s) => WriteSettingFields(w, Shown(s), s.EarDetection, s.AllowOff, s.MicSide);
+
+    private static void WriteSettingFields(Utf8JsonWriter w, PodSettings pod, bool? earDetection, bool? allowOff, MicSide? micSide)
     {
-        PodSettings pod = Shown(s);
-        WriteBool(w, "earDetection", s.EarDetection);
+        WriteBool(w, "earDetection", earDetection);
         WriteBool(w, "conversationAwareness", pod.ConversationAwareness);
         WriteBool(w, "personalizedVolume", pod.PersonalizedVolume);
         WriteBool(w, "oneBudAnc", pod.OneBudAnc);
-        WriteBool(w, "allowOff", s.AllowOff);
-        WriteEnum(w, "micSide", s.MicSide);
+        WriteBool(w, "allowOff", allowOff);
+        WriteEnum(w, "micSide", micSide);
         WriteEnum(w, "pressSpeed", pod.PressSpeed);
         WriteEnum(w, "holdDuration", pod.HoldDuration);
         WriteNumber(w, "toneVolume", pod.ToneVolume);
@@ -235,6 +236,7 @@ internal sealed class MessageWriter
             w.WriteString("name", option.Name);
             w.WriteString("weight", option.Weight);
             w.WriteNumber("threads", option.Threads);
+            w.WriteNumber("mmacs", option.Mmacs);
             w.WriteNumber("latencyMs", option.LatencyMs);
             w.WriteEndObject();
         }
@@ -300,17 +302,7 @@ internal sealed class MessageWriter
         w.WriteEndArray();
         w.WriteStartObject("saved");
         WriteEnum(w, "listeningMode", saved.ListeningMode);
-        w.WriteBoolean("earDetection", earDetection);
-        WriteBool(w, "conversationAwareness", saved.ConversationAwareness);
-        WriteBool(w, "personalizedVolume", saved.PersonalizedVolume);
-        WriteBool(w, "oneBudAnc", saved.OneBudAnc);
-        w.WriteBoolean("allowOff", allowOff);
-        w.WriteString("micSide", Camel(micSide));
-        WriteEnum(w, "pressSpeed", saved.PressSpeed);
-        WriteEnum(w, "holdDuration", saved.HoldDuration);
-        WriteNumber(w, "toneVolume", saved.ToneVolume);
-        WriteBool(w, "hearingAidEnrolled", saved.HearingAidEnrolled);
-        w.WriteBoolean("hearingAidEnabled", saved.HearingAidEnabled);
+        WriteSettingFields(w, saved, earDetection, allowOff, micSide);
         w.WriteEndObject();
         w.WriteEndObject();
     }

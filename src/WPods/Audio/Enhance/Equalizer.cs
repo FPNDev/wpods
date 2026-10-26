@@ -3,24 +3,13 @@ using WPods.Audio.Dsp;
 namespace WPods.Audio.Enhance;
 
 /// <summary>Static EQ: a cascade of biquads (high-pass, shelves, peaks) applied in order. IIR, no latency.</summary>
-internal sealed class Equalizer : IMicStage
+internal sealed class Equalizer(params Biquad[] filters) : IMicStage
 {
-    private readonly Biquad[] _filters;
-
-    public Equalizer(params Biquad[] filters)
-    {
-        _filters = filters;
-    }
-
     public void Process(Span<float> frame)
     {
-        foreach (Biquad filter in _filters)
+        foreach (Biquad filter in filters)
         {
             filter.Process(frame);
         }
-    }
-
-    public void Dispose()
-    {
     }
 }

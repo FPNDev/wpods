@@ -196,9 +196,6 @@ void FreePackets(PACX_RTPACKET Packets, ULONG Count)
 {
     for (ULONG i = 0; i < Count; i++) {
         PMDL mdl = Packets[i].RtPacketBuffer.u.MdlType.Mdl;
-        if (mdl == nullptr) {
-            continue;
-        }
         if ((mdl->MdlFlags & MDL_MAPPED_TO_SYSTEM_VA) != 0) {
             MmUnmapLockedPages(mdl->MappedSystemVa, mdl);
         }

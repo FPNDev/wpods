@@ -13,7 +13,7 @@ namespace WPods.Audio.Onnx;
 /// </summary>
 internal sealed unsafe partial class OnnxModel : IDisposable
 {
-    public const string ModelFolder = "models";
+    private const string ModelFolder = "models";
 
     private const uint ApiVersion = 20;
     private const int LoggingLevelWarning = 2;

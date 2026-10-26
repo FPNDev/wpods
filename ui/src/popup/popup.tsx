@@ -1,7 +1,13 @@
 /* Nearby popup entry (NearbyPopup component). Protocol: scratchpad ui-protocol.md (v2), section 4.
    Never focuses itself; the host focuses the window on Win+Shift+A and sends `focus`. */
 import { applyCommon } from "../common";
-import { createFrame, setAttr, setHidden, setText } from "../dom";
+import {
+  createAnnouncer,
+  createFrame,
+  setAttr,
+  setHidden,
+  setText,
+} from "../dom";
 import { listen, post } from "../host";
 import { t } from "../i18n";
 import { Icon } from "../icons";
@@ -56,9 +62,8 @@ let failed!: HTMLDivElement;
 let retry!: HTMLButtonElement;
 let close!: HTMLButtonElement;
 let announce!: HTMLDivElement;
-let announceFrame = 0;
 const root = (
-  <div class="wp-popup wp-popup--window" role="dialog" hidden ref={card}>
+  <div class="wp-popup" role="dialog" hidden ref={card}>
     {offerView.el}
     {list.el}
     <div class="wp-popup__view" hidden ref={done}>
@@ -112,6 +117,7 @@ const root = (
   </div>
 );
 document.body.append(root);
+const announcer = createAnnouncer(announce);
 
 const setOffers = (next: Offer[]): void => {
   offers = next;
@@ -152,9 +158,7 @@ const render = (): void => {
   if (announceText) {
     const text = announceText;
     announceText = "";
-    cancelAnimationFrame(announceFrame);
-    setText(announce, "");
-    announceFrame = requestAnimationFrame(() => setText(announce, text));
+    announcer(text);
   }
   if (view === "multi") {
     list.render(offers);

@@ -1,18 +1,11 @@
 namespace WPods.Audio;
 
 /// <summary>Runs stages in order on each frame; disposes them all.</summary>
-internal sealed class MicChain : IMicStage
+internal sealed class MicChain(params IMicStage[] stages) : IMicStage
 {
-    private readonly IMicStage[] _stages;
-
-    public MicChain(params IMicStage[] stages)
-    {
-        _stages = stages;
-    }
-
     public void Process(Span<float> frame)
     {
-        foreach (IMicStage stage in _stages)
+        foreach (IMicStage stage in stages)
         {
             stage.Process(frame);
         }
@@ -20,7 +13,7 @@ internal sealed class MicChain : IMicStage
 
     public void Dispose()
     {
-        foreach (IMicStage stage in _stages)
+        foreach (IMicStage stage in stages)
         {
             stage.Dispose();
         }

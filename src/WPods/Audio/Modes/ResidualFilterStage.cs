@@ -20,12 +20,12 @@ internal sealed class ResidualFilterStage : IMicStage
     private const float NoiseRisePerHop = 1.0116f; // 10^(5 dB/s * 0.01 s / 10)
     private const float PowerFloor = 1e-12f;
     private const float SilenceLevel = 1e-6f; // about -120 dBFS
+    private const float Oversubtraction = 2f;
+    private const float GainSmoothing = 0.7f;
+    private static readonly float Floor = MathF.Pow(10f, -20f / 20f);
 
     private readonly IMicStage? _model;
     private readonly int _modelLatency;
-    private readonly float _oversubtraction;
-    private readonly float _floor;
-    private readonly float _gainSmoothing;
     private readonly Stft _output = new(FftSize, Hop);
     private readonly Stft _reference = new(FftSize, Hop);
     private readonly float[] _delay;
@@ -38,16 +38,10 @@ internal sealed class ResidualFilterStage : IMicStage
 
     /// <param name="model">Stage to post-filter (owned, disposed with this one); null = filter the input itself.</param>
     /// <param name="modelLatencySamples">Input-to-output delay of <paramref name="model"/> in samples.</param>
-    /// <param name="oversubtraction">a in the gain rule (1.5..2).</param>
-    /// <param name="floorDb">Lowest gain in dB.</param>
-    /// <param name="gainSmoothing">Weight of the previous gain per hop (0.6..0.8).</param>
-    public ResidualFilterStage(IMicStage? model = null, int modelLatencySamples = 0, float oversubtraction = 2f, float floorDb = -20f, float gainSmoothing = 0.7f)
+    public ResidualFilterStage(IMicStage? model = null, int modelLatencySamples = 0)
     {
         _model = model;
-        _modelLatency = model is null ? 0 : modelLatencySamples;
-        _oversubtraction = oversubtraction;
-        _floor = MathF.Pow(10f, floorDb / 20f);
-        _gainSmoothing = gainSmoothing;
+        _modelLatency = modelLatencySamples;
         _delay = new float[_modelLatency + Hop];
         _outputSpectrum = new float[2 * _output.Bins];
         _referenceSpectrum = new float[2 * _output.Bins];
@@ -113,8 +107,8 @@ internal sealed class ResidualFilterStage : IMicStage
             float power = _started ? PowerSmoothing * _power[k] + (1f - PowerSmoothing) * p : p;
             _power[k] = power;
             _noise[k] = _started ? MathF.Min(power, _noise[k] * NoiseRisePerHop) : power;
-            float gain = MathF.Max(1f - _oversubtraction * _noise[k] / p, _floor);
-            _gain[k] = _gainSmoothing * _gain[k] + (1f - _gainSmoothing) * gain;
+            float gain = MathF.Max(1f - Oversubtraction * _noise[k] / p, Floor);
+            _gain[k] = GainSmoothing * _gain[k] + (1f - GainSmoothing) * gain;
         }
         _started = true;
     }

@@ -359,17 +359,7 @@ internal sealed partial class TrayApp
         }
     }
 
-    private KnownDevice? Find(ulong address)
-    {
-        foreach (KnownDevice device in _connections.GetDevices())
-        {
-            if (device.Address == address)
-            {
-                return device;
-            }
-        }
-        return null;
-    }
+    private KnownDevice? Find(ulong address) => _connections.GetDevices().Find(d => d.Address == address);
 
     // ---- Device commands: success shows through the core's Changed event; failure sends the current value back ----
 
@@ -579,7 +569,6 @@ internal sealed partial class TrayApp
         SendStartupPref();
     }
 
-    // "" = Same as Windows. The main window restarts (after this message handler returns) with the new labels.
     // "" = Same as Windows. Applied live: both pages relabel in place; the tray and notifications read the labels on use.
     private void SetLanguage(string code)
     {

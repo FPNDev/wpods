@@ -76,10 +76,7 @@ internal static class Log
         {
             Pending.WaitOne();
             Thread.Sleep(WriteIntervalMs);
-            if (!Queue.IsEmpty)
-            {
-                Flush();
-            }
+            Flush();
         }
     }
 
@@ -91,15 +88,16 @@ internal static class Log
             return;
         }
         StreamWriter? writer = Open();
+        if (writer is null)
+        {
+            Queue.Clear();
+            return;
+        }
         Span<char> time = stackalloc char[32];
         try
         {
             while (Queue.TryDequeue(out Entry entry))
             {
-                if (writer is null)
-                {
-                    continue;
-                }
                 DateTime local = new DateTime(entry.UtcTicks, DateTimeKind.Utc).ToLocalTime();
                 local.TryFormat(time, out int length, "yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
                 writer.Write(time[..length]);
@@ -118,10 +116,6 @@ internal static class Log
                 writer.Write(": ");
                 writer.Write(entry.Message);
                 writer.Write('\n');
-            }
-            if (writer is null)
-            {
-                return;
             }
             writer.Flush();
             if (writer.BaseStream.Length > MaxBytes)

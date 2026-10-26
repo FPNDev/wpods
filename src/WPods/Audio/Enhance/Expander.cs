@@ -8,10 +8,6 @@ namespace WPods.Audio.Enhance;
 /// </summary>
 internal sealed class Expander : IMicStage
 {
-    // dB of a power from its log2 (10 * log10(2)); log2 of a gain from its dB (log2(10) / 20).
-    private const float PowerDbPerLog2 = 3.01029996f;
-    private const float Log2PerDb = 0.166096404f;
-
     private readonly float _thresholdDb;
     private readonly float _ratioMinusOne;
     private readonly float _floorDb;
@@ -48,7 +44,7 @@ internal sealed class Expander : IMicStage
             else
             {
                 // Holding at or above the envelope power means the level in dB is at or above the envelope (attack).
-                float levelDb = PowerDbPerLog2 * MathF.Log2(power);
+                float levelDb = Level.PowerDbPerLog2 * MathF.Log2(power);
                 if (levelDb >= _envelopeDb)
                 {
                     _envelopeDb = levelDb;
@@ -63,12 +59,8 @@ internal sealed class Expander : IMicStage
             float underDb = _envelopeDb - _thresholdDb;
             if (underDb < 0f)
             {
-                frame[i] = x * float.Exp2(MathF.Max(underDb * _ratioMinusOne, _floorDb) * Log2PerDb);
+                frame[i] = x * float.Exp2(MathF.Max(underDb * _ratioMinusOne, _floorDb) * Level.Log2PerDb);
             }
         }
-    }
-
-    public void Dispose()
-    {
     }
 }

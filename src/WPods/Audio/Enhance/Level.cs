@@ -5,6 +5,10 @@ internal static class Level
 {
     public const float SampleRate = 48000f;
 
+    // dB of a power from its log2 (10 * log10(2)); log2 of a gain from its dB (log2(10) / 20).
+    public const float PowerDbPerLog2 = 3.01029996f;
+    public const float Log2PerDb = 0.166096404f;
+
     public static float DbToGain(float db) => MathF.Pow(10f, db / 20f);
 
     /// <summary>Power (mean square) to dBFS, floored at -120 dBFS.</summary>

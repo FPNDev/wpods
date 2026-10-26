@@ -1,8 +1,9 @@
-import { setAttr, setHidden, setText } from "../dom";
+import { setHidden, setText } from "../dom";
 import { post } from "../host";
 import { t } from "../i18n";
 import { Icon } from "../icons";
 import { store } from "../state";
+import { createCheck } from "./enhancement";
 import type { Ctx, Page } from "./page";
 
 type Row = { el: HTMLButtonElement; hay: string };
@@ -15,7 +16,7 @@ export const createLanguage = (ctx: Ctx): Page => {
   let none!: HTMLParagraphElement;
   const rows: Row[] = [];
   const byCode = new Map<string, HTMLButtonElement>();
-  let checked: HTMLButtonElement | null = null;
+  const check = createCheck();
 
   const pick = (code: string): void => {
     if (code !== store.language) {
@@ -128,17 +129,9 @@ export const createLanguage = (ctx: Ctx): Page => {
     el,
     sections: {
       langs: () => {
-        const next =
-          store.language === "" ? auto : (byCode.get(store.language) ?? null);
-        if (next !== checked) {
-          if (checked) {
-            setAttr(checked, "aria-checked", "false");
-          }
-          if (next) {
-            setAttr(next, "aria-checked", "true");
-          }
-          checked = next;
-        }
+        check(
+          store.language === "" ? auto : (byCode.get(store.language) ?? null),
+        );
         if (!none.hidden) {
           filter();
         }

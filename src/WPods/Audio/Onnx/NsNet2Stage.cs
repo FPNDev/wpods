@@ -10,9 +10,8 @@ namespace WPods.Audio.Onnx;
 /// </summary>
 internal sealed class NsNet2Stage : IMicStage
 {
-    public const string File48k = "nsnet2_48k.onnx";
+    private const string File48k = "nsnet2_48k.onnx";
 
-    private const int FrameSize48k = 480;
     private const float MinGain = 1e-4f;
     private const float MinPower = 1e-12f;
 
@@ -22,19 +21,18 @@ internal sealed class NsNet2Stage : IMicStage
     private readonly float[] _block;
     private readonly float[] _spectrum;
 
-    /// <param name="fileName"><see cref="File48k"/>.</param>
-    public NsNet2Stage(string fileName)
+    public NsNet2Stage()
     {
-        _model = new OnnxModel(fileName);
+        _model = new OnnxModel(File48k);
         _stft = new Stft(1024, 512, StftWindow.SqrtHann, 960);
         if (_model.Input.Length != _stft.Bins || _model.Output.Length != _stft.Bins)
         {
             _model.Dispose();
-            throw new InvalidOperationException($"{fileName}: gain tensors are not {_stft.Bins} bins.");
+            throw new InvalidOperationException($"{File48k}: gain tensors are not {_stft.Bins} bins.");
         }
         _block = new float[_stft.Hop];
         _spectrum = new float[2 * _stft.Bins];
-        _fifo = new FrameFifo(FrameSize48k, _stft.Hop);
+        _fifo = new FrameFifo(Denoiser.FrameSize, _stft.Hop);
     }
 
     public void Process(Span<float> frame)

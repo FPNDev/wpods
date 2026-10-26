@@ -10,10 +10,6 @@ namespace WPods.Audio.Enhance;
 /// </summary>
 internal sealed class DeEsser : IMicStage
 {
-    // dB of a power from its log2 (10 * log10(2)); log2 of a gain from its dB (log2(10) / 20).
-    private const float PowerDbPerLog2 = 3.01029996f;
-    private const float Log2PerDb = 0.166096404f;
-
     private readonly Biquad _split = Biquad.LowPass(Level.SampleRate, 5000f, 0.7071f);
     private readonly Biquad _sideHighPass = Biquad.HighPass(Level.SampleRate, 5000f, 0.7071f);
     private readonly Biquad _sideLowPass = Biquad.LowPass(Level.SampleRate, 9000f, 0.7071f);
@@ -53,16 +49,12 @@ internal sealed class DeEsser : IMicStage
             {
                 continue;
             }
-            float overDb = PowerDbPerLog2 * MathF.Log2(_envelope * _envelope + 1e-12f) - _thresholdDb;
+            float overDb = Level.PowerDbPerLog2 * MathF.Log2(_envelope * _envelope + 1e-12f) - _thresholdDb;
             if (overDb > 0f)
             {
-                float gain = float.Exp2(-MathF.Min(overDb * _slope, _maxReductionDb) * Log2PerDb);
+                float gain = float.Exp2(-MathF.Min(overDb * _slope, _maxReductionDb) * Level.Log2PerDb);
                 frame[i] = low[i] + (frame[i] - low[i]) * gain;
             }
         }
-    }
-
-    public void Dispose()
-    {
     }
 }

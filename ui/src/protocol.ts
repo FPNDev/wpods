@@ -40,12 +40,13 @@ type HostSettings = {
 };
 export type MicSlot = "mode" | "enhancement";
 type StageLoad = "loading" | "ready" | "failed";
-export type Weight = "light" | "medium" | "heavy" | "veryHeavy" | "notMeasured";
+export type Weight = "light" | "medium" | "heavy" | "veryHeavy";
 export type MicOption = {
   id: string;
   name: string;
   weight: Weight;
   threads: number;
+  mmacs: number;
   latencyMs: number;
 };
 export type MicCatalog = {

@@ -7,6 +7,7 @@
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
 $ProgressPreference = 'SilentlyContinue'
+. "$PSScriptRoot\common.ps1"
 
 $Tag = 'v0.5.6'
 $Commit = '978576aa8400552a4ce9730838c635aa30db5e61'
@@ -38,19 +39,9 @@ if ($LASTEXITCODE) {
 }
 
 $archive = "$dl\DeepFilterNet-$Commit.tar.gz"
-if (-not (Test-Path $archive) -or (Get-FileHash $archive -Algorithm SHA256).Hash -ne $Sha256) {
-    Invoke-WebRequest $Url -OutFile $archive
-    $hash = (Get-FileHash $archive -Algorithm SHA256).Hash
-    if ($hash -ne $Sha256) {
-        Remove-Item $archive
-        throw "SHA-256 mismatch for $Url`: got $hash, expected $Sha256"
-    }
-}
+Get-Pinned $Url $archive $Sha256
 
-if (Test-Path $src) {
-    Remove-Item -Recurse -Force $src
-}
-New-Item -ItemType Directory $src | Out-Null
+Reset-Dir $src
 # The only symlink in the tree (Python package README) cannot be created without privileges and is not needed.
 & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $src --exclude "DeepFilterNet-$Commit/DeepFilterNet/README.md"
 if ($LASTEXITCODE) {

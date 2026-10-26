@@ -54,15 +54,13 @@ internal sealed class HostWindow : NativeWindow, IDisposable
         switch (m.Msg)
         {
             case NativeUi.WmSettingChange when m.WParam == SpiSetWorkArea:
+            case NativeUi.WmDisplayChange:
+            case NativeUi.WmDpiChanged:
                 _displayChanged();
                 break;
             case NativeUi.WmSettingChange when m.LParam != 0 && Marshal.PtrToStringUni(m.LParam) == "ImmersiveColorSet":
             case NativeUi.WmDwmColorizationColorChanged:
                 _colorsChanged();
-                break;
-            case NativeUi.WmDisplayChange:
-            case NativeUi.WmDpiChanged:
-                _displayChanged();
                 break;
             case NativeUi.WmHotKey when m.WParam == HotKeyId:
                 _hotKey();

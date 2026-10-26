@@ -30,8 +30,7 @@ internal sealed class DpdfNetStage : IMicStage
             {
                 throw new InvalidOperationException($"{fileName}: unsupported sample rate {rate}.");
             }
-            int hop = rate / 100;
-            _stft = new Stft(2 * hop, hop, StftWindow.Vorbis);
+            _stft = new Stft(2 * Denoiser.FrameSize, Denoiser.FrameSize, StftWindow.Vorbis);
             if (_model.Input.Length != 2 * _stft.Bins)
             {
                 throw new InvalidOperationException($"{fileName}: spectrum input has {_model.Input.Length} floats, expected {2 * _stft.Bins}.");

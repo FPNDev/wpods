@@ -54,6 +54,7 @@ internal sealed partial class TrayApp : ApplicationContext
 
     private const int LowBatteryPercent = 10;
     private const char MiddleDot = (char)0xB7;
+    private static readonly string[] PartLabels = ["battery.left", "battery.right", "battery.case", "battery.max"];
 
     private readonly SettingsStore _settings;
     private readonly ConnectionManager _connections;
@@ -730,29 +731,10 @@ internal sealed partial class TrayApp : ApplicationContext
         }
     }
 
-    private bool IsMax(ulong address)
-    {
-        foreach (KnownDevice device in _devices)
-        {
-            if (device.Address == address)
-            {
-                return (Models.FromModelNumber(device.ModelNumber) ?? Models.Unknown).SingleBattery;
-            }
-        }
-        return false;
-    }
+    private bool IsMax(ulong address) =>
+        _devices.Find(d => d.Address == address) is { } device && (Models.FromModelNumber(device.ModelNumber) ?? Models.Unknown).SingleBattery;
 
-    private string DeviceName(ulong address)
-    {
-        foreach (KnownDevice device in _devices)
-        {
-            if (device.Address == address)
-            {
-                return device.Name;
-            }
-        }
-        return Text("app.name");
-    }
+    private string DeviceName(ulong address) => _devices.Find(d => d.Address == address)?.Name ?? Text("app.name");
 
     // Once per discharge per part: below 10% and not charging; re-armed at 10% or more, or while charging.
     private void CheckLowBattery(DeviceState state)
@@ -790,13 +772,7 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             return;
         }
-        string part = Text(lowest switch
-        {
-            0 => "battery.left",
-            1 => "battery.right",
-            2 => "battery.case",
-            _ => "battery.max",
-        });
+        string part = Text(PartLabels[lowest]);
         string text = Text("battery.low")
             .Replace("{name}", state.Name ?? DeviceName(_session!.Address), StringComparison.Ordinal)
             .Replace("{part}", part, StringComparison.Ordinal)
@@ -821,14 +797,8 @@ internal sealed partial class TrayApp : ApplicationContext
         }
         Log.Info("ui", "exit requested");
         _exiting = true;
-        _hideTimer.Stop();
         DestroyPopup();
-        if (_main is { } main)
-        {
-            _main = null;
-            main.Destroy();
-        }
-        _host.SetHotKey(false);
+        DestroyMain();
         await _mic.StopStreamAsync();
         await _connections.DisposeAsync();
         _ducker.Dispose();

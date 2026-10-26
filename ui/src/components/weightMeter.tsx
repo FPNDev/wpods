@@ -1,4 +1,4 @@
-/* Weight meter: 4 small bars, filled per weight (light 1 .. veryHeavy 4); notMeasured draws all 4 hollow (dashed).
+/* Weight meter: 4 small bars, filled per weight (light 1 .. veryHeavy 4).
    Its accessible label is the weight word. */
 import type { Weight } from "../protocol";
 
@@ -7,19 +7,12 @@ const FILLED: Record<Weight, number> = {
   medium: 2,
   heavy: 3,
   veryHeavy: 4,
-  notMeasured: 0,
 };
 const BARS = 4;
 
 export const WeightMeter = (weight: Weight): HTMLSpanElement => {
   const el = (
-    <span
-      class={
-        weight === "notMeasured" ? "wp-meter wp-meter--unmeasured" : "wp-meter"
-      }
-      role="img"
-      l:aria-label={`mic.weight.${weight}`}
-    />
+    <span class="wp-meter" role="img" l:aria-label={`mic.weight.${weight}`} />
   ) as HTMLSpanElement;
   for (let i = 0; i < BARS; i++) {
     el.append(

@@ -234,7 +234,7 @@ public sealed partial class EarPause
     {
         lock (_lock)
         {
-            if (generation != _timerGeneration || _timer is null)
+            if (generation != _timerGeneration)
             {
                 return;
             }

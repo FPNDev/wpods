@@ -28,11 +28,10 @@ internal sealed class Spectrum16kStage : IMicStage
     private readonly float[] _block;
 
     /// <param name="fileName"><see cref="GtcrnFile"/> or a <see cref="VdSpecFile"/> name.</param>
-    /// <param name="window">The STFT window the model was trained with.</param>
     /// <param name="highBand">8-24 kHz handling.</param>
-    public Spectrum16kStage(string fileName, StftWindow window, HighBand highBand = HighBand.GainTransfer)
+    public Spectrum16kStage(string fileName, HighBand highBand = HighBand.GainTransfer)
     {
-        _stft = new Stft(FftSize, Hop, window);
+        _stft = new Stft(FftSize, Hop);
         _fifo = new FrameFifo(BandSplit16k.Block, Hop);
         _block = new float[Hop];
         _model = new OnnxModel(fileName);

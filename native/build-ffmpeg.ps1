@@ -5,6 +5,7 @@
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
 $ProgressPreference = 'SilentlyContinue'
+. "$PSScriptRoot\common.ps1"
 
 $Version = '7.1.5'
 $Url = "https://ffmpeg.org/releases/ffmpeg-$Version.tar.xz"
@@ -31,28 +32,10 @@ if (-not (Test-Path $bash)) {
 }
 New-Item -ItemType Directory -Force $dl, $bin | Out-Null
 
-# Downloads url to path unless path already has the expected hash.
-function Get-Pinned([string]$Url, [string]$Path, [string]$Sha256) {
-    if ((Test-Path $Path) -and (Get-FileHash $Path -Algorithm SHA256).Hash -eq $Sha256) {
-        return
-    }
-    Invoke-WebRequest $Url -OutFile $Path
-    $hash = (Get-FileHash $Path -Algorithm SHA256).Hash
-    if ($hash -ne $Sha256) {
-        Remove-Item $Path
-        throw "SHA-256 mismatch for $Url`: got $hash, expected $Sha256"
-    }
-}
-
 $archive = "$dl\ffmpeg-$Version.tar.xz"
 Get-Pinned $Url $archive $Sha256
 
-foreach ($dir in $src, $obj, $prefix) {
-    if (Test-Path $dir) {
-        Remove-Item -Recurse -Force $dir
-    }
-    New-Item -ItemType Directory $dir | Out-Null
-}
+Reset-Dir $src, $obj, $prefix
 & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $src
 if ($LASTEXITCODE) {
     throw 'tar failed'
@@ -69,15 +52,7 @@ if ($LASTEXITCODE) {
 }
 
 # MSVC x64 environment, inherited by the MSYS2 shell.
-$vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-if (-not $vs) {
-    throw 'MSVC x64 toolset not found'
-}
-foreach ($line in (cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul 2>nul && set")) {
-    if ($line -match '^([^=]+)=(.*)$') {
-        Set-Item "env:$($Matches[1])" $Matches[2]
-    }
-}
+Import-Msvc
 $env:MSYS2_PATH_TYPE = 'inherit'
 
 $u = @(foreach ($p in "$PSScriptRoot\build-ffmpeg.sh", "$src\ffmpeg-$Version", $obj, $prefix) { & 'C:\msys64\usr\bin\cygpath.exe' -u $p })

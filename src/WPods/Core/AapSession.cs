@@ -57,7 +57,6 @@ public sealed class AapSession : IAsyncDisposable
     private readonly SemaphoreSlim _heartRateGate = new(1, 1);
     private readonly CancellationTokenSource _life = new();
     private readonly Lock _stateLock = new();
-    private CancellationTokenSource _writeTimeout = new();
     private TaskCompletionSource? _firstPacket;
     private TaskCompletionSource? _firstSetting;
     private TaskCompletionSource? _keysReply;
@@ -147,15 +146,9 @@ public sealed class AapSession : IAsyncDisposable
                 return false;
             }
             Log.Packet(outbound: true, packet.Span);
-            if (!_writeTimeout.TryReset())
-            {
-                _writeTimeout.Dispose();
-                _writeTimeout = new CancellationTokenSource();
-            }
-            _writeTimeout.CancelAfter(WriteTimeout);
-            using CancellationTokenRegistration caller = ct.UnsafeRegister(static s => ((CancellationTokenSource)s!).Cancel(), _writeTimeout);
-            using CancellationTokenRegistration life = _life.Token.UnsafeRegister(static s => ((CancellationTokenSource)s!).Cancel(), _writeTimeout);
-            await _stream.WriteAsync(packet, _writeTimeout.Token).ConfigureAwait(false);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct, _life.Token);
+            timeout.CancelAfter(WriteTimeout);
+            await _stream.WriteAsync(packet, timeout.Token).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -493,15 +486,11 @@ public sealed class AapSession : IAsyncDisposable
     {
         LogInbound(packet);
         PacketReceived?.Invoke(packet);
-        if (_firstPacket is { } first)
+        bool isSetting = Aap.IsSetting(packet);
+        _firstPacket?.TrySetResult();
+        if (isSetting)
         {
-            _firstPacket = null;
-            first.TrySetResult();
-        }
-        if (_firstSetting is { } setting && Aap.IsSetting(packet))
-        {
-            _firstSetting = null;
-            setting.TrySetResult();
+            _firstSetting?.TrySetResult();
         }
         if (Aap.TryParseKeys(packet, out ProximityKeys? keys))
         {
@@ -525,13 +514,13 @@ public sealed class AapSession : IAsyncDisposable
         {
             SaveCapabilities();
         }
-        if (Aap.IsSetting(packet) && packet[6] == Aap.EarDetectionId && packet[7] is 0x01 or 0x02)
+        if (isSetting && packet[6] == Aap.EarDetectionId && packet[7] is 0x01 or 0x02)
         {
             Log.Info("aap", $"device reports ear detection {(packet[7] == 0x01 ? "on" : "off")}; stored");
             SaveEarDetection(packet[7] == 0x01);
         }
         // Same for mic side (0x01): 00 Automatic, 01 Right, 02 Left.
-        if (Aap.IsSetting(packet) && packet[6] == Aap.MicSideId && packet[7] <= 0x02)
+        if (isSetting && packet[6] == Aap.MicSideId && packet[7] <= 0x02)
         {
             Log.Info("aap", $"device reports mic side {(MicSide)packet[7]}; stored");
             SaveMicSide((MicSide)packet[7]);
@@ -905,18 +894,7 @@ public sealed class AapSession : IAsyncDisposable
 
     private void SaveEarDetection(bool on) => QueueSave("ear detection", () => _settings.SetEarDetection(Address, on));
 
-    private void SaveAllowOff(bool on)
-    {
-        try
-        {
-            _settings.SetAllowOff(Address, on);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            // The device has it; the next attach writes the previously stored value again.
-            Log.Warn("aap", $"allow off not saved: {e.Message}");
-        }
-    }
+    private void SaveAllowOff(bool on) => QueueSave("allow off", () => _settings.SetAllowOff(Address, on));
 
     private void SaveMicSide(MicSide side) => QueueSave("mic side", () => _settings.SetMicSide(Address, side));
 

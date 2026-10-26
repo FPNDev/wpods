@@ -360,7 +360,7 @@ public sealed class NearbyService : IDisposable
             }
             if (pair is null)
             {
-                CountMiss();
+                CountAndLog(ref _misses, ref _missWindowStart, "matched no paired AirPods");
                 return;
             }
             // The resolved address never expires and bytes 5-8 are clear: an advert counts only when its encrypted
@@ -368,7 +368,7 @@ public sealed class NearbyService : IDisposable
             AirPodsModel model = pair.Offer?.Model ?? Models.FromProximityId(Proximity.ModelId(data)) ?? Models.FromModelNumber(pair.ModelNumber) ?? Models.Unknown;
             if (Proximity.ReadBatteries(data, pair.EncCipher, model.SingleBattery, pair.Offer?.Batteries ?? default) is not { } batteries)
             {
-                CountDrop();
+                CountAndLog(ref _drops, ref _dropWindowStart, "dropped (encrypted levels do not confirm the clear ones)");
                 return;
             }
             bool wasNearby = pair.Nearby;
@@ -385,14 +385,7 @@ public sealed class NearbyService : IDisposable
                 Publish();
             }
         }
-        if (changed)
-        {
-            OffersChanged?.Invoke();
-        }
-        if (nearbyChanged)
-        {
-            NearbyChanged?.Invoke();
-        }
+        Raise(changed, nearbyChanged);
         if (caseOpened != 0)
         {
             CaseOpened?.Invoke(caseOpened);
@@ -400,32 +393,17 @@ public sealed class NearbyService : IDisposable
     }
 
     // Under _lock.
-    private void CountMiss()
+    private static void CountAndLog(ref int count, ref long windowStart, string what)
     {
         long now = Environment.TickCount64;
-        if (_misses++ == 0)
+        if (count++ == 0)
         {
-            _missWindowStart = now;
+            windowStart = now;
         }
-        if (now - _missWindowStart >= MissLogIntervalMs)
+        if (now - windowStart >= MissLogIntervalMs)
         {
-            Log.Info("nearby", $"{_misses} proximity adverts matched no paired AirPods in the last {now - _missWindowStart} ms");
-            _misses = 0;
-        }
-    }
-
-    // Under _lock.
-    private void CountDrop()
-    {
-        long now = Environment.TickCount64;
-        if (_drops++ == 0)
-        {
-            _dropWindowStart = now;
-        }
-        if (now - _dropWindowStart >= MissLogIntervalMs)
-        {
-            Log.Info("nearby", $"{_drops} proximity adverts dropped (encrypted levels do not confirm the clear ones) in the last {now - _dropWindowStart} ms");
-            _drops = 0;
+            Log.Info("nearby", $"{count} proximity adverts {what} in the last {now - windowStart} ms");
+            count = 0;
         }
     }
 
@@ -468,18 +446,13 @@ public sealed class NearbyService : IDisposable
         pair.InClosedCase = !pair.LidOpen && Proximity.AreBothInCase(data);
         if (pair.Offer is { } offer)
         {
-            bool single = offer.Model.SingleBattery;
-            if (!single && !pair.LidOpen && offer.State != OfferState.Connecting)
+            if (!offer.Model.SingleBattery && !pair.LidOpen && offer.State != OfferState.Connecting)
             {
                 Log.Info("nearby", $"offer {Mac.Format(pair.Address)} removed: lid closed (was {offer.State})");
                 pair.Offer = null;
                 return true;
             }
-            if (pair.LinkUp)
-            {
-                return false;
-            }
-            if (batteries == offer.Batteries)
+            if (pair.LinkUp || batteries == offer.Batteries)
             {
                 return false;
             }
@@ -491,7 +464,7 @@ public sealed class NearbyService : IDisposable
             return false;
         }
         // AirPods Max have no lid or case signal: offered on arrival (after 45 s unseen). Others: lid opening with a bud in the case.
-        if (model.SingleBattery ? !arrived : (!pair.LidOpen || wasOpen || !Proximity.IsBudInCase(data)))
+        if (model.SingleBattery ? !arrived : (!pair.LidOpen || wasOpen || !budInCase))
         {
             return false;
         }
@@ -540,14 +513,7 @@ public sealed class NearbyService : IDisposable
                 Publish();
             }
         }
-        if (changed)
-        {
-            OffersChanged?.Invoke();
-        }
-        if (nearbyChanged)
-        {
-            NearbyChanged?.Invoke();
-        }
+        Raise(changed, nearbyChanged);
     }
 
     // CM notification thread.
@@ -568,14 +534,7 @@ public sealed class NearbyService : IDisposable
                 Publish();
             }
         }
-        if (changed)
-        {
-            OffersChanged?.Invoke();
-        }
-        if (nearbyChanged)
-        {
-            NearbyChanged?.Invoke();
-        }
+        Raise(changed, nearbyChanged);
         // No radio-state event exists in Core; a link coming up also means the radio is on.
         if (up)
         {
@@ -671,7 +630,13 @@ public sealed class NearbyService : IDisposable
                 }
             }
         }
-        if (changed)
+        Raise(changed, nearbyChanged);
+    }
+
+    // Outside _lock.
+    private void Raise(bool offersChanged, bool nearbyChanged)
+    {
+        if (offersChanged)
         {
             OffersChanged?.Invoke();
         }

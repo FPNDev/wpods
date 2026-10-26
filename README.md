@@ -16,7 +16,7 @@
 > WPods is an independent project. It is not made, affiliated with, sponsored, endorsed or supported by Apple Inc. Apple product and feature names are used only to describe compatibility.
 
 > [!WARNING]
-> WPods needs Windows **Test Mode** turned on and **Secure Boot** turned off. This lowers a Windows security protection while Test Mode stays on. Please read [Before you install](#before-you-install) first.
+> WPods needs Windows **Test Mode** turned on and **Secure Boot** turned off. This weakens Windows security while Test Mode is on. Please read [Before you install](#before-you-install) first.
 
 <p align="center">
   <a href="https://github.com/FPNDev/wpods/releases/latest"><b>Download</b></a> |
@@ -32,7 +32,7 @@
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/home-top-dark.png"><img src="docs/screenshots/home-top-light.png" width="360" alt="WPods home screen"></picture></p>
 
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/popup-desktop-dark.png"><img src="docs/screenshots/popup-desktop-light.png" width="720" alt="WPods nearby popup in the corner of a Windows 11 desktop"></picture></p>
-<p align="center"><i>The nearby popup, drawn to scale in the bottom-right corner of a 1920x1080 desktop.</i></p>
+<p align="center"><i>The nearby popup on a Windows 11 desktop.</i></p>
 
 <details>
 <summary>See the full home screen</summary>
@@ -43,13 +43,13 @@
 
 - **Free and open source.** GPL-3.0, drivers included. No trial, no subscription.
 - **Stereo sound while the mic is on.** Your AirPods mic shows up in Windows as "Headset (A2DP)". Music and game audio stay stereo instead of dropping to the low-quality hands-free mode.
-- **Mic modes with real choice.** Standard, Voice Isolation and Wide Spectrum, each with a choice of noise-suppression models that run locally on your PC. 15+ models, including Raw (no processing). Every model shows how heavy it is. None of the other projects we compared offer this.
-- **Voice enhancement.** Make your voice clearer and more even for calls. Also unique among the projects we compared.
+- **Mic modes you can tune.** Standard, Voice Isolation and Wide Spectrum, each with a choice of noise-suppression models that run locally on your PC. Over a dozen models, plus Raw (no processing). Every model shows how heavy it is.
+- **Voice enhancement.** Make your voice clearer and more even for calls.
 - **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
 - **Nearby popup, like on iPhone.** When your AirPods are near and connected to another device, WPods shows them with their battery. One click to connect. Works with several pairs.
 - **Low audio latency mode** for games and calls.
 - **One installer does it all.** It installs .NET and WebView2 if missing, sets up Test Mode and installs the drivers. Uninstall can turn Test Mode back off.
-- **Looks at home on Windows.** Light, Dark or Auto theme and your Windows accent colour. 45 languages.
+- **Looks at home on Windows.** Light, Dark or Auto theme and your Windows accent color. 45 languages.
 
 ## Features
 
@@ -58,7 +58,6 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 ### Connection and battery
 
 - Connect, Disconnect and Reconnect from the Home screen. Connecting takes your AirPods over from another device, such as your phone.
-- Clear status: Connected (with the model name), Not connected, Connecting, Reconnecting, Couldn't connect, Connected to another device.
 - Left, Right and Case battery with rings and charging state. AirPods Max show one battery value. You get a message when the battery is low.
 - Several pairs of AirPods? Switch between them from the Home header.
 - "Pair new AirPods" guide in 3 steps: open the lid, hold the back button until the light flashes white, choose them in Windows "Add a device".
@@ -95,14 +94,12 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mic-modes-dark.png"><img src="docs/screenshots/mic-modes-light.png" width="360" alt="WPods mic modes settings"></picture></p>
 
-- Your AirPods mic shows up in Windows as "Headset (A2DP)", so audio stays stereo.
-- Mic status: Not active, Starting, Live or Problem.
 - Microphone side: Automatic, Always Left or Always Right.
-- **Mic modes:** Standard, Voice Isolation and Wide Spectrum. Pick one on the Home screen. Turn modes on or off and choose the model for each mode in Windows settings > Mic modes. Each model shows a weight label (light, medium, heavy, very heavy or not measured).
-- **Voice enhancement** (for the whole app): Off, Apple-like, Clear voice auto level or Clear voice full-range level.
+- **Mic modes:** Standard, Voice Isolation and Wide Spectrum. Pick one on the Home screen. Turn modes on or off and choose the model for each mode in Windows settings > Mic modes. Each model shows how heavy it is on your PC and how much delay it adds.
+- **Voice enhancement:** Off, Apple-inspired, Clear voice auto level or Clear voice full-range level. Applies to every pair.
 
 > [!NOTE]
-> Mic modes are WPods' own processing, not Apple's. WPods runs public noise-suppression models locally on your PC under Apple's mode names.
+> Mic modes are WPods' own processing, not Apple's. WPods runs open noise-suppression models on your PC and uses Apple's mode names for them.
 
 <details>
 <summary>All mic mode models</summary>
@@ -124,16 +121,16 @@ For each pair (while connected):
 
 For the app:
 
-- Mic modes.
+- Mic modes: turn modes on or off and pick a model for each.
 - Start with Windows (opens in the tray when you sign in).
 - Theme: Light, Dark or Auto (Auto follows Windows).
 - Language.
-- Use Windows accent colour.
+- Use Windows accent color.
 
 ### Tray and nearby popup
 
 - Closing the window keeps WPods in the tray. Tray menu: Open WPods, Start with Windows, Quit WPods.
-- When your AirPods are near and connected to another device, a popup shows their picture, name and battery with Connect and Not now. You see Connecting, then Connected, or Couldn't connect with Try again.
+- When your AirPods are near and connected to another device, a popup shows their picture, name and battery with Connect and Not now.
 - Several pairs nearby? You get a "Connect AirPods?" list. Press Esc to dismiss.
 - Nearby detection works after you connect your AirPods once.
 
@@ -141,18 +138,18 @@ For the app:
 
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/first-run-dark.png"><img src="docs/screenshots/first-run-light.png" width="360" alt="WPods welcome screen"></picture></p>
 
-- A welcome screen shows the Apple non-affiliation notice and the terms to agree to. The legal page is always available in the app.
+On first launch, WPods shows a short welcome with the terms and a note that it isn't made by Apple. You can find the legal page in the app at any time.
 
 ## Supported AirPods
 
-Every model shows battery. Features show only when your model supports them.
+Every model shows battery.
 
 Supports AirPods (1st, 2nd and 3rd gen), AirPods 4 and 4 (ANC), AirPods 5, AirPods Pro (1st gen), Pro 2 and Pro 3, and AirPods Max (1st gen) and Max 2.
 
 - "Noise cancellation with one AirPod" works on AirPods 4 (ANC), AirPods 5 and all AirPods Pro.
 - "Allow 'Off' in listening modes" works on AirPods Pro 2 and AirPods Pro 3.
 - AirPods (1st gen) and AirPods (2nd gen) also support the microphone side setting.
-- AirPods Max use head detection and show a single battery value.
+- AirPods Max use head detection.
 
 ## How WPods compares
 
@@ -201,7 +198,7 @@ Based on each project's README, website and source code as of 2026-10-26. If som
 > - WPods installs its own kernel drivers. They are test-signed by the WPods project, not signed by Microsoft.
 > - To load them, Setup turns on Windows test signing (Test Mode). A restart is needed.
 > - Test Mode requires Secure Boot to be off. If it is on, Setup stops and explains how to turn it off: restart into UEFI/BIOS, set Secure Boot to Disabled, save, then run Setup again. Have your BitLocker recovery key ready before changing Secure Boot.
-> - **Security:** while Test Mode is on, Windows loads any test-signed kernel driver, not only WPods' drivers. This lowers a Windows security protection for as long as Test Mode stays on.
+> - **Security:** while Test Mode is on, Windows loads any test-signed kernel driver, not only WPods' drivers. This weakens Windows security for as long as Test Mode is on.
 > - **BitLocker:** Setup suspends BitLocker for one restart, so turning on test signing does not trigger a recovery prompt.
 > - Windows shows a "Test Mode" watermark on the desktop while Test Mode is on. See [The Test Mode watermark](#the-test-mode-watermark).
 > - You do this at your own risk. WPods comes with no warranty.
@@ -223,7 +220,7 @@ With Test Mode on, Windows shows a "Test Mode" watermark in the corner of your d
    - Start WPods when I sign in (on by default).
 5. Setup installs .NET and WebView2 if missing, turns on Test Mode, and installs WPods and its drivers.
 6. **Restart Windows.** The drivers load, and WPods can connect, only after the restart.
-7. **Open WPods** and agree to the welcome screen. Open your AirPods case near your PC (AirPods Max: take them out of the Smart Case) and click **Connect**. Not paired yet? Use "Pair new AirPods" or Open Bluetooth settings.
+7. **Open WPods** and agree to the welcome screen. Open your AirPods case near your PC (AirPods Max: take them out of the Smart Case) and click **Connect**. Not paired yet? Use "Pair new AirPods" or "Open Bluetooth settings".
 
 If the driver install fails, run Setup again.
 
@@ -232,9 +229,8 @@ If the driver install fails, run Setup again.
 ## Uninstall
 
 1. Open Windows **Settings > Apps > Installed apps**, find **WPods** and choose **Uninstall**.
-2. It asks "Also remove your WPods settings?" (default No).
-3. It removes the drivers and the startup entry.
-4. If WPods Setup turned Test Mode on, it asks "Turn Windows test mode off as well?" (default No). Say **Yes** to restore the default Windows protection.
+2. Choose whether to also remove your WPods settings (No by default). It then removes the drivers and the startup entry.
+3. If WPods Setup turned Test Mode on, it asks "Turn Windows test mode off as well?" (default No). Say **Yes** to restore the default Windows protection.
 
 To turn Test Mode off yourself, open a Command Prompt as administrator, run this, then restart:
 

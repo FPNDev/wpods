@@ -15,7 +15,6 @@ internal sealed unsafe class BluetoothLink : IDisposable
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<ulong, Entry> _devices = [];
-    private readonly Dictionary<string, ulong> _addressByPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, nint> _radioByPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<nint, string> _radioByNotify = [];
     private GCHandle _self;
@@ -291,7 +290,6 @@ internal sealed unsafe class BluetoothLink : IDisposable
             }
             up = Query(address, out string name);
             _devices[address] = new Entry(path, name) { Up = up };
-            _addressByPath[path] = address;
             Log.Info("link", $"NTAPD {(raiseEvents ? "added" : "present")} {Mac.Format(address)} \"{name}\", link {(up ? "up" : "down")}");
         }
         if (raiseEvents)
@@ -306,14 +304,18 @@ internal sealed unsafe class BluetoothLink : IDisposable
 
     private void RemoveDevice(string path)
     {
+        if (!Mac.TryParseInterfacePath(path, out ulong address))
+        {
+            return;
+        }
         Entry? entry;
-        ulong address;
         lock (_lock)
         {
-            if (!_addressByPath.Remove(path, out address) || !_devices.Remove(address, out entry))
+            if (!_devices.TryGetValue(address, out entry) || !string.Equals(entry.Path, path, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
+            _devices.Remove(address);
         }
         Log.Info("link", $"NTAPD removed {Mac.Format(address)}, link was {(entry.Up ? "up" : "down")}");
         DevicesChanged?.Invoke();

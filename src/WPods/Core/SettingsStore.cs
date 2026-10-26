@@ -92,7 +92,7 @@ public sealed record MicConfig(IReadOnlySet<MicMode> Modes, IReadOnlyDictionary<
         }
         foreach (string name in names)
         {
-            if (!Enum.TryParse(name, ignoreCase: true, out MicMode mode) || !Enum.IsDefined(mode) || char.IsAsciiDigit(name[0]))
+            if (!TryParseMode(name, out MicMode mode))
             {
                 return false;
             }
@@ -100,6 +100,10 @@ public sealed record MicConfig(IReadOnlySet<MicMode> Modes, IReadOnlyDictionary<
         }
         return true;
     }
+
+    /// <summary>Parses one mode name, any case; false for an unknown or numeric name.</summary>
+    internal static bool TryParseMode(string? name, out MicMode mode) =>
+        Enum.TryParse(name, ignoreCase: true, out mode) && Enum.IsDefined(mode) && !char.IsAsciiDigit(name[0]);
 }
 
 /// <summary>Model reported over AAP 0x1D, remembered for pairs that are not attached.</summary>
@@ -252,13 +256,7 @@ public sealed class SettingsStore
     }
 
     /// <summary>Stored settings, or <see cref="HostSettings.Default"/> for a device never changed.</summary>
-    public HostSettings Get(ulong address)
-    {
-        lock (_lock)
-        {
-            return _devices.GetValueOrDefault(address, HostSettings.Default);
-        }
-    }
+    public HostSettings Get(ulong address) => Read(_devices, address, HostSettings.Default);
 
     /// <summary>Last model seen for this pair; null if it was never attached.</summary>
     public DeviceModel? GetModel(ulong address)
@@ -270,58 +268,22 @@ public sealed class SettingsStore
     }
 
     /// <summary>Stem press-and-hold cycle of the pair; <see cref="DefaultStemModes"/> when never set.</summary>
-    internal StemModes GetStemModes(ulong address)
-    {
-        lock (_lock)
-        {
-            return _stemModes.GetValueOrDefault(address, DefaultStemModes);
-        }
-    }
+    internal StemModes GetStemModes(ulong address) => Read(_stemModes, address, DefaultStemModes);
 
     /// <summary>Ear detection (0x0A) of the pair as last set by the user or reported by the device; true (Apple default) when never set.</summary>
-    internal bool GetEarDetection(ulong address)
-    {
-        lock (_lock)
-        {
-            return _earDetection.GetValueOrDefault(address, true);
-        }
-    }
+    internal bool GetEarDetection(ulong address) => Read(_earDetection, address, true);
 
     /// <summary>Allow Off (0x34) of the pair as last set by the user; false when never set.</summary>
-    internal bool GetAllowOff(ulong address)
-    {
-        lock (_lock)
-        {
-            return _allowOff.GetValueOrDefault(address, false);
-        }
-    }
+    internal bool GetAllowOff(ulong address) => Read(_allowOff, address, false);
 
     /// <summary>Microphone side (0x01) of the pair as last set by the user or reported by the device; Automatic when never set.</summary>
-    internal MicSide GetMicSide(ulong address)
-    {
-        lock (_lock)
-        {
-            return _micSide.GetValueOrDefault(address, MicSide.Automatic);
-        }
-    }
+    internal MicSide GetMicSide(ulong address) => Read(_micSide, address, MicSide.Automatic);
 
     /// <summary>Every capability the pair reported on any attach; None if it was never attached.</summary>
-    internal DeviceCapabilities GetCapabilities(ulong address)
-    {
-        lock (_lock)
-        {
-            return _capabilities.GetValueOrDefault(address);
-        }
-    }
+    internal DeviceCapabilities GetCapabilities(ulong address) => Read(_capabilities, address, DeviceCapabilities.None);
 
     /// <summary>Pod-saved settings of the pair as last seen; <see cref="PodSettings.None"/> if never seen.</summary>
-    internal PodSettings GetPodSettings(ulong address)
-    {
-        lock (_lock)
-        {
-            return _podSettings.GetValueOrDefault(address, PodSettings.None);
-        }
-    }
+    internal PodSettings GetPodSettings(ulong address) => Read(_podSettings, address, PodSettings.None);
 
     public bool HasKeys(ulong address)
     {
@@ -368,31 +330,9 @@ public sealed class SettingsStore
         }
     }
 
-    internal void SetModel(ulong address, DeviceModel model)
-    {
-        lock (_lock)
-        {
-            if (_models.TryGetValue(address, out DeviceModel? current) && current == model)
-            {
-                return;
-            }
-            _models[address] = model;
-            SaveSettings();
-        }
-    }
+    internal void SetModel(ulong address, DeviceModel model) => Store(_models, address, model);
 
-    internal void SetCapabilities(ulong address, DeviceCapabilities capabilities)
-    {
-        lock (_lock)
-        {
-            if (_capabilities.TryGetValue(address, out DeviceCapabilities current) && current == capabilities)
-            {
-                return;
-            }
-            _capabilities[address] = capabilities;
-            SaveSettings();
-        }
-    }
+    internal void SetCapabilities(ulong address, DeviceCapabilities capabilities) => Store(_capabilities, address, capabilities);
 
     /// <summary>
     /// Records the install date of the pair's Windows device entry (<see cref="Native.GetDeviceInstallDate"/>). A date
@@ -422,71 +362,31 @@ public sealed class SettingsStore
         }
     }
 
-    internal void SetPodSettings(ulong address, PodSettings settings)
-    {
-        lock (_lock)
-        {
-            if (_podSettings.TryGetValue(address, out PodSettings? current) && current == settings)
-            {
-                return;
-            }
-            _podSettings[address] = settings;
-            SaveSettings();
-        }
-    }
+    internal void SetPodSettings(ulong address, PodSettings settings) => Store(_podSettings, address, settings);
 
     /// <summary>Stores a valid (<see cref="Aap.IsValidStemModes"/>) stem cycle mask.</summary>
-    internal void SetStemModes(ulong address, StemModes modes)
-    {
-        lock (_lock)
-        {
-            if (_stemModes.TryGetValue(address, out StemModes current) && current == modes)
-            {
-                return;
-            }
-            _stemModes[address] = modes;
-            SaveSettings();
-        }
-    }
+    internal void SetStemModes(ulong address, StemModes modes) => Store(_stemModes, address, modes);
 
     internal void SetEarDetection(ulong address, bool on)
     {
-        lock (_lock)
+        if (Store(_earDetection, address, on))
         {
-            if (_earDetection.TryGetValue(address, out bool current) && current == on)
-            {
-                return;
-            }
-            _earDetection[address] = on;
-            SaveSettings();
             Log.Info("settings", $"{Mac.Format(address)}: earDetection = {on}");
         }
     }
 
     internal void SetAllowOff(ulong address, bool on)
     {
-        lock (_lock)
+        if (Store(_allowOff, address, on))
         {
-            if (_allowOff.TryGetValue(address, out bool current) && current == on)
-            {
-                return;
-            }
-            _allowOff[address] = on;
-            SaveSettings();
             Log.Info("settings", $"{Mac.Format(address)}: allowOff = {on}");
         }
     }
 
     internal void SetMicSide(ulong address, MicSide side)
     {
-        lock (_lock)
+        if (Store(_micSide, address, side))
         {
-            if (_micSide.TryGetValue(address, out MicSide current) && current == side)
-            {
-                return;
-            }
-            _micSide[address] = side;
-            SaveSettings();
             Log.Info("settings", $"{Mac.Format(address)}: micSide = {side}");
         }
     }
@@ -506,6 +406,29 @@ public sealed class SettingsStore
             SaveKeys();
             Log.Info("settings", $"proximity keys stored for {Mac.Format(address)}");
             return true;
+        }
+    }
+
+    // False when value equals the stored one (nothing written).
+    private bool Store<T>(Dictionary<ulong, T> map, ulong address, T value)
+    {
+        lock (_lock)
+        {
+            if (map.TryGetValue(address, out T? current) && EqualityComparer<T>.Default.Equals(current, value))
+            {
+                return false;
+            }
+            map[address] = value;
+            SaveSettings();
+            return true;
+        }
+    }
+
+    private T Read<T>(Dictionary<ulong, T> map, ulong address, T fallback)
+    {
+        lock (_lock)
+        {
+            return map.GetValueOrDefault(address, fallback);
         }
     }
 
@@ -543,13 +466,7 @@ public sealed class SettingsStore
                     _models[address] = model;
                 }
             }
-            foreach ((string mac, DeviceCapabilities capabilities) in file.Capabilities ?? [])
-            {
-                if (Mac.TryParse(mac, out ulong address))
-                {
-                    _capabilities[address] = capabilities;
-                }
-            }
+            LoadMap(file.Capabilities, _capabilities);
             foreach ((string mac, StemModes modes) in file.StemModes ?? [])
             {
                 if (!Mac.TryParse(mac, out ulong address))
@@ -565,20 +482,8 @@ public sealed class SettingsStore
                     Log.Warn("settings", $"{mac}: stemModes {modes} invalid (needs 2+ of Off, NC, Transparency, Adaptive), using the default");
                 }
             }
-            foreach ((string mac, bool on) in file.EarDetection ?? [])
-            {
-                if (Mac.TryParse(mac, out ulong address))
-                {
-                    _earDetection[address] = on;
-                }
-            }
-            foreach ((string mac, bool on) in file.AllowOff ?? [])
-            {
-                if (Mac.TryParse(mac, out ulong address))
-                {
-                    _allowOff[address] = on;
-                }
-            }
+            LoadMap(file.EarDetection, _earDetection);
+            LoadMap(file.AllowOff, _allowOff);
             foreach ((string mac, MicSide side) in file.MicSide ?? [])
             {
                 if (!Mac.TryParse(mac, out ulong address))
@@ -594,13 +499,7 @@ public sealed class SettingsStore
                     Log.Warn("settings", $"{mac}: micSide {side} invalid, using Automatic");
                 }
             }
-            foreach ((string mac, PodSettings? settings) in file.PodSettings ?? [])
-            {
-                if (settings is not null && Mac.TryParse(mac, out ulong address))
-                {
-                    _podSettings[address] = settings;
-                }
-            }
+            LoadMap(file.PodSettings, _podSettings);
             foreach ((string mac, DateTime date) in file.PairingDates ?? [])
             {
                 if (Mac.TryParse(mac, out ulong address))
@@ -733,43 +632,35 @@ public sealed class SettingsStore
     private void SaveSettings()
     {
         var file = new SettingsFile { LastUsed = _lastUsed == 0 ? null : Mac.Format(_lastUsed), Ui = _ui, Mic = SaveMic(_mic) };
-        foreach ((ulong address, HostSettings settings) in _devices)
-        {
-            file.Devices[Mac.Format(address)] = settings;
-        }
-        foreach ((ulong address, DeviceModel model) in _models)
-        {
-            file.Models[Mac.Format(address)] = model;
-        }
-        foreach ((ulong address, DeviceCapabilities capabilities) in _capabilities)
-        {
-            file.Capabilities[Mac.Format(address)] = capabilities;
-        }
-        foreach ((ulong address, StemModes modes) in _stemModes)
-        {
-            file.StemModes[Mac.Format(address)] = modes;
-        }
-        foreach ((ulong address, bool on) in _earDetection)
-        {
-            file.EarDetection[Mac.Format(address)] = on;
-        }
-        foreach ((ulong address, bool on) in _allowOff)
-        {
-            file.AllowOff[Mac.Format(address)] = on;
-        }
-        foreach ((ulong address, MicSide side) in _micSide)
-        {
-            file.MicSide[Mac.Format(address)] = side;
-        }
-        foreach ((ulong address, PodSettings settings) in _podSettings)
-        {
-            file.PodSettings[Mac.Format(address)] = settings;
-        }
-        foreach ((ulong address, DateTime date) in _pairingDates)
-        {
-            file.PairingDates[Mac.Format(address)] = date;
-        }
+        SaveMap(_devices, file.Devices);
+        SaveMap(_models, file.Models);
+        SaveMap(_capabilities, file.Capabilities);
+        SaveMap(_stemModes, file.StemModes);
+        SaveMap(_earDetection, file.EarDetection);
+        SaveMap(_allowOff, file.AllowOff);
+        SaveMap(_micSide, file.MicSide);
+        SaveMap(_podSettings, file.PodSettings);
+        SaveMap(_pairingDates, file.PairingDates);
         WriteAtomic(_settingsPath, JsonSerializer.SerializeToUtf8Bytes(file, SettingsJson.Default.SettingsFile));
+    }
+
+    private static void SaveMap<T>(Dictionary<ulong, T> source, Dictionary<string, T> target)
+    {
+        foreach ((ulong address, T value) in source)
+        {
+            target[Mac.Format(address)] = value;
+        }
+    }
+
+    private static void LoadMap<T>(Dictionary<string, T>? source, Dictionary<ulong, T> target)
+    {
+        foreach ((string mac, T value) in source ?? [])
+        {
+            if (value is not null && Mac.TryParse(mac, out ulong address))
+            {
+                target[address] = value;
+            }
+        }
     }
 
     // keys.bin = DPAPI(record*), record = address u64 LE | IRK 16 | ENC_KEY 16.
@@ -888,7 +779,7 @@ internal sealed class MicModeJsonConverter : JsonConverter<MicMode>
             Log.Info("settings", $"stored micMode {text} migrated to {migrated}");
             return migrated;
         }
-        if (text is null || !Enum.TryParse(text, ignoreCase: true, out MicMode mode) || !Enum.IsDefined(mode) || char.IsAsciiDigit(text[0]))
+        if (!MicConfig.TryParseMode(text, out MicMode mode))
         {
             throw new JsonException($"Unknown micMode {text ?? reader.TokenType.ToString()}.");
         }

@@ -1,7 +1,7 @@
 namespace WPods.Audio.Enhance;
 
 /// <summary>
-/// Voice enhancements built on WebRTC AGC2 (<see cref="WebRtcAgc2"/>, in webrtc_apm.dll). Like
+/// Voice enhancements built on WebRTC AGC2 (<see cref="WebRtcApm.Agc2"/>, in webrtc_apm.dll). Like
 /// <see cref="VoiceEnhancements"/> they run after the mode's model on the x4 signal and are loudness matched to
 /// enhancement Off at the measured AirPods speech level (about -24 dBFS RMS after x4) through their target (headroom).
 /// AGC2's adaptive gain never goes below 0 dB, so two families: on the x4 signal (raises only speech quieter than Off,
@@ -12,11 +12,9 @@ internal static class WebRtcEnhancements
 {
     // On the x4 signal: a booster for quiet speech, Off-level speech passes at 0 dB.
     public static IMicStage Agc2CleanEq() => new MicChain(
-        VoiceEnhancements.CleanEq(), new WebRtcAgc2(adaptive: true, headroomDb: 8f, initialGainDb: 0f));
+        VoiceEnhancements.CleanEq(), WebRtcApm.Agc2(headroomDb: 8f, initialGainDb: 0f));
 
     // Full range: input back at the x1 level, AGC2 sets the final level.
     public static IMicStage Agc2FullCleanEq() => new MicChain(
-        UndoX4(), VoiceEnhancements.CleanEq(), new WebRtcAgc2(adaptive: true, headroomDb: 6.8f));
-
-    private static Gain UndoX4() => new(-12.04f);
+        new Gain(-12.04f), VoiceEnhancements.CleanEq(), WebRtcApm.Agc2(headroomDb: 6.8f));
 }

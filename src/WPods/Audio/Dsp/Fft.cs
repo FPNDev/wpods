@@ -103,10 +103,10 @@ internal sealed unsafe class RealFft
             throw new ArgumentException("Forward needs Size input samples and Size + 2 spectrum floats.");
         }
         int h = _half;
-        fixed (float* x = input, s = spectrum, a = _bufferA, b = _bufferB, w = _split)
+        fixed (float* s = spectrum, a = _bufferA, b = _bufferB, w = _split)
         {
             // z[k] = x[2k] + i x[2k+1] is exactly the interleaved input.
-            new ReadOnlySpan<float>(x, Size).CopyTo(new Span<float>(a, Size));
+            input.CopyTo(_bufferA);
             float* z = Transform(a, b);
             s[0] = z[0] + z[1];
             s[1] = 0f;
