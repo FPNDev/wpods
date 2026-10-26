@@ -76,10 +76,10 @@ const
   NotMicrosoftSigned = 22352;
   SystemCodeIntegrityInformation = 103;
   CodeIntegrityOptionTestSign = 2;
-  // Exit codes of the BitLocker script: not protected (or done), suspended now by this call, protected.
   BitLockerOff = 0;
   BitLockerSuspended = 10;
   BitLockerOn = 11;
+  BitLockerConverting = 12;
   // Exit code of the TestSigningConfigured script when {current} has testsigning set.
   BcdTestSigningSet = 10;
 
@@ -160,9 +160,11 @@ end;
 
 // Runs Action ('status', 'suspend' or 'resume') for BitLocker (or Device encryption) on the OS drive through WMI
 // Win32_EncryptableVolume, which needs no BitLocker PowerShell module (missing on some Windows Home installs).
-// Returns the script exit code (BitLockerOff, BitLockerSuspended, BitLockerOn), any other value is a failure, -1 when
-// PowerShell could not run. Changing testsigning or Secure Boot while BitLocker protects the drive makes Windows ask
-// for the recovery key, so callers treat every failure as "may be protected".
+// Returns the script exit code (BitLockerOff, BitLockerSuspended, BitLockerOn, BitLockerConverting), any other value
+// is a failure, -1 when PowerShell could not run. Protection off while encryption or decryption still runs (or is
+// paused) is BitLockerConverting, not BitLockerOff. No volume record for the OS drive is a failure for 'status' and
+// 'suspend' (nothing to resume for 'resume'). Changing testsigning or Secure Boot while BitLocker protects the drive
+// makes Windows ask for the recovery key, so callers treat every failure as "may be protected".
 function BitLocker(const Action: String): Integer;
 var
   Code: Integer;
@@ -170,11 +172,15 @@ begin
   if not Exec(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
     '$ErrorActionPreference = ''Stop''; try { ' +
     '$v = Get-CimInstance -Namespace root/CIMV2/Security/MicrosoftVolumeEncryption -ClassName Win32_EncryptableVolume | ' +
-    'Where-Object DriveLetter -eq $env:SystemDrive; if (-not $v) { exit 0 }; $a = ' + PSString(Action) + '; ' +
+    'Where-Object DriveLetter -eq $env:SystemDrive; $a = ' + PSString(Action) + '; ' +
+    'if (-not $v) { if ($a -eq ''resume'') { exit 0 }; exit 1 }; ' +
     'if ($a -eq ''resume'') { ' +
     'if ((Invoke-CimMethod -InputObject $v -MethodName EnableKeyProtectors).ReturnValue -eq 0) { exit 0 }; exit 1 }; ' +
     '$p = (Invoke-CimMethod -InputObject $v -MethodName GetProtectionStatus).ProtectionStatus; ' +
-    'if ($p -eq 0) { exit ' + IntToStr(BitLockerOff) + ' }; if ($p -ne 1) { exit 1 }; ' +
+    'if ($p -eq 0) { $c = (Invoke-CimMethod -InputObject $v -MethodName GetConversionStatus).ConversionStatus; ' +
+    'if ($c -eq 0 -or $c -eq 1) { exit ' + IntToStr(BitLockerOff) + ' }; ' +
+    'if ($c -ge 2 -and $c -le 5) { exit ' + IntToStr(BitLockerConverting) + ' }; exit 1 }; ' +
+    'if ($p -ne 1) { exit 1 }; ' +
     'if ($a -eq ''status'') { exit ' + IntToStr(BitLockerOn) + ' }; ' +
     'if ((Invoke-CimMethod -InputObject $v -MethodName DisableKeyProtectors ' +
     '-Arguments @{DisableCount = [uint32]1}).ReturnValue -ne 0) { exit 1 }; ' +
@@ -186,21 +192,27 @@ begin
   Result := Code;
 end;
 
-// True only when the OS drive is not protected (off or already suspended) or this call suspended it for the next
-// restart. False on any error or doubt.
-function SuspendBitLocker: Boolean;
-var
-  Code: Integer;
+// Returns the BitLocker('suspend') exit code. Only BitLockerOff (not protected: off or already suspended) and
+// BitLockerSuspended (this call suspended it for the next restart) are safe, see BitLockerSafe; BitLockerConverting
+// and every other value (any error or doubt) are not.
+function SuspendBitLocker: Integer;
 begin
-  Code := BitLocker('suspend');
-  Result := (Code = BitLockerOff) or (Code = BitLockerSuspended);
-  if Code = BitLockerSuspended then begin
+  Result := BitLocker('suspend');
+  if Result = BitLockerSuspended then begin
     BitLockerSuspendedByRun := True;
     Log('BitLocker suspended on the OS drive until the next restart.');
-  end else if Code = BitLockerOff then
+  end else if Result = BitLockerOff then
     Log('BitLocker does not protect the OS drive (off or already suspended).')
+  else if Result = BitLockerConverting then
+    Log('BitLocker is still encrypting or decrypting the OS drive; nothing was changed.')
   else
-    Log(Format('Could not confirm that BitLocker is off or suspended on the OS drive (exit code %d).', [Code]));
+    Log(Format('Could not confirm that BitLocker is off or suspended on the OS drive (exit code %d).', [Result]));
+end;
+
+// True when a SuspendBitLocker result allows changing the boot configuration.
+function BitLockerSafe(const Code: Integer): Boolean;
+begin
+  Result := (Code = BitLockerOff) or (Code = BitLockerSuspended);
 end;
 
 // Resumes BitLocker only when this run suspended it. False when it stays suspended (until the next restart).
@@ -220,21 +232,21 @@ end;
 // How to suspend BitLocker for one restart by hand, for every case Setup cannot do it safely itself.
 function BitLockerManualSteps: String;
 begin
-  Result := 'To suspend BitLocker (or Device encryption) for the next restart, open Terminal (Admin) and run:' + #13#10 +
+  Result := 'To suspend BitLocker (or Device encryption) for the next restart, open Windows PowerShell or Terminal ' +
+    'as administrator and run:' + #13#10 +
     'manage-bde -protectors -disable ' + ExpandConstant('{sd}') + ' -RebootCount 1' + #13#10#13#10 +
     'Keep your BitLocker recovery key at hand: https://aka.ms/myrecoverykey';
 end;
 
 // Boot configuration, not the running state: True when {current} already has testsigning set (it applies after the
-// next restart). Read through WMI BcdStore; a failed read counts as not set, which takes the checked path.
+// next restart). Read through WMI BcdObject; a failed read counts as not set, which takes the checked path.
 function TestSigningConfigured: Boolean;
 var
   Code: Integer;
 begin
   Result := Exec(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' +
     '$ErrorActionPreference = ''Stop''; try { ' +
-    '$s = ([wmiclass]''root\wmi:BcdStore'').OpenStore('''').Store; ' +
-    '$o = $s.OpenObject(''{fa926493-6f1c-4193-a414-58f0b2456d1e}'').Object; ' +
+    '$o = [wmi]''root\wmi:BcdObject.Id=\"{fa926493-6f1c-4193-a414-58f0b2456d1e}\",StoreFilePath=\"\"''; ' +
     '$e = $o.GetElement(0x16000049); ' +
     'if ($e.ReturnValue -and $e.Element.Boolean) { exit ' + IntToStr(BcdTestSigningSet) + ' }; exit 0 ' +
     '} catch { exit 0 }"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = BcdTestSigningSet);
@@ -258,7 +270,15 @@ begin
     Log('Windows test signing is already set in the boot configuration; it takes effect after a restart.');
     Exit;
   end;
-  if not SuspendBitLocker then begin
+  Code := SuspendBitLocker;
+  if Code = BitLockerConverting then begin
+    Result := 'BitLocker (or Device encryption) is still encrypting or decrypting drive ' + ExpandConstant('{sd}') +
+      ', so Setup did not turn on Windows test signing: changing it now could make Windows ask for the BitLocker ' +
+      'recovery key. Nothing was installed.' + #13#10#13#10 + 'Wait until encryption or decryption finishes ' +
+      '(manage-bde -status shows its progress), then run Setup again.';
+    Exit;
+  end;
+  if not BitLockerSafe(Code) then begin
     Result := 'Setup could not confirm that BitLocker (or Device encryption) is off or suspended on drive ' +
       ExpandConstant('{sd}') + ', so it did not turn on Windows test signing. Changing it while BitLocker protects ' +
       'the drive makes Windows ask for the BitLocker recovery key. Nothing was installed.' + #13#10#13#10 +
@@ -307,8 +327,9 @@ begin
     'asks for the BitLocker recovery key at the next start. When you click Exit Setup, Setup offers to suspend it ' +
     'for the next restart only. Make sure you can get your recovery key: https://aka.ms/myrecoverykey' + #13#10#13#10 +
     'To turn Secure Boot off:' + #13#10 +
-    '1. Restart straight into the UEFI firmware settings (BIOS). Do not restart in between: the suspend lasts one ' +
-    'restart only.' + #13#10 +
+    '1. Restart straight into the UEFI firmware settings: open Windows PowerShell or Terminal as administrator and ' +
+    'run: shutdown /r /fw /t 0' + #13#10 +
+    'Do not restart Windows in between: the suspend lasts one restart only.' + #13#10 +
     '2. Find the Secure Boot option (usually under a Boot, Security, or Authentication section).' + #13#10 +
     '3. Set it to Disabled, then save and exit.' + #13#10#13#10 +
     'After Windows starts again, run WPods Setup once more.' + #13#10#13#10 +
@@ -434,13 +455,19 @@ begin
       'off makes Windows ask for the BitLocker recovery key at the next start, unless BitLocker is suspended ' +
       'first.' + #13#10#13#10 + 'Suspend BitLocker now, for the next restart only?',
       mbConfirmation, MB_YESNO) = IDYES then begin
-      if SuspendBitLocker then
+      if BitLockerSafe(SuspendBitLocker) then
         MsgBox('BitLocker is suspended until the next restart only. Turn Secure Boot off during that restart. ' +
-          'BitLocker turns back on by itself after Windows starts.', mbInformation, MB_OK)
+          'BitLocker turns back on by itself after Windows starts.' + #13#10#13#10 + 'To restart straight into the ' +
+          'firmware settings, open Windows PowerShell or Terminal as administrator and run: shutdown /r /fw /t 0',
+          mbInformation, MB_OK)
       else
         MsgBox('Setup could not suspend BitLocker.' + #13#10#13#10 + BitLockerManualSteps, mbError, MB_OK);
     end;
-  end else if Code <> BitLockerOff then
+  end else if Code = BitLockerConverting then
+    MsgBox('BitLocker (or Device encryption) is still encrypting or decrypting drive ' + ExpandConstant('{sd}') +
+      '. Wait until it finishes before you turn Secure Boot off, then run WPods Setup again so it can offer to ' +
+      'suspend BitLocker.', mbError, MB_OK)
+  else if Code <> BitLockerOff then
     MsgBox('Setup could not check whether BitLocker (or Device encryption) protects drive ' + ExpandConstant('{sd}') +
       '. If it is on, suspend it before you turn Secure Boot off, or Windows asks for the BitLocker recovery ' +
       'key.' + #13#10#13#10 + BitLockerManualSteps, mbError, MB_OK);
@@ -505,6 +532,7 @@ end;
 procedure InstallDrivers;
 var
   Code: Integer;
+  Msg: String;
 begin
   WizardForm.StatusLabel.Caption := 'Installing the WPods drivers...';
   if not ExecAndLogOutput(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
@@ -515,12 +543,15 @@ begin
     // Test signing reads off only because it is set in the boot configuration (by Setup this run, or already): it
     // takes effect after a restart, and the drivers load then. When it was already on, keep the lighter 3010
     // "finish updating" note.
-    if not TestSigningOn then
-      SuppressibleMsgBox('WPods and its drivers were installed. Windows test mode turns on when Windows ' +
+    if not TestSigningOn then begin
+      Msg := 'WPods and its drivers were installed. Windows test mode turns on when Windows ' +
         'restarts.' + #13#10#13#10 +
         'You must restart Windows to finish. The drivers load, and WPods can connect to your ' +
-        'AirPods, only after you restart.', mbInformation, MB_OK, IDOK)
-    else if Code = 3010 then
+        'AirPods, only after you restart.';
+      if BitLockerSuspendedByRun then
+        Msg := Msg + ' BitLocker is suspended until you restart, so restart soon.';
+      SuppressibleMsgBox(Msg, mbInformation, MB_OK, IDOK);
+    end else if Code = 3010 then
       SuppressibleMsgBox('The WPods drivers were installed. Restart Windows when convenient to finish updating them.',
         mbInformation, MB_OK, IDOK);
   end
@@ -551,19 +582,23 @@ begin
   if TestSigningSetByRun and not InstallFinished then begin
     if Exec(ExpandConstant('{sys}\bcdedit.exe'), '/set testsigning off', '', SW_HIDE, ewWaitUntilTerminated, Code) and
       (Code = 0) then begin
-      ResumeBitLocker;
+      // No resume here: whether an in-session resume re-captures the BCD baseline after a set and reset is
+      // unverified, and this run's suspend ending at the next restart is safe either way.
       RegDeleteValue(HKLM64, 'SOFTWARE\WPods', 'TestSigningByWPods');
       RegDeleteKeyIfEmpty(HKLM64, 'SOFTWARE\WPods');
       Log('Setup did not finish; Windows test signing turned back off.');
+      if BitLockerSuspendedByRun then
+        SuppressibleMsgBox('Setup did not finish, so it turned Windows test mode back off. BitLocker stays suspended ' +
+          'until the next restart, so restart soon.', mbInformation, MB_OK, IDOK);
     end else begin
       // The boot configuration may still have testsigning on: BitLocker must stay suspended until the next restart.
       Log(Format('Setup did not finish and could not turn Windows test signing back off (code %d).', [Code]));
       Msg := 'Setup stopped after turning on Windows test mode and could not turn it back off.';
       if BitLockerSuspendedByRun then
-        Msg := Msg + ' BitLocker stays suspended until the next restart, so before restarting, open Terminal ' +
-          '(Admin) and run:'
+        Msg := Msg + ' BitLocker stays suspended until the next restart, so before restarting, open Windows ' +
+          'PowerShell or Terminal as administrator and run:'
       else
-        Msg := Msg + ' Before restarting, open Terminal (Admin) and run:';
+        Msg := Msg + ' Before restarting, open Windows PowerShell or Terminal as administrator and run:';
       SuppressibleMsgBox(Msg + #13#10 + 'bcdedit /set testsigning off', mbError, MB_OK, IDOK);
     end;
   end;
@@ -575,11 +610,18 @@ end;
 procedure TurnTestSigningOff;
 var
   Code: Integer;
-  Manual: String;
+  Manual, Msg: String;
 begin
   Manual := 'To turn test mode off yourself:' + #13#10#13#10 + BitLockerManualSteps + #13#10#13#10 +
     'Then run: bcdedit /set testsigning off' + #13#10 + 'Then restart Windows.';
-  if not SuspendBitLocker then begin
+  Code := SuspendBitLocker;
+  if Code = BitLockerConverting then begin
+    SuppressibleMsgBox('Windows test mode was left on: BitLocker (or Device encryption) is still encrypting or ' +
+      'decrypting drive ' + ExpandConstant('{sd}') + '. Wait until it finishes.' + #13#10#13#10 + Manual,
+      mbError, MB_OK, IDOK);
+    Exit;
+  end;
+  if not BitLockerSafe(Code) then begin
     SuppressibleMsgBox('Windows test mode was left on: Uninstall could not confirm that BitLocker (or Device ' +
       'encryption) is off or suspended on drive ' + ExpandConstant('{sd}') + '. Turning test mode off while ' +
       'BitLocker protects the drive makes Windows ask for the BitLocker recovery key.' + #13#10#13#10 + Manual,
@@ -593,7 +635,10 @@ begin
     Log(Format('Could not turn Windows test signing off (bcdedit exit code %d).', [Code]))
   else begin
     Log('Windows test signing turned off; it takes effect after a restart.');
-    SuppressibleMsgBox('Windows test mode turns off when you restart Windows.' + #13#10#13#10 +
+    Msg := 'Windows test mode turns off when you restart Windows.';
+    if BitLockerSuspendedByRun then
+      Msg := Msg + ' BitLocker is suspended until you restart, so restart soon.';
+    SuppressibleMsgBox(Msg + #13#10#13#10 +
       'If you turn Secure Boot back on later, suspend BitLocker first, or Windows asks for the BitLocker ' +
       'recovery key.' + #13#10#13#10 + BitLockerManualSteps, mbInformation, MB_OK, IDOK);
     Exit;

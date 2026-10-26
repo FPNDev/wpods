@@ -46,7 +46,6 @@ export type MicOption = {
   name: string;
   weight: Weight;
   threads: number;
-  cores: number;
   latencyMs: number;
 };
 export type MicCatalog = {

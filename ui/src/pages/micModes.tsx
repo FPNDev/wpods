@@ -126,22 +126,12 @@ export const createMicModes = (ctx: Ctx): Page => {
     for (const { el: hint, option } of hints) {
       const delay = format.format(option.latencyMs);
       const threads = option.threads;
-      if (option.cores === 0) {
-        setText(
-          hint,
-          threads > 1
-            ? t("mic.usageThreadsNotMeasured", { threads, delay })
-            : t("mic.usageNotMeasured", { delay }),
-        );
-      } else {
-        const pct = format.format(option.cores * 100);
-        setText(
-          hint,
-          threads > 1
-            ? t("mic.usageThreads", { threads, pct, delay })
-            : t("mic.usage", { pct, delay }),
-        );
-      }
+      setText(
+        hint,
+        threads > 1
+          ? t("mic.usageThreads", { threads, delay })
+          : t("mic.usage", { delay }),
+      );
     }
   };
 

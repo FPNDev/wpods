@@ -43,7 +43,7 @@
 
 - **Free and open source.** GPL-3.0, drivers included. No trial, no subscription.
 - **Stereo sound while the mic is on.** Your AirPods mic shows up in Windows as "Headset (A2DP)". Music and game audio stay stereo instead of dropping to the low-quality hands-free mode.
-- **Mic modes with real choice.** Standard, Voice Isolation and Wide Spectrum, each with a choice of noise-suppression models that run locally on your PC. 15+ models, including Raw (no processing). Every model shows how heavy it is: CPU use and added delay. None of the other projects we compared offer this.
+- **Mic modes with real choice.** Standard, Voice Isolation and Wide Spectrum, each with a choice of noise-suppression models that run locally on your PC. 15+ models, including Raw (no processing). Every model shows how heavy it is. None of the other projects we compared offer this.
 - **Voice enhancement.** Make your voice clearer and more even for calls. Also unique among the projects we compared.
 - **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
 - **Nearby popup, like on iPhone.** When your AirPods are near and connected to another device, WPods shows them with their battery. One click to connect. Works with several pairs.
@@ -98,7 +98,7 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 - Your AirPods mic shows up in Windows as "Headset (A2DP)", so audio stays stereo.
 - Mic status: Not active, Starting, Live or Problem.
 - Microphone side: Automatic, Always Left or Always Right.
-- **Mic modes:** Standard, Voice Isolation and Wide Spectrum. Pick one on the Home screen. Turn modes on or off and choose the model for each mode in Windows settings > Mic modes. Each model shows a weight label (light, medium, heavy, very heavy or not measured), its CPU use and its added delay.
+- **Mic modes:** Standard, Voice Isolation and Wide Spectrum. Pick one on the Home screen. Turn modes on or off and choose the model for each mode in Windows settings > Mic modes. Each model shows a weight label (light, medium, heavy, very heavy or not measured).
 - **Voice enhancement** (for the whole app): Off, Apple-like, Clear voice auto level or Clear voice full-range level.
 
 > [!NOTE]

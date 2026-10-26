@@ -235,7 +235,6 @@ internal sealed class MessageWriter
             w.WriteString("name", option.Name);
             w.WriteString("weight", option.Weight);
             w.WriteNumber("threads", option.Threads);
-            w.WriteNumber("cores", option.Cores);
             w.WriteNumber("latencyMs", option.LatencyMs);
             w.WriteEndObject();
         }
