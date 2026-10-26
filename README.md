@@ -7,7 +7,7 @@
 <div align="center">
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
-[![Latest release](https://img.shields.io/github/v/release/FPNDev/wpods)](https://github.com/FPNDev/wpods/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/FPNDev/wpods)](https://github.com/FPNDev/wpods/releases/latest) 
 ![Windows 11 x64](https://img.shields.io/badge/Windows%2011-x64-0078D4)
 
 </div>
