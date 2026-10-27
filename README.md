@@ -45,7 +45,7 @@
 - **Stereo sound while the mic is on.** Your AirPods mic shows up in Windows as "Headset (A2DP)". Music and game audio stay stereo instead of dropping to the low-quality hands-free mode.
 - **Mic modes you can tune.** Standard, Voice Isolation and Wide Spectrum, each with a choice of noise-suppression models that run locally on your PC. Over a dozen models, plus Raw (no processing). Every model shows how heavy it is.
 - **Voice enhancement.** Make your voice clearer and more even for calls.
-- **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
+- **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid and Media Assist, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
 - **Nearby popup, like on iPhone.** When your AirPods are near and connected to another device, WPods shows them with their battery. One click to connect. Works with several pairs.
 - **Low audio latency mode** for games and calls.
 - **One installer does it all.** It installs .NET and WebView2 if missing, sets up Test Mode and installs the drivers. Uninstall can turn Test Mode back off.
@@ -87,7 +87,7 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 
 - **Conversation awareness** lowers your media and brings voices forward when you speak.
 - **Personalized Volume** adjusts media volume to your surroundings.
-- **Hearing Aid** uses the hearing settings from your iPhone or iPad. Set it up there first.
+- **Hearing Assistance** (AirPods Pro 2 and Pro 3) has Hearing Aid, and Media Assist for music and video and for calls. They use the hearing settings from your iPhone or iPad, so set up hearing there first. Hearing Aid works in Transparency. Media Assist for calls applies only to calls that use Hands-Free mode.
 - **Heart rate** (AirPods Pro 3) shows your BPM from the AirPods sensors. Not a medical device.
 
 ### Microphone
@@ -116,7 +116,7 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 
 For each pair (while connected):
 
-- **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead.
+- **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. With Hands-Free on, an app that uses the Hands-Free mic gets the AirPods mic, and the "Headset (A2DP)" mic pauses until that app lets go.
 - **Low audio latency** gives less delay for games and calls. It keeps your AirPods awake and may use more battery.
 
 For the app:
@@ -148,6 +148,7 @@ Supports AirPods (1st, 2nd and 3rd gen), AirPods 4 and 4 (ANC), AirPods 5, AirPo
 
 - "Noise cancellation with one AirPod" works on AirPods 4 (ANC), AirPods 5 and all AirPods Pro.
 - "Allow 'Off' in listening modes" works on AirPods Pro 2 and AirPods Pro 3.
+- Hearing Aid and Media Assist work on AirPods Pro 2 and AirPods Pro 3.
 - AirPods (1st gen) and AirPods (2nd gen) also support the microphone side setting.
 - AirPods Max use head detection.
 
@@ -166,7 +167,7 @@ There are other good projects for AirPods on Windows and beyond. Here is how the
 | Noise control incl. Adaptive               | Yes          | Yes                                                   | Yes                                                            | Yes                                                   | Yes (with MagicAAP)                  |
 | Conversation awareness                     | Yes          | Yes                                                   | Yes                                                            | Yes                                                   | Yes (with MagicAAP)                  |
 | Personalized Volume                        | Yes          | Yes                                                   | Yes                                                            | Yes (Android)                                         | Yes (with MagicAAP)                  |
-| Hearing Aid                                | Partial      | Experimental                                          | Experimental                                                   | Partial (Android, needs root)                         | No                                   |
+| Hearing Aid                                | Yes\*        | Experimental                                          | Experimental                                                   | Partial (Android, needs root)                         | No                                   |
 | Heart rate                                 | Yes (Pro 3)  | Yes (Pro 3)                                           | Yes                                                            | Experimental (Android)                                | No                                   |
 | Press-and-hold customization               | Yes          | No                                                    | Yes                                                            | Yes (Android)                                         | Yes (with MagicAAP)                  |
 | Stereo audio while mic is on               | Yes          | Yes                                                   | Yes                                                            | Experimental                                          | No                                   |
@@ -176,6 +177,8 @@ There are other good projects for AirPods on Windows and beyond. Here is how the
 | Nearby popup                               | Yes          | Yes                                                   | Yes                                                            | Yes (Android)                                         | Yes                                  |
 | Head gestures                              | No           | No                                                    | No                                                             | Yes (Android)                                         | No                                   |
 | Non-Apple earbuds                          | No           | Partial (Beats)                                       | Partial (Powerbeats Pro 2)                                     | No                                                    | Yes (Beats, Galaxy Buds, Sony, more) |
+
+\* Tested on AirPods Pro 2 only so far. Needs hearing set up on an iPhone or iPad first. WPods turns Hearing Aid and Media Assist on and off; it doesn't change the hearing settings themselves. Tried it on other AirPods? Please [open an issue](https://github.com/FPNDev/wpods/issues).
 
 Based on each project's README, website and source code as of 2026-10-26. If something is wrong, please [open an issue](https://github.com/FPNDev/wpods/issues).
 
@@ -260,6 +263,6 @@ WPods is free software under the GPL-3.0 license. See [LICENSE](LICENSE). Third-
 
 WPods is not made, affiliated with, sponsored, endorsed or supported by Apple Inc.
 
-Apple, AirPods, AirPods Pro, AirPods Max, iPhone, iPad and Mac are trademarks of Apple Inc., registered in the U.S. and other countries. Feature names (Noise Cancellation, Transparency, Adaptive, Conversation Awareness, Personalized Volume, Hearing Aid, Standard, Voice Isolation, Wide Spectrum) are Apple's names, used only to describe compatibility.
+Apple, AirPods, AirPods Pro, AirPods Max, iPhone, iPad and Mac are trademarks of Apple Inc., registered in the U.S. and other countries. Feature names (Noise Cancellation, Transparency, Adaptive, Conversation Awareness, Personalized Volume, Hearing Assistance, Hearing Aid, Media Assist, Standard, Voice Isolation, Wide Spectrum) are Apple's names, used only to describe compatibility.
 
 WPods is provided as is, without warranty of any kind. Heart rate is not a medical device and is not for medical use.

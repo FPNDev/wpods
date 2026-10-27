@@ -38,7 +38,7 @@ import { enhancementName } from "./enhancement";
 import { LegalFoot } from "./legal";
 import type { Ctx, Page } from "./page";
 
-type FeatureKey = ToggleName | "heartRate" | "hearingAid";
+type FeatureKey = ToggleName | "heartRate";
 type FeatureDef = {
   key: FeatureKey;
   title: LabelKey;
@@ -108,13 +108,33 @@ const FEATURES: FeatureDef[] = [
     title: "features.heartRate",
     desc: "features.heartRateDesc",
   },
-  {
-    key: "hearingAid",
-    title: "features.hearingAid",
-    desc: "features.hearingAidDesc",
-    podSaved: true,
-  },
 ];
+
+// Hearing Assistance row: what is on, once the AirPods (or the remembered state) tell it.
+const hearingSummary = (
+  pods: Pick<
+    State,
+    | "hearingAidEnrolled"
+    | "hearingAidEnabled"
+    | "mediaAssistCalls"
+    | "mediaAssistMedia"
+  >,
+): LabelKey => {
+  if (pods.hearingAidEnrolled === false) {
+    return "hearing.setup";
+  }
+  if (pods.hearingAidEnrolled === null) {
+    return "hearing.desc";
+  }
+  const assist = !!pods.mediaAssistCalls || !!pods.mediaAssistMedia;
+  return pods.hearingAidEnabled
+    ? assist
+      ? "hearing.bothOn"
+      : "hearing.aidOn"
+    : assist
+      ? "hearing.assistOn"
+      : "hearing.off";
+};
 
 const earText = (st: State | null, side: Side): string => {
   const ear = st ? st.ear[side] : null;
@@ -148,7 +168,6 @@ export const createHome = (ctx: Ctx): Page => {
       | "listeningMode"
       | "micSide"
       | "heartRate"
-      | "hearingAidEnabled"
       | ToggleName,
   >(
     field: K,
@@ -271,9 +290,6 @@ export const createHome = (ctx: Ctx): Page => {
     if (key === "heartRate") {
       setState("heartRate", value ? "starting" : "off");
       post({ type: "setHeartRate", value });
-    } else if (key === "hearingAid") {
-      setState("hearingAidEnabled", value);
-      post({ type: "setHearingAid", value });
     } else {
       setState(key, value);
       post({ type: "setToggle", name: key, value });
@@ -319,6 +335,34 @@ export const createHome = (ctx: Ctx): Page => {
   features
     .find((f) => f.def.key === "heartRate")
     ?.row.append(hrLive, hrWait, hrNote);
+
+  let hearingDesc!: HTMLSpanElement;
+  let hearingArrow!: HTMLSpanElement;
+  let hearingSpin!: HTMLSpanElement;
+  const toHearing = (
+    <button
+      type="button"
+      class="wp-row wp-row--nav"
+      onclick={() => ctx.go("hearing")}
+    >
+      <span class="wp-row__text">
+        <span class="wp-row__title" l:text="hearing.title" />
+        <span class="wp-row__desc" ref={hearingDesc} />
+      </span>
+      <span class="wp-row__end" ref={hearingArrow}>
+        <Icon name="chevron-right" />
+      </span>
+      <span
+        class="wp-row__end"
+        role="img"
+        l:aria-label="common.checking"
+        hidden
+        ref={hearingSpin}
+      >
+        <Spinner class="wp-spinner--sm" />
+      </span>
+    </button>
+  ) as HTMLButtonElement;
 
   const toControls = NavRow({
     icon: "press",
@@ -463,6 +507,7 @@ export const createHome = (ctx: Ctx): Page => {
   for (const f of features) {
     featList.append(f.row);
   }
+  featList.append(toHearing);
 
   const featBusy = createBusy(featList, []);
   featTitle.append(featBusy.spin);
@@ -656,32 +701,22 @@ export const createHome = (ctx: Ctx): Page => {
         continue;
       }
       any = true;
-      let value: boolean | null = null;
-      let reason = false;
-      if (def.key === "heartRate") {
-        value = st ? HR_ON.has(st.heartRate) : null;
-      } else if (def.key === "hearingAid") {
-        reason = pods.hearingAidEnrolled === false;
-        value =
-          pods.hearingAidEnrolled !== null ? pods.hearingAidEnabled : null;
-      } else {
-        value = pods[def.key];
-      }
-      setClass(f.row, "is-disabled", reason);
-      setText(
-        f.desc,
-        t(
-          reason
-            ? "features.hearingAidSetup"
-            : single && def.descMax
-              ? def.descMax
-              : def.desc,
-        ),
-      );
-      f.busy?.set(checking, notReady || (def.key === "hearingAid" && checking));
-      setChecked(f.input, !reason && !!value);
-      setDisabled(f.input, !st || reason || (!f.busy && notReady));
-      setAttr(f.input, "aria-describedby", st && reason ? f.desc.id : null);
+      const value =
+        def.key === "heartRate"
+          ? !!st && HR_ON.has(st.heartRate)
+          : pods[def.key];
+      setText(f.desc, t(single && def.descMax ? def.descMax : def.desc));
+      f.busy?.set(checking, notReady);
+      setChecked(f.input, !!value);
+      setDisabled(f.input, !st || (!f.busy && notReady));
+    }
+    const hearing = caps.has("hearingAid") || caps.has("mediaAssist");
+    setHidden(toHearing, !hearing);
+    if (hearing) {
+      any = true;
+      setText(hearingDesc, t(hearingSummary(pods)));
+      setHidden(hearingArrow, checking);
+      setHidden(hearingSpin, !checking);
     }
     featBusy.set(checking, false);
     setHidden(featGroup, !any);
@@ -725,6 +760,8 @@ export const createHome = (ctx: Ctx): Page => {
       switch (from) {
         case "controls":
           return toControls;
+        case "hearing":
+          return toHearing;
         case "windows":
           return toWindows;
         case "pair":

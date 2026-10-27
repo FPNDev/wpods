@@ -55,6 +55,8 @@ public sealed class AapSession : IAsyncDisposable
     private readonly SemaphoreSlim _stemGate = new(1, 1);
     // Serializes SetHeartRateAsync (user toggles and the restart after a re-attach).
     private readonly SemaphoreSlim _heartRateGate = new(1, 1);
+    // Serializes Hearing Aid and Media Assist changes: each computes the shared Hearing Assist (0x33) from the state.
+    private readonly SemaphoreSlim _hearingGate = new(1, 1);
     private readonly CancellationTokenSource _life = new();
     private readonly Lock _stateLock = new();
     private TaskCompletionSource? _firstPacket;
@@ -343,21 +345,95 @@ public sealed class AapSession : IAsyncDisposable
         return SendSettingAsync(Aap.ToneVolume(volume), ct);
     }
 
-    /// <summary>On: 0x2C on, 300 ms, 0x33 on. Off: 0x33 off, 300 ms, 0x2C off. Requires enrollment.</summary>
-    public async Task<bool> SetHearingAidAsync(bool on, CancellationToken ct = default)
+    public Task<bool> SetHearingAidAsync(bool on, CancellationToken ct = default) => SetHearingModesAsync(on, null, null, ct);
+
+    public Task<bool> SetMediaAssistCallsAsync(bool on, CancellationToken ct = default) => SetHearingModesAsync(null, on, null, ct);
+
+    public Task<bool> SetMediaAssistMediaAsync(bool on, CancellationToken ct = default) => SetHearingModesAsync(null, null, on, ct);
+
+    /// <summary>
+    /// Sets Hearing Aid (0x2C) and Media Assist for calls / media (0x53 record flags); null keeps what is shown. They
+    /// share Hearing Assist (0x33), on while any of them is on. A raw byte is written only when it differs, so a flag
+    /// left on under 0x33 off (shown off) is written off before 0x33 turns on. 0x33 turning on: the others, 300 ms,
+    /// 0x33. Off: 0x33, 300 ms, the others. Requires enrollment; Media Assist also a reported 0x53 record.
+    /// </summary>
+    private async Task<bool> SetHearingModesAsync(bool? hearingAid, bool? calls, bool? media, CancellationToken ct)
     {
         if (State.HearingAidEnrolled != true)
         {
             throw new InvalidOperationException("Hearing Aid has not been reported as configured on this AirPods device.");
         }
-        byte[] hearingAid = Aap.HearingAid(on);
-        byte[] hearingAssist = Aap.Setting(Aap.HearingAssistId, Aap.Bool(on));
-        if (!await SendSettingAsync(on ? hearingAid : hearingAssist, ct).ConfigureAwait(false))
+        await _hearingGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            return false;
+            DeviceState s = State;
+            byte[]? record = s.MediaAssistRecord;
+            if (record is null && (calls is not null || media is not null))
+            {
+                throw new InvalidOperationException("Media Assist has not been reported by this AirPods device.");
+            }
+            bool aid = hearingAid ?? s.HearingAidEnabled;
+            bool assistCalls = calls ?? s.MediaAssistCalls == true;
+            bool assistMedia = media ?? s.MediaAssistMedia == true;
+            List<byte[]> modes = [];
+            if (s.HearingAidEnabledByte != Aap.Bool(aid))
+            {
+                modes.Add(Aap.HearingAid(aid));
+            }
+            if (record is not null
+                && (record[Aap.MediaAssistCallsOffset] != Aap.Bool(assistCalls) || record[Aap.MediaAssistMediaOffset] != Aap.Bool(assistMedia)))
+            {
+                modes.Add(Aap.MediaAssist(record, assistCalls, assistMedia));
+            }
+            bool assist = aid || assistCalls || assistMedia;
+            Log.Info("aap", $"hearing modes requested: hearing aid {aid}, media assist calls {assistCalls}, media {assistMedia}");
+            if (s.HearingAssist == assist)
+            {
+                return await SendHearingModesAsync(modes, ct).ConfigureAwait(false);
+            }
+            byte[] hearingAssist = Aap.Setting(Aap.HearingAssistId, Aap.Bool(assist));
+            if (assist)
+            {
+                if (!await SendHearingModesAsync(modes, ct).ConfigureAwait(false))
+                {
+                    return false;
+                }
+                if (modes.Count > 0)
+                {
+                    await Task.Delay(300, ct).ConfigureAwait(false);
+                }
+                return await SendSettingAsync(hearingAssist, ct).ConfigureAwait(false);
+            }
+            if (!await SendSettingAsync(hearingAssist, ct).ConfigureAwait(false))
+            {
+                return false;
+            }
+            if (modes.Count > 0)
+            {
+                await Task.Delay(300, ct).ConfigureAwait(false);
+            }
+            return await SendHearingModesAsync(modes, ct).ConfigureAwait(false);
         }
-        await Task.Delay(300, ct).ConfigureAwait(false);
-        return await SendSettingAsync(on ? hearingAssist : hearingAid, ct).ConfigureAwait(false);
+        finally
+        {
+            _hearingGate.Release();
+        }
+    }
+
+    // 0x2C settings and 0x53 records in order; false at the first one not written.
+    private async ValueTask<bool> SendHearingModesAsync(List<byte[]> packets, CancellationToken ct)
+    {
+        foreach (byte[] packet in packets)
+        {
+            bool written = Aap.IsSetting(packet)
+                ? await SendSettingAsync(packet, ct).ConfigureAwait(false)
+                : await SendMediaAssistAsync(packet, ct).ConfigureAwait(false);
+            if (!written)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>
@@ -729,7 +805,7 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // NTPods timing: init packets with 180/220 ms gaps, power-on, 120 ms, stream 0x54, 120 ms, stream 0x13.
+    // Timing: init packets with 180/220 ms gaps, power-on, 120 ms, stream 0x54, 120 ms, stream 0x13.
     private async Task<bool> SendHeartRateStartAsync(CancellationToken ct) =>
         await WriteAsync(Aap.HeartRateConnectService0, ct).ConfigureAwait(false)
         && await DelayTrue(180, ct).ConfigureAwait(false)
@@ -883,6 +959,25 @@ public sealed class AapSession : IAsyncDisposable
         lock (_stateLock)
         {
             DeviceChange change = Aap.ApplySetting(packet, State);
+            if (change != DeviceChange.None)
+            {
+                Changed?.Invoke(change);
+                SavePodSettings(change);
+            }
+        }
+        return true;
+    }
+
+    // Writes a 0x53 record, then applies it as the device report would (optimistic update; the AirPods do not echo it).
+    private async ValueTask<bool> SendMediaAssistAsync(byte[] packet, CancellationToken ct)
+    {
+        if (!await WriteAsync(packet, ct).ConfigureAwait(false))
+        {
+            return false;
+        }
+        lock (_stateLock)
+        {
+            DeviceChange change = Aap.Apply(packet, State);
             if (change != DeviceChange.None)
             {
                 Changed?.Invoke(change);

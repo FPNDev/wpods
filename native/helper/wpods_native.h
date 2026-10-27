@@ -28,6 +28,8 @@ int32_t __stdcall wpn_bt_connect_audio(uint64_t btAddress);
 // Same lookup, KSPROPERTY_ONESHOT_DISCONNECT: asks Windows to drop the device's BT audio
 // connection (Mac-like Disconnect). Same return semantics; confirm via ACL link event.
 int32_t __stdcall wpn_bt_disconnect_audio(uint64_t btAddress);
+// Same, on the Hands-Free filter(s) only: drops the Hands-Free connection (and its call audio), A2DP stays.
+int32_t __stdcall wpn_bt_disconnect_handsfree(uint64_t btAddress);
 
 // Media functions below: synchronous (each WinRT call waits at most 3 s), call off the UI thread;
 // they never initialize COM on the caller's thread (implicit MTA, see wpods_native.cpp). They are serialized.
@@ -51,6 +53,10 @@ void __stdcall wpn_media_forget(void);
 // the present BTHENUM\DEV_<address> devnode; A2DP and Hands-Free endpoints share it), 0 if not or
 // if there is no default render endpoint, negative HRESULT on error.
 int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress);
+// Returns 1 if an app records from the paired Classic BT device's mic (an active audio session on a
+// capture endpoint with its container ID: only Hands-Free has one), 0 if not or if there is no such
+// endpoint, negative HRESULT on error. Synchronous, call off the UI thread.
+int32_t __stdcall wpn_bt_handsfree_mic_in_use(uint64_t btAddress);
 // Sets flush-to-zero (0x8000) and denormals-are-zero (0x0040) in the calling thread's MXCSR and returns the
 // previous MXCSR. Pair with wpn_fp_restore on the same thread, so a thread-pool thread is handed back unchanged.
 uint32_t __stdcall wpn_fp_set_ftz_daz(void);

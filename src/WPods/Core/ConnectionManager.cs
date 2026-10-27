@@ -106,6 +106,12 @@ public sealed class ConnectionManager : IAsyncDisposable
     /// <summary>Applying the Hands-Free policy on attach failed.</summary>
     public event Action<ulong, Exception>? HandsFreeFailed;
 
+    /// <summary>
+    /// True when applying the Hands-Free policy on attach starts a real change in Windows, false when that change
+    /// ended (applied or failed). Raised on a thread-pool thread.
+    /// </summary>
+    public event Action<ulong, bool>? HandsFreeChanging;
+
     public void Start()
     {
         Log.Info("conn", $"start, lastUsed={Mac.Format(Settings.LastUsed)}");
@@ -302,7 +308,14 @@ public sealed class ConnectionManager : IAsyncDisposable
         Settings.Set(address, settings);
         if (handsFreeChanged && Session?.Address == address)
         {
-            await ApplyHandsFreeAsync(address, settings.DisableHandsFree).ConfigureAwait(false);
+            if (settings.DisableHandsFree)
+            {
+                await ApplyHandsFreeAsync(address, disable: true).ConfigureAwait(false);
+            }
+            else
+            {
+                await ApplyHandsFreeAsync(address, disable: false, retries: 3, retryDelayMs: 1000).ConfigureAwait(false);
+            }
         }
     }
 
@@ -816,30 +829,52 @@ public sealed class ConnectionManager : IAsyncDisposable
 
     private async Task ApplyHandsFreeOnAttachAsync(ulong address)
     {
+        // Set on the SetEnabled thread before Windows changes the service; read after the await.
+        bool changing = false;
         try
         {
-            await ApplyHandsFreeAsync(address, Settings.Get(address).DisableHandsFree).ConfigureAwait(false);
+            await ApplyHandsFreeAsync(address, Settings.Get(address).DisableHandsFree, () =>
+            {
+                if (!changing)
+                {
+                    changing = true;
+                    HandsFreeChanging?.Invoke(address, true);
+                }
+            }).ConfigureAwait(false);
         }
         catch (Exception e) when (e is Win32Exception or InvalidOperationException)
         {
             Log.Warn("conn", $"hands-free on attach failed: {e.Message}");
             HandsFreeFailed?.Invoke(address, e);
         }
+        finally
+        {
+            if (changing)
+            {
+                HandsFreeChanging?.Invoke(address, false);
+            }
+        }
     }
 
-    // One retry after 750 ms for the transient errors Windows reports right after a connect.
-    private static async Task ApplyHandsFreeAsync(ulong address, bool disable)
+    // Retries (count, delay ms) for the transient errors Windows reports right after a connect, and, for a user's
+    // enable, the ones it reports for a second or two after Hands-Free was disabled. changing: see
+    // HandsFree.SetEnabled.
+    private static async Task ApplyHandsFreeAsync(ulong address, bool disable, Action? changing = null, int retries = 1, int retryDelayMs = 750)
     {
         Log.Info("conn", $"hands-free {Mac.Format(address)}: {(disable ? "disable" : "enable")}");
-        try
+        for (int attempt = 1; ; attempt++)
         {
-            await Task.Run(() => HandsFree.SetEnabled(address, !disable)).ConfigureAwait(false);
-        }
-        catch (Win32Exception e) when (e.NativeErrorCode is Native.ErrorServiceDoesNotExist or Native.ErrorNotFound or Native.ErrorInvalidParameter)
-        {
-            Log.Info("conn", $"hands-free: error {e.NativeErrorCode}, retrying in 750 ms");
-            await Task.Delay(750).ConfigureAwait(false);
-            await Task.Run(() => HandsFree.SetEnabled(address, !disable)).ConfigureAwait(false);
+            try
+            {
+                await Task.Run(() => HandsFree.SetEnabled(address, !disable, changing)).ConfigureAwait(false);
+                break;
+            }
+            catch (Win32Exception e) when (attempt <= retries
+                && e.NativeErrorCode is Native.ErrorServiceDoesNotExist or Native.ErrorNotFound or Native.ErrorInvalidParameter)
+            {
+                Log.Info("conn", $"hands-free: error {e.NativeErrorCode}, retry {attempt}/{retries} in {retryDelayMs} ms");
+                await Task.Delay(retryDelayMs).ConfigureAwait(false);
+            }
         }
         Log.Info("conn", "hands-free applied");
     }

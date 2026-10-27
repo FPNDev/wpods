@@ -133,6 +133,7 @@ internal sealed partial class TrayApp : ApplicationContext
         connections.DevicesChanged += () => MarkDirty(Dirty.Devices);
         connections.LinkChanged += OnLinkChanged;
         connections.HandsFreeFailed += (address, _) => QueueToast("handsFreeFailed", address);
+        connections.HandsFreeChanging += (address, applying) => _ui.Post(_ => SetHandsFreeApplying(address, applying), null);
         settings.HostSettingsChanged += OnHostSettingsChanged;
         mic.StatusChanged += OnMicStatus;
         mic.StageChanged += OnMicStage;
@@ -511,6 +512,7 @@ internal sealed partial class TrayApp : ApplicationContext
         Utf8JsonWriter w = _writer.Begin("hostSettings");
         w.WriteString("id", Mac.Format(address));
         MessageWriter.WriteHost(w, _settings.Get(address));
+        w.WriteBoolean("handsFreeApplying", _handsFreeApplying.ContainsKey(address));
         PostMain(_writer.End());
     }
 

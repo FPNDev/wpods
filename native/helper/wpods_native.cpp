@@ -8,6 +8,7 @@
 #include <windows.h>
 #include <cfgmgr32.h>
 #include <mmdeviceapi.h>
+#include <audiopolicy.h>
 #include <ks.h>
 #include <ksmedia.h>
 #include <devicetopology.h>
@@ -150,8 +151,9 @@ bool find_container_id(uint64_t address, GUID& containerId)
     return false;
 }
 
-// KS filter IDs (BTHENUM = A2DP, BTHHFENUM = Hands-Free) wired to the audio endpoints of the device.
-std::vector<std::wstring> find_bt_audio_filters(IMMDeviceEnumerator* enumerator, uint64_t address)
+// KS filter IDs (BTHENUM = A2DP, BTHHFENUM = Hands-Free) wired to the audio endpoints of the device; only the
+// Hands-Free ones when handsFreeOnly.
+std::vector<std::wstring> find_bt_audio_filters(IMMDeviceEnumerator* enumerator, uint64_t address, bool handsFreeOnly)
 {
     std::vector<std::wstring> filters;
     GUID containerId;
@@ -188,8 +190,8 @@ std::vector<std::wstring> find_bt_audio_filters(IMMDeviceEnumerator* enumerator,
         CoTaskMemFree(filterId);
         std::wstring lower = filter;
         _wcslwr_s(lower.data(), lower.size() + 1);
-        bool const btFilter = lower.find(L"\\\\?\\bthenum") != std::wstring::npos ||
-            lower.find(L"\\\\?\\bthhfenum") != std::wstring::npos;
+        bool const handsFree = lower.find(L"\\\\?\\bthhfenum") != std::wstring::npos;
+        bool const btFilter = handsFree || (!handsFreeOnly && lower.find(L"\\\\?\\bthenum") != std::wstring::npos);
         if (btFilter && std::find(filters.begin(), filters.end(), filter) == filters.end()) {
             filters.push_back(std::move(filter));
         }
@@ -197,12 +199,12 @@ std::vector<std::wstring> find_bt_audio_filters(IMMDeviceEnumerator* enumerator,
     return filters;
 }
 
-int32_t send_oneshot(uint64_t address, ULONG propertyId) noexcept
+int32_t send_oneshot(uint64_t address, ULONG propertyId, bool handsFreeOnly) noexcept
 {
     try {
         winrt::check_hresult(ensure_mta());
         auto const enumerator = winrt::create_instance<IMMDeviceEnumerator>(__uuidof(MMDeviceEnumerator));
-        auto const filters = find_bt_audio_filters(enumerator.get(), address);
+        auto const filters = find_bt_audio_filters(enumerator.get(), address, handsFreeOnly);
         if (filters.empty()) {
             return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
         }
@@ -450,12 +452,17 @@ void __stdcall wpn_ble_stop(void)
 
 int32_t __stdcall wpn_bt_connect_audio(uint64_t btAddress)
 {
-    return send_oneshot(btAddress, KSPROPERTY_ONESHOT_RECONNECT);
+    return send_oneshot(btAddress, KSPROPERTY_ONESHOT_RECONNECT, false);
 }
 
 int32_t __stdcall wpn_bt_disconnect_audio(uint64_t btAddress)
 {
-    return send_oneshot(btAddress, KSPROPERTY_ONESHOT_DISCONNECT);
+    return send_oneshot(btAddress, KSPROPERTY_ONESHOT_DISCONNECT, false);
+}
+
+int32_t __stdcall wpn_bt_disconnect_handsfree(uint64_t btAddress)
+{
+    return send_oneshot(btAddress, KSPROPERTY_ONESHOT_DISCONNECT, true);
 }
 
 int32_t __stdcall wpn_media_pause_all(void)
@@ -602,6 +609,53 @@ int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress)
         PropVariantClear(&value);
         GUID deviceContainer;
         return hasContainer && find_container_id(btAddress, deviceContainer) && endpointContainer == deviceContainer ? 1 : 0;
+    } catch (...) {
+        return winrt::to_hresult();
+    }
+}
+
+int32_t __stdcall wpn_bt_handsfree_mic_in_use(uint64_t btAddress)
+{
+    try {
+        winrt::check_hresult(ensure_mta());
+        GUID containerId;
+        if (!find_container_id(btAddress, containerId)) {
+            return 0;
+        }
+        auto const enumerator = winrt::create_instance<IMMDeviceEnumerator>(__uuidof(MMDeviceEnumerator));
+        winrt::com_ptr<IMMDeviceCollection> endpoints;
+        winrt::check_hresult(enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, endpoints.put()));
+        UINT count = 0;
+        winrt::check_hresult(endpoints->GetCount(&count));
+        for (UINT i = 0; i < count; ++i) {
+            winrt::com_ptr<IMMDevice> endpoint;
+            winrt::com_ptr<IPropertyStore> properties;
+            if (FAILED(endpoints->Item(i, endpoint.put())) || FAILED(endpoint->OpenPropertyStore(STGM_READ, properties.put()))) {
+                continue;
+            }
+            PROPVARIANT value;
+            PropVariantInit(&value);
+            bool const sameDevice = SUCCEEDED(properties->GetValue(PKEY_Device_ContainerId, &value)) &&
+                value.vt == VT_CLSID && *value.puuid == containerId;
+            PropVariantClear(&value);
+            winrt::com_ptr<IAudioSessionManager2> manager;
+            winrt::com_ptr<IAudioSessionEnumerator> sessions;
+            int sessionCount = 0;
+            if (!sameDevice ||
+                FAILED(endpoint->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, manager.put_void())) ||
+                FAILED(manager->GetSessionEnumerator(sessions.put())) || FAILED(sessions->GetCount(&sessionCount))) {
+                continue;
+            }
+            for (int s = 0; s < sessionCount; ++s) {
+                winrt::com_ptr<IAudioSessionControl> session;
+                AudioSessionState state;
+                if (SUCCEEDED(sessions->GetSession(s, session.put())) && SUCCEEDED(session->GetState(&state)) &&
+                    state == AudioSessionStateActive) {
+                    return 1;
+                }
+            }
+        }
+        return 0;
     } catch (...) {
         return winrt::to_hresult();
     }

@@ -5,6 +5,7 @@ export type PageName =
   | "empty"
   | "home"
   | "controls"
+  | "hearing"
   | "windows"
   | "language"
   | "pair"

@@ -4,7 +4,7 @@ import { createSwitchRow, type SwitchRow } from "../components/switchRow";
 import { setChecked, setDisabled, setHidden, setText } from "../dom";
 import { post } from "../host";
 import { t } from "../i18n";
-import { Icon } from "../icons";
+import { Icon, Spinner } from "../icons";
 import type { Theme } from "../protocol";
 import { current, live, store } from "../state";
 import { getTheme, getUseAccent, setThemePrefs } from "../theme";
@@ -31,6 +31,14 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     desc: "windows.handsFreeDesc",
     onChange: hostToggle("disableHandsFree"),
   });
+  // While the host applies a change (Windows takes a few seconds) a spinner takes the switch's place.
+  const handsFreeSwitch = handsFree.row.lastElementChild as HTMLElement;
+  const handsFreeSpin = (
+    <span class="wp-switch-spin" role="img" l:aria-label="common.checking" hidden>
+      <Spinner class="wp-spinner--sm" />
+    </span>
+  ) as HTMLSpanElement;
+  handsFree.row.append(handsFreeSpin);
   const latency = createSwitchRow({
     id: "latencyTitle",
     title: "windows.latency",
@@ -129,7 +137,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     </div>
   ) as HTMLDivElement;
 
-  const renderHost = (row: SwitchRow, on: boolean, locked: boolean): void => {
+  const renderHost =(row: SwitchRow, on: boolean, locked: boolean): void => {
     setChecked(row.input, on);
     setDisabled(row.input, locked);
   };
@@ -141,6 +149,9 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     const locked = !live(d);
     setText(forDevice, t("windows.forDevice", { name: d.name }));
     renderHost(handsFree, d.host.disableHandsFree, locked);
+    const applying = store.handsFreeApplying.has(d.id);
+    setHidden(handsFreeSwitch, applying);
+    setHidden(handsFreeSpin, !applying);
     renderHost(latency, d.host.lowLatency, locked);
     setHidden(latencyNote, !d.host.lowLatency);
     setChecked(startup.input, store.startup);

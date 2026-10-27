@@ -33,6 +33,13 @@ internal static class Aap
     public const byte RightComponent = 0x02;
     public const byte LeftComponent = 0x04;
 
+    // Media Assist record (opcode 0x53, "PME record"):
+    // 04 00 04 00 53 00, length 84 00, version 02, voice enrolled, calls flag, media flag (01 on, 02 off), then four
+    // eight-float32 curves. Writes send the reported record back with only the two flags changed, as Apple hosts do.
+    public const int MediaAssistLength = 140;
+    public const int MediaAssistCallsOffset = 10;
+    public const int MediaAssistMediaOffset = 11;
+
     public const byte HeartRateService = 0x54;
     public const byte HeartRateLegacyService = 0x13;
 
@@ -43,7 +50,7 @@ internal static class Aap
     public static readonly byte[] FeatureFlags = [0x04, 0x00, 0x04, 0x00, 0x4D, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
     /// <summary>
     /// 0x0F notification filter. Byte 3 (packet byte 8) tells the buds the host's Ear detection setting like Apple
-    /// hosts do: FF = on, FD = off (LibrePods AACPManager: "third byte is 0xfd when ear detection is disabled").
+    /// hosts do: FF = on, FD = off.
     /// </summary>
     public static byte[] RequestNotifications(bool earDetection) =>
         [0x04, 0x00, 0x04, 0x00, 0x0F, 0x00, 0xFF, 0xFF, earDetection ? (byte)0xFF : (byte)0xFD, 0xFF];
@@ -70,6 +77,15 @@ internal static class Aap
 
     /// <summary>0x2C: byte 7 = enrolled (always 01 when sent), byte 8 = enabled.</summary>
     public static byte[] HearingAid(bool on) => Setting(HearingAidId, 0x01, Bool(on));
+
+    /// <summary>A reported 0x53 record with the calls and media flags set; every other byte unchanged.</summary>
+    public static byte[] MediaAssist(ReadOnlySpan<byte> record, bool calls, bool media)
+    {
+        byte[] packet = record.ToArray();
+        packet[MediaAssistCallsOffset] = Bool(calls);
+        packet[MediaAssistMediaOffset] = Bool(media);
+        return packet;
+    }
 
     public static byte[] HeartRateStream(byte sequence, byte service, uint periodUs) =>
     [
@@ -120,6 +136,10 @@ internal static class Aap
                 }
                 state.ConversationLevel = p[9];
                 return DeviceChange.ConversationLevel;
+            case 0x53:
+                return IsMediaAssistRecord(p)
+                    ? (state.SetMediaAssist(p) ? DeviceChange.Settings : DeviceChange.None) | state.Observe(DeviceCapabilities.MediaAssist)
+                    : DeviceChange.None;
             default:
                 return DeviceChange.None;
         }
@@ -170,7 +190,7 @@ internal static class Aap
     private static DeviceChange ApplyBattery(ReadOnlySpan<byte> p, DeviceState state)
     {
         bool changed = false;
-        // LibrePods: the first pod component in the packet is the primary bud.
+        // The first pod component in the packet is the primary bud.
         byte firstPod = 0;
         int count = p[6];
         for (int i = 0; i < count; i++)
@@ -200,6 +220,11 @@ internal static class Aap
         DeviceChange change = changed ? DeviceChange.Battery : DeviceChange.None;
         return firstPod == 0 ? change : change | state.SetPrimaryPod(firstPod, fromBudRole: false);
     }
+
+    // Length 0x84, version 02 and enrolled/calls/media bytes 00..02; other 0x53 messages are ignored.
+    private static bool IsMediaAssistRecord(ReadOnlySpan<byte> p) =>
+        p.Length == MediaAssistLength && p[6] == 0x84 && p[7] == 0x00 && p[8] == 0x02
+        && p[9] <= 2 && p[MediaAssistCallsOffset] <= 2 && p[MediaAssistMediaOffset] <= 2;
 
     private static DeviceChange ApplyEar(ReadOnlySpan<byte> p, DeviceState state)
     {
@@ -248,7 +273,7 @@ internal static class Aap
         }
     }
 
-    // Setting ids per LibrePods AACPManager.ControlCommandIdentifiers (0x2E AUTO_ANC_STRENGTH, 0x30 HRM_STATE).
+    // Setting ids: 0x2E AUTO_ANC_STRENGTH, 0x30 HRM_STATE.
     private static DeviceCapabilities CapabilityOf(byte id, byte value) => id switch
     {
         ListeningModeId when value == (byte)ListeningMode.Adaptive => DeviceCapabilities.ListeningMode | DeviceCapabilities.Adaptive,

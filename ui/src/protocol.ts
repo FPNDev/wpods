@@ -22,6 +22,7 @@ export type Capability =
   | "holdDuration"
   | "toneVolume"
   | "hearingAid"
+  | "mediaAssist"
   | "heartRate"
   | "singleBattery";
 export type Conn =
@@ -94,6 +95,8 @@ type Settings = {
   toneVolume: number | null;
   hearingAidEnrolled: boolean | null;
   hearingAidEnabled: boolean;
+  mediaAssistCalls: boolean | null;
+  mediaAssistMedia: boolean | null;
 };
 type Saved = Settings & { listeningMode: ListeningMode | null };
 export type State = Settings & {
@@ -186,7 +189,12 @@ export type HostToMain =
   | { type: "heartRate"; heartRate: HeartRate; heartRateBpm: number | null }
   | { type: "caps"; caps: Capability[] }
   | { type: "checking"; checking: boolean; ready: boolean }
-  | { type: "hostSettings"; id: DeviceId; host: HostSettings }
+  | {
+      type: "hostSettings";
+      id: DeviceId;
+      host: HostSettings;
+      handsFreeApplying: boolean;
+    }
   | { type: "mic"; status: MicStatus }
   | { type: "micConfig"; config: MicConfig }
   | { type: "micStage"; slot: MicSlot; id: string | null; state: StageLoad }
@@ -207,6 +215,7 @@ export type MainToHost =
       type: "setHeartRate" | "setHearingAid" | "setAccent" | "setStartup";
       value: boolean;
     }
+  | { type: "setMediaAssist"; name: "calls" | "media"; value: boolean }
   | { type: "setMicSide"; side: MicSide }
   | { type: "setPressSpeed"; value: PressSpeed }
   | { type: "setHoldDuration"; value: HoldDuration }

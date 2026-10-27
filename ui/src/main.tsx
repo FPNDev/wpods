@@ -8,6 +8,7 @@ import { createControls } from "./pages/controls";
 import { createEmpty } from "./pages/empty";
 import { createEnhancement } from "./pages/enhancement";
 import { createFirstRun } from "./pages/firstRun";
+import { createHearing } from "./pages/hearing";
 import { createHome } from "./pages/home";
 import { createLanguage } from "./pages/language";
 import { createLegal } from "./pages/legal";
@@ -30,6 +31,7 @@ const ROUTES: Record<PageName, Route> = {
   empty: { create: createEmpty, title: null, parent: null },
   home: { create: createHome, title: null, parent: null },
   controls: { create: createControls, title: "controls.title", parent: "home" },
+  hearing: { create: createHearing, title: "hearing.title", parent: "home" },
   windows: {
     create: createWindowsSettings,
     title: "windows.title",

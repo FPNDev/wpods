@@ -52,6 +52,8 @@ public enum DeviceCapabilities
     HearingAid = 1 << 11,
     /// <summary>Heart-rate state 0x30 reported, or a heart-rate reading arrived.</summary>
     HeartRate = 1 << 12,
+    /// <summary>Media Assist record (AAP 0x53) reported.</summary>
+    MediaAssist = 1 << 13,
 }
 
 public enum SessionStatus
@@ -141,6 +143,8 @@ internal sealed record PodSettings
     public byte? ToneVolume { get; init; }
     public bool? HearingAidEnrolled { get; init; }
     public bool HearingAidEnabled { get; init; }
+    public bool? MediaAssistCalls { get; init; }
+    public bool? MediaAssistMedia { get; init; }
 }
 
 public enum HeartRateStatus
@@ -170,6 +174,8 @@ public sealed class DeviceState
     private readonly byte[] _settings = CreateSettings();
     private readonly Battery[] _batteries = new Battery[4];
     private byte _hearingAidEnabled = NotReported;
+    // Latest valid 0x53 record (Aap.MediaAssistLength bytes), replaced whole, never changed in place; null until reported.
+    private byte[]? _mediaAssist;
     private DeviceCapabilities _baseline;
     // AAP battery component of the primary bud (Aap.LeftComponent / RightComponent / HeadphoneComponent); 0 = unknown.
     private byte _primaryPod;
@@ -261,6 +267,17 @@ public sealed class DeviceState
     public bool? HearingAidEnrolled => Flag(Aap.HearingAidId);
     /// <summary>Hearing aid (0x2C enabled byte) and Hearing Assist (0x33) both on.</summary>
     public bool HearingAidEnabled => _hearingAidEnabled == 1 && _settings[Aap.HearingAssistId] == 1;
+    /// <summary>Media Assist for calls: the 0x53 calls flag and Hearing Assist (0x33) both on; null until 0x53 is reported.</summary>
+    public bool? MediaAssistCalls => MediaAssistOn(Aap.MediaAssistCallsOffset);
+    /// <summary>Media Assist for music and video: the 0x53 media flag and Hearing Assist (0x33) both on; null until 0x53 is reported.</summary>
+    public bool? MediaAssistMedia => MediaAssistOn(Aap.MediaAssistMediaOffset);
+
+    /// <summary>Raw 0x2C enabled byte (01 on, 02 off); FF until reported.</summary>
+    internal byte HearingAidEnabledByte => _hearingAidEnabled;
+    /// <summary>Raw Hearing Assist 0x33, shared by Hearing Aid and Media Assist.</summary>
+    internal bool? HearingAssist => Flag(Aap.HearingAssistId);
+    /// <summary>The latest 0x53 record; null until reported.</summary>
+    internal byte[]? MediaAssistRecord => _mediaAssist;
 
     /// <summary>Conversation-awareness level (0x4B byte 9).</summary>
     public byte? ConversationLevel { get; internal set; }
@@ -307,6 +324,8 @@ public sealed class DeviceState
         HearingAidEnrolled = HearingAidEnrolled ?? fallback.HearingAidEnrolled,
         // The enabled byte comes with 0x2C (enrolment).
         HearingAidEnabled = HearingAidEnrolled is null ? fallback.HearingAidEnabled : HearingAidEnabled,
+        MediaAssistCalls = MediaAssistCalls ?? fallback.MediaAssistCalls,
+        MediaAssistMedia = MediaAssistMedia ?? fallback.MediaAssistMedia,
     };
 
     internal DeviceChange SetBaseline(DeviceCapabilities baseline)
@@ -332,6 +351,16 @@ public sealed class DeviceState
             return false;
         }
         _hearingAidEnabled = value;
+        return true;
+    }
+
+    internal bool SetMediaAssist(ReadOnlySpan<byte> record)
+    {
+        if (_mediaAssist is { } current && record.SequenceEqual(current))
+        {
+            return false;
+        }
+        _mediaAssist = record.ToArray();
         return true;
     }
 
@@ -455,6 +484,9 @@ public sealed class DeviceState
         Aap.HeadphoneComponent => "headphone",
         _ => "unknown",
     };
+
+    private bool? MediaAssistOn(int offset) =>
+        _mediaAssist is { } record ? record[offset] == 1 && _settings[Aap.HearingAssistId] == 1 : null;
 
     private bool? Flag(byte id) => _settings[id] switch
     {

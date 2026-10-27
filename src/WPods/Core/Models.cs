@@ -11,7 +11,7 @@ public sealed record AirPodsModel(string Name, string Art, DeviceCapabilities Ca
 /// <summary>
 /// The single model table: display name + illustration by AAP 0x1D model number (A-number, names and numbers per
 /// Apple support 109525 "Identify your AirPods") and by proximity-advert model ID (advert bytes 3-4 read
-/// little-endian = Apple's Bluetooth product ID, e.g. 0x2024; per LibrePods and AirPodsDesktop). Which features to
+/// little-endian = Apple's Bluetooth product ID, e.g. 0x2024). Which features to
 /// show is <see cref="DeviceState.Capabilities"/>: what the device reported plus the baseline of its model here.
 /// </summary>
 public static class Models
@@ -24,8 +24,7 @@ public static class Models
 
     static Models()
     {
-        // Baselines per Apple's AirPods User Guide (support.apple.com/guide/airpods, iOS 27) and Apple support 104979,
-        // cross-checked with MagicPods' per-model pages (help.magicpods.app/headphones) and NTPods.
+        // Baselines per Apple's AirPods User Guide (support.apple.com/guide/airpods, iOS 27) and Apple support 104979.
         // Ear detection = Automatic Ear Detection (AirPods Max: Automatic Head Detection).
         const DeviceCapabilities airPods12 = DeviceCapabilities.EarDetection | DeviceCapabilities.MicSide;
         const DeviceCapabilities controls = DeviceCapabilities.PressSpeed | DeviceCapabilities.HoldDuration | DeviceCapabilities.ToneVolume;
@@ -34,7 +33,8 @@ public static class Models
         const DeviceCapabilities airPods4Anc = airPods4 | DeviceCapabilities.ListeningMode | DeviceCapabilities.Adaptive
             | DeviceCapabilities.ConversationAwareness | DeviceCapabilities.OneBudAnc;
         const DeviceCapabilities pro1 = airPods3 | DeviceCapabilities.ListeningMode | DeviceCapabilities.OneBudAnc;
-        const DeviceCapabilities pro2 = airPods4Anc | DeviceCapabilities.AllowOff | DeviceCapabilities.HearingAid;
+        const DeviceCapabilities pro2 = airPods4Anc | DeviceCapabilities.AllowOff | DeviceCapabilities.HearingAid
+            | DeviceCapabilities.MediaAssist;
         const DeviceCapabilities max1 = DeviceCapabilities.EarDetection | controls | DeviceCapabilities.ListeningMode;
         const DeviceCapabilities max2 = max1 | DeviceCapabilities.Adaptive | DeviceCapabilities.ConversationAwareness
             | DeviceCapabilities.PersonalizedVolume;

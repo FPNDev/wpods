@@ -164,6 +164,8 @@ internal sealed class MessageWriter
         WriteNumber(w, "toneVolume", pod.ToneVolume);
         WriteBool(w, "hearingAidEnrolled", pod.HearingAidEnrolled);
         w.WriteBoolean("hearingAidEnabled", pod.HearingAidEnabled);
+        WriteBool(w, "mediaAssistCalls", pod.MediaAssistCalls);
+        WriteBool(w, "mediaAssistMedia", pod.MediaAssistMedia);
     }
 
     // Pod-saved settings to show: while checking, the remembered value for each one not reported yet (display only,

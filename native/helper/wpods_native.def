@@ -4,6 +4,8 @@ EXPORTS
     wpn_ble_stop
     wpn_bt_connect_audio
     wpn_bt_disconnect_audio
+    wpn_bt_disconnect_handsfree
+    wpn_bt_handsfree_mic_in_use
     wpn_media_pause_all
     wpn_media_resume_paused
     wpn_media_forget

@@ -15,11 +15,13 @@ internal sealed partial class TrayApp
 {
     private static readonly TimeSpan LinkWait = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan HandsFreeDropTimeout = TimeSpan.FromSeconds(5);
 
     // User-initiated connects in progress (conn "connecting"), their cancel sources (own link waits) and cancel requests.
     private readonly HashSet<ulong> _connecting = [];
     private readonly Dictionary<ulong, CancellationTokenSource> _connectCancels = [];
     private readonly HashSet<ulong> _cancelled = [];
+    private readonly Dictionary<ulong, int> _handsFreeApplying = [];
     // Link-up and attach waits of user connects, completed from core threads.
     private readonly Lock _linkLock = new();
     private readonly Dictionary<ulong, TaskCompletionSource> _linkWaits = [];
@@ -71,6 +73,13 @@ internal sealed partial class TrayApp
             {
                 bool on = m.Value.GetBoolean();
                 RunCommand((s, ct) => new ValueTask<bool>(s.SetHearingAidAsync(on, ct)), Dirty.Settings);
+                break;
+            }
+            case "setMediaAssist" when m.Name is "calls" or "media" && m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+            {
+                bool on = m.Value.GetBoolean();
+                bool calls = m.Name == "calls";
+                RunCommand((s, ct) => new ValueTask<bool>(calls ? s.SetMediaAssistCallsAsync(on, ct) : s.SetMediaAssistMediaAsync(on, ct)), Dirty.Settings);
                 break;
             }
             case "setMicSide" when MessageWriter.TryParse(m.Side, out MicSide side):
@@ -454,12 +463,24 @@ internal sealed partial class TrayApp
             "duckPercent" when value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int duck) && duck is >= 10 and <= 90 => current with { DuckPercent = duck },
             _ => null,
         };
-        // Host settings are editable only for the attached pair; anything else just gets the saved value back.
-        if (next is not null && attached)
+        bool handsFree = next is not null && next.DisableHandsFree != current.DisableHandsFree;
+        // Host settings are editable only for the attached pair, and Hands-Free one change at a time; anything else
+        // just gets the saved value back.
+        if (next is not null && attached && !(handsFree && _handsFreeApplying.ContainsKey(address)))
         {
+            if (handsFree)
+            {
+                SetHandsFreeApplying(address, true);
+            }
             int lowLatencyFailures = Volatile.Read(ref _lowLatencyFailures);
             try
             {
+                // Disabling the Hands-Free service while it is in use leaves Windows' A2DP stream paused for good: drop
+                // the Hands-Free connection first.
+                if (next.DisableHandsFree && !current.DisableHandsFree && _mic.HandsFreeInUse)
+                {
+                    await DropHandsFreeAsync(address);
+                }
                 await _connections.SetHostSettingsAsync(address, next);
                 // The keep-alive raises Failed synchronously inside the call when Windows refuses the sound: switch back.
                 if (next.LowLatency && !current.LowLatency && Volatile.Read(ref _lowLatencyFailures) != lowLatencyFailures)
@@ -473,8 +494,54 @@ internal sealed partial class TrayApp
                 SendToast("handsFreeFailed", address);
                 await RevertHandsFreeAsync(address, current);
             }
+            finally
+            {
+                if (handsFree)
+                {
+                    SetHandsFreeApplying(address, false);
+                }
+            }
         }
         SendHostSettings(address);
+    }
+
+    // Counts one Hands-Free change in or out; the loader shows while any runs (sent when that changes).
+    private void SetHandsFreeApplying(ulong address, bool applying)
+    {
+        int count = _handsFreeApplying.GetValueOrDefault(address) + (applying ? 1 : -1);
+        if (count > 0)
+        {
+            _handsFreeApplying[address] = count;
+        }
+        else
+        {
+            _handsFreeApplying.Remove(address);
+        }
+        if (count == (applying ? 1 : 0))
+        {
+            SendHostSettings(address);
+        }
+    }
+
+    // Asks Windows to disconnect the pair's Hands-Free connection (A2DP stays) and waits until Hands-Free is no
+    // longer in use, at most HandsFreeDropTimeout.
+    private async Task DropHandsFreeAsync(ulong address)
+    {
+        int hr = await Task.Run(() => Native.wpn_bt_disconnect_handsfree(address));
+        Log.Info("ui", $"hands-free {Mac.Format(address)}: in use, disconnect hands-free hr=0x{hr:X8}");
+        if (hr < 0)
+        {
+            return;
+        }
+        try
+        {
+            await _mic.HandsFreeEndedAsync().WaitAsync(HandsFreeDropTimeout);
+            Log.Info("ui", "hands-free: no longer in use");
+        }
+        catch (TimeoutException)
+        {
+            Log.Warn("ui", $"hands-free: still in use after {HandsFreeDropTimeout.TotalSeconds} s");
+        }
     }
 
     // Under MicPipeline's lock (serialized); applied on the UI thread in the same order.

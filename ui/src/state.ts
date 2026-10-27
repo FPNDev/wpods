@@ -86,6 +86,7 @@ export const store = {
   >,
   lastBattery: new Map<DeviceId, Batteries>(),
   lowSaid: new Set<string>(),
+  handsFreeApplying: new Set<DeviceId>(),
   announce: "",
   toast: null as ToastId | null,
   toastDevice: null as DeviceId | null,
@@ -282,6 +283,11 @@ export const apply = (msg: HostToMain): void => {
       break;
     case "hostSettings": {
       const d = store.byId.get(msg.id);
+      if (msg.handsFreeApplying) {
+        store.handsFreeApplying.add(msg.id);
+      } else {
+        store.handsFreeApplying.delete(msg.id);
+      }
       if (d) {
         d.host = msg.host;
         mark("mic", "windows", "controls");

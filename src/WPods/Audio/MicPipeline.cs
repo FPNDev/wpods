@@ -57,6 +57,12 @@ public sealed class MicPipeline
     private const int PcmCapacity = 2048;
     private const int StallAfterMs = 8000;
     private const int RestartEveryMs = 5000;
+    // Hands-Free mic check interval while an app captures. The AirPods drop the link when Hands-Free starts while
+    // their mic streams here, and they report Hands-Free call audio only after that.
+    private const int HandsFreePollMs = 50;
+    // No START for this long after Hands-Free is enabled or starts being used: Windows lets it go and takes it again
+    // within that time, and a START in between makes the AirPods drop the link.
+    private const int HandsFreeHoldMs = 3000;
     private const int MaxConsecutiveErrors = 8;
     private const int LevelLogIntervalMs = 1000;
     // Applied to the decoded signal before mode processing. Measured on AirPods Pro 2: normal speech
@@ -64,7 +70,7 @@ public sealed class MicPipeline
     private const float MakeUpGain = 4f;
 
     private static readonly byte[] StartMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x01, 0x82, 0x00, 0x00, 0x00, 0x04, 0x96, 0x00];
-    // From LibrePods (AACP_STOP_AUDIO).
+    // AACP_STOP_AUDIO.
     private static readonly byte[] StopMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x02, 0x00, 0x03, 0x01];
 
     private readonly ConnectionManager _connections;
@@ -72,6 +78,7 @@ public sealed class MicPipeline
     private readonly VirtualMic _mic;
     private readonly Lock _lock = new();
     private readonly Timer _timer;
+    private readonly Timer _handsFreePoll;
 
     // Read-loop state (one session at a time; reset on detach after its read loop ended).
     private readonly float[] _pcm = GC.AllocateArray<float>(PcmCapacity, pinned: true);
@@ -101,6 +108,16 @@ public sealed class MicPipeline
     private long _lastStart;
     private long _lastAudio;
     private volatile bool _capturing;
+    // Hands-Free has the AirPods mic, so no START is sent while either is set: the AirPods report its call audio
+    // (0x0E state bit 0x01), or an app records from the Hands-Free mic (polled while capturing).
+    private bool _handsFreeAudio;
+    private bool _handsFreeMic;
+    // Completed when both turn false or the session detaches.
+    private TaskCompletionSource? _handsFreeEnded;
+    // No START before this tick (HandsFreeHoldMs); kept across a reattach.
+    private long _holdUntil;
+    // Saved DisableHandsFree of the attached pair, to see Hands-Free being enabled.
+    private bool _disableHandsFree;
     private volatile bool _flush;
     // Saved mic mode of the attached pair.
     private MicMode _mode;
@@ -113,6 +130,7 @@ public sealed class MicPipeline
         _model = new StageSlot("mode model", _lock, (id, load, code) => ReportLocked(MicSlot.Mode, id, load, code));
         _enhancement = new StageSlot("enhancement", _lock, (id, load, code) => ReportLocked(MicSlot.Enhancement, id, load, code));
         _timer = new Timer(static s => ((MicPipeline)s!).OnTimer(), this, Timeout.Infinite, Timeout.Infinite);
+        _handsFreePoll = new Timer(static s => ((MicPipeline)s!).OnHandsFreePoll(), this, Timeout.Infinite, Timeout.Infinite);
         _mic = new VirtualMic(OnCaptureChanged);
         connections.Attached += OnAttached;
         connections.Detached += OnDetached;
@@ -160,6 +178,38 @@ public sealed class MicPipeline
     public bool Capturing => _capturing;
 
     /// <summary>
+    /// Hands-Free is in use on the attached pair: the AirPods report its call audio (0x0E state bit 0x01), or, while
+    /// an app captures from the virtual mic, an app records from the Hands-Free mic.
+    /// </summary>
+    public bool HandsFreeInUse
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _handsFreeAudio || _handsFreeMic;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Completes when Hands-Free is no longer in use (<see cref="HandsFreeInUse"/>) or the session detaches; at once
+    /// when it is not.
+    /// </summary>
+    public Task HandsFreeEndedAsync()
+    {
+        lock (_lock)
+        {
+            if (!_handsFreeAudio && !_handsFreeMic)
+            {
+                return Task.CompletedTask;
+            }
+            _handsFreeEnded ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            return _handsFreeEnded.Task;
+        }
+    }
+
+    /// <summary>
     /// Stops the AirPods mic stream (0x58 STOP) when a START was sent in the attached session. Completes when the
     /// STOP was written, or at once when there is nothing to stop. Call before an intentional detach (user
     /// Disconnect, exit): AirPods cut off mid-stream may reconnect on their own.
@@ -184,11 +234,17 @@ public sealed class MicPipeline
             _startSent = false;
             _started = false;
             _startFailed = false;
+            ResetHandsFreeLocked();
             _mode = _settings.Get(session.Address).MicMode;
+            _disableHandsFree = _settings.Get(session.Address).DisableHandsFree;
             MicConfig config = _settings.Mic;
             Log.Info("mic", $"session {Mac.Format(session.Address)} attached, mode={_mode} (runs {config.EffectiveMode(_mode)}), capturing={_capturing}");
             RequestStagesLocked(config);
             UpdateStatusLocked("session attached");
+            if (_capturing)
+            {
+                _handsFreePoll.Change(0, Timeout.Infinite);
+            }
         }
         session.Changed += OnSessionChanged;
         session.PacketReceived += OnPacket;
@@ -204,6 +260,7 @@ public sealed class MicPipeline
             if (_session == session)
             {
                 _session = null;
+                ResetHandsFreeLocked();
                 UpdateStatusLocked("session detached");
             }
         }
@@ -227,11 +284,13 @@ public sealed class MicPipeline
         }
         lock (_lock)
         {
-            if (_capturing && !_startSent && _session is { } session && IsReady(session))
+            if (_capturing && !_startSent && !_handsFreeAudio && _session is { } session && IsReady(session))
             {
-                long now = Environment.TickCount64;
-                BeginWaitLocked(now, "session ready while capturing");
-                SendStartLocked(session, now, "session ready");
+                CheckHandsFreeMicLocked(session);
+                if (!_handsFreeMic)
+                {
+                    TryStartLocked(session, "session ready");
+                }
             }
         }
     }
@@ -240,12 +299,21 @@ public sealed class MicPipeline
     {
         lock (_lock)
         {
-            if (_session?.Address == address && _mode != settings.MicMode)
+            if (_session?.Address != address)
+            {
+                return;
+            }
+            if (_mode != settings.MicMode)
             {
                 _mode = settings.MicMode;
                 Log.Info("mic", $"mode -> {settings.MicMode}");
                 RequestStagesLocked(_settings.Mic);
             }
+            if (_disableHandsFree && !settings.DisableHandsFree)
+            {
+                HoldLocked("Hands-Free enabled");
+            }
+            _disableHandsFree = settings.DisableHandsFree;
         }
     }
 
@@ -275,6 +343,12 @@ public sealed class MicPipeline
             if (!_capturing)
             {
                 _timer.Change(Timeout.Infinite, Timeout.Infinite);
+                _handsFreePoll.Change(Timeout.Infinite, Timeout.Infinite);
+                _handsFreeMic = false;
+                if (!_handsFreeAudio)
+                {
+                    CompleteHandsFreeEndedLocked();
+                }
                 if (_startSent && _session is { } attached)
                 {
                     _ = StopLocked(attached, "capture stopped");
@@ -286,25 +360,39 @@ public sealed class MicPipeline
             _flush = true;
             long now = Environment.TickCount64;
             BeginWaitLocked(now, "app started capturing");
-            if (!_startSent && _session is { } session && IsReady(session))
+            if (_session is not null)
             {
-                SendStartLocked(session, now, "capture started");
+                _handsFreePoll.Change(0, Timeout.Infinite);
+            }
+            if (!_startSent && !_handsFreeAudio && _session is { } session && IsReady(session))
+            {
+                CheckHandsFreeMicLocked(session);
+                if (!_handsFreeMic)
+                {
+                    TryStartLocked(session, "capture started");
+                }
             }
         }
     }
 
-    // Stall re-send of START only. Silence never changes the status: the AirPods send nothing while it is quiet.
-    // Re-armed for the next deadline, so it fires about every 8 s while audio flows.
+    // The START held back by a Hands-Free hold, and the stall re-send of START. Silence never changes the status: the
+    // AirPods send nothing while it is quiet. Re-armed for the next deadline, so it fires about every 8 s while audio
+    // flows.
     private void OnTimer()
     {
         lock (_lock)
         {
-            if (!_capturing || _session is not { } session || !IsReady(session))
+            if (!_capturing || _handsFreeAudio || _handsFreeMic || _session is not { } session || !IsReady(session))
             {
-                // Capture start and session ready restart the wait.
+                // Capture start, session ready and the end of Hands-Free use restart the wait.
                 return;
             }
             long now = Environment.TickCount64;
+            if (!_startSent)
+            {
+                TryStartLocked(session, "Hands-Free hold ended");
+                return;
+            }
             long silent = now - Volatile.Read(ref _lastAudio);
             long sinceStart = now - _lastStart;
             if (silent >= StallAfterMs && sinceStart >= RestartEveryMs)
@@ -318,6 +406,20 @@ public sealed class MicPipeline
 
     private void OnPacket(ReadOnlySpan<byte> packet)
     {
+        // Audio state: 04 00 04 00 0E 00, source address (6 bytes, zero when none), state bits.
+        if (packet.Length == 13 && packet[0] == 0x04 && packet[2] == 0x04 && packet[4] == 0x0E)
+        {
+            bool callAudio = (packet[12] & 0x01) != 0;
+            lock (_lock)
+            {
+                if (callAudio != _handsFreeAudio && _session is not null)
+                {
+                    Log.Info("mic", $"Hands-Free call audio {(callAudio ? "started" : "ended")}");
+                    SetHandsFreeLocked(callAudio, _handsFreeMic, "Hands-Free call audio");
+                }
+            }
+            return;
+        }
         if (!_capturing
             || packet.Length < HeaderLength
             || packet[0] != 0x04 || packet[2] != 0x04 || packet[4] != 0x58 || packet[6] != 0x01 || packet[7] != 0x00
@@ -371,6 +473,112 @@ public sealed class MicPipeline
                 }
             }
         }
+    }
+
+    // Timer thread, re-armed while capturing (one check at a time). The native check enumerates audio sessions, so
+    // it runs outside the lock; a result for a pair that detached meanwhile is dropped.
+    private void OnHandsFreePoll()
+    {
+        ulong address;
+        lock (_lock)
+        {
+            if (!_capturing || _session is not { } session)
+            {
+                return;
+            }
+            address = session.Address;
+        }
+        bool inUse = HandsFreeMicInUse(address);
+        lock (_lock)
+        {
+            if (!_capturing || _session?.Address != address)
+            {
+                return;
+            }
+            if (inUse != _handsFreeMic)
+            {
+                Log.Info("mic", $"Hands-Free mic {(inUse ? "opened" : "closed")} by an app");
+                SetHandsFreeLocked(_handsFreeAudio, inUse, "Hands-Free mic");
+            }
+            _handsFreePoll.Change(HandsFreePollMs, Timeout.Infinite);
+        }
+    }
+
+    // An app records from the pair's Hands-Free mic (enumerates audio sessions, a few ms); false while Hands-Free is
+    // disabled for the pair.
+    private bool HandsFreeMicInUse(ulong address) =>
+        !_settings.Get(address).DisableHandsFree && Native.wpn_bt_handsfree_mic_in_use(address) == 1;
+
+    // Before a START at capture start or session ready: the poll may not have run yet when both mics open together.
+    private void CheckHandsFreeMicLocked(AapSession session)
+    {
+        _handsFreeMic = HandsFreeMicInUse(session.Address);
+        if (_handsFreeMic)
+        {
+            Log.Info("mic", "Hands-Free mic in use by an app, no START");
+        }
+    }
+
+    // Hands-Free takes the AirPods mic: stop the stream while it is in use (a START then only fights it), start it
+    // again when it ends and an app still captures.
+    private void SetHandsFreeLocked(bool audio, bool mic, string reason)
+    {
+        bool wasInUse = _handsFreeAudio || _handsFreeMic;
+        _handsFreeAudio = audio;
+        _handsFreeMic = mic;
+        bool inUse = audio || mic;
+        if (inUse == wasInUse || _session is not { } session)
+        {
+            return;
+        }
+        if (inUse)
+        {
+            HoldLocked(reason);
+            return;
+        }
+        CompleteHandsFreeEndedLocked();
+        if (_capturing && !_startSent && IsReady(session))
+        {
+            TryStartLocked(session, $"{reason} ended");
+        }
+    }
+
+    // Hands-Free is taking the mic: STOP now and no START for HandsFreeHoldMs (TryStartLocked).
+    private void HoldLocked(string reason)
+    {
+        _holdUntil = Environment.TickCount64 + HandsFreeHoldMs;
+        Log.Info("mic", $"no START for {HandsFreeHoldMs} ms ({reason})");
+        if (_startSent && _session is { } session)
+        {
+            _ = StopLocked(session, reason);
+        }
+    }
+
+    // Sends START, or within a Hands-Free hold arms the timer to send it when the hold ends.
+    private void TryStartLocked(AapSession session, string reason)
+    {
+        long now = Environment.TickCount64;
+        if (now < _holdUntil)
+        {
+            UpdateStatusLocked(reason);
+            ArmLocked(_holdUntil - now);
+            return;
+        }
+        BeginWaitLocked(now, reason);
+        SendStartLocked(session, now, reason);
+    }
+
+    private void ResetHandsFreeLocked()
+    {
+        _handsFreeAudio = false;
+        _handsFreeMic = false;
+        CompleteHandsFreeEndedLocked();
+    }
+
+    private void CompleteHandsFreeEndedLocked()
+    {
+        _handsFreeEnded?.TrySetResult();
+        _handsFreeEnded = null;
     }
 
     private bool TryCreateNative()

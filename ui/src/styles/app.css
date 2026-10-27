@@ -283,6 +283,15 @@ span.wp-menu__glyph {
 .wp-busy:not(.is-busy) {
   visibility: hidden;
 }
+.wp-switch-spin {
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  justify-content: center;
+  width: var(--switch-w);
+  height: var(--switch-h);
+}
 .wp-busy:not(.is-busy) > .wp-spinner {
   animation: none !important;
 }
