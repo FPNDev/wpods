@@ -1,6 +1,6 @@
-import type en from "../../src/WPods/locales/en-US.json";
+import type en from '../../src/WPods/locales/en-US.json';
 
-export type LabelKey = keyof (typeof en)["labels"];
+export type LabelKey = keyof (typeof en)['labels'];
 type Vars = Record<string, string | number>;
 type TextBinding = { node: Text; key: LabelKey };
 type AttrBinding = { el: Element; name: string; key: LabelKey };
@@ -41,7 +41,7 @@ export const setLabels = (
   labels = next;
   labelsVersion++;
   root.lang = lang;
-  root.dir = rtl ? "rtl" : "ltr";
+  root.dir = rtl ? 'rtl' : 'ltr';
   for (const b of texts) {
     b.node.data = t(b.key);
   }

@@ -1,40 +1,40 @@
-import type { AccentRamp, Theme } from "./protocol";
+import type { AccentRamp, Theme } from './protocol';
 
 type Rgb = [number, number, number];
 type ThemeTokens = { card: string; onAccent: string };
 
 const root = document.documentElement;
-const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
 const ACCENT_VARS = [
-  "--accent",
-  "--accent-hover",
-  "--accent-pressed",
-  "--on-accent",
-  "--accent-text",
-  "--focus-ring",
+  '--accent',
+  '--accent-hover',
+  '--accent-pressed',
+  '--on-accent',
+  '--accent-text',
+  '--focus-ring',
 ];
 const WEIGHTS = [0.2126, 0.7152, 0.0722];
 
-let themePref: Theme = "auto";
+let themePref: Theme = 'auto';
 let useAccent = false;
 let ramp: AccentRamp | null = null;
-let tokens: Record<"light" | "dark", ThemeTokens> | null = null;
+let tokens: Record<'light' | 'dark', ThemeTokens> | null = null;
 
-const readTokens = (): Record<"light" | "dark", ThemeTokens> => {
-  const read = (theme: "light" | "dark"): ThemeTokens => {
-    const probe = document.createElement("div");
+const readTokens = (): Record<'light' | 'dark', ThemeTokens> => {
+  const read = (theme: 'light' | 'dark'): ThemeTokens => {
+    const probe = document.createElement('div');
     probe.dataset.theme = theme;
     probe.hidden = true;
     document.body.append(probe);
     const cs = getComputedStyle(probe);
     const out = {
-      card: cs.getPropertyValue("--surface-card").trim(),
-      onAccent: cs.getPropertyValue("--on-accent").trim(),
+      card: cs.getPropertyValue('--surface-card').trim(),
+      onAccent: cs.getPropertyValue('--on-accent').trim(),
     };
     probe.remove();
     return out;
   };
-  return { light: read("light"), dark: read("dark") };
+  return { light: read('light'), dark: read('dark') };
 };
 
 const rgb = (hex: string): Rgb | null => {
@@ -62,8 +62,8 @@ const contrast = (a: string, b: string): number => {
 
 const pickAccent = (
   r: AccentRamp,
-  t: Record<"light" | "dark", ThemeTokens>,
-  theme: "light" | "dark",
+  t: Record<'light' | 'dark', ThemeTokens>,
+  theme: 'light' | 'dark',
 ): string[] | null => {
   const steps = [
     r.dark3,
@@ -79,7 +79,7 @@ const pickAccent = (
       return null;
     }
   }
-  const dark = theme === "dark";
+  const dark = theme === 'dark';
   const at = dark ? 5 : 2;
   const accent = steps[at];
   let on: string | null = null;
@@ -112,7 +112,7 @@ const pickAccent = (
 
 const apply = (): void => {
   const theme =
-    themePref === "auto" ? (darkQuery.matches ? "dark" : "light") : themePref;
+    themePref === 'auto' ? (darkQuery.matches ? 'dark' : 'light') : themePref;
   if (root.dataset.theme !== theme) {
     root.dataset.theme = theme;
   }
@@ -126,8 +126,8 @@ const apply = (): void => {
     }
   }
 };
-darkQuery.addEventListener("change", () => {
-  if (themePref === "auto") {
+darkQuery.addEventListener('change', () => {
+  if (themePref === 'auto') {
     apply();
   }
 });

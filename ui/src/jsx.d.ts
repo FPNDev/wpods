@@ -1,11 +1,11 @@
-import type { LabelKey } from "./i18n";
+import type { LabelKey } from './i18n';
 
 type Handlers<M> = { [K in keyof M as `on${K & string}`]?: (e: M[K]) => void };
 
 type LabelAttrs = {
-  "l:text"?: LabelKey;
-  "l:aria-label"?: LabelKey;
-  "l:placeholder"?: LabelKey;
+  'l:text'?: LabelKey;
+  'l:aria-label'?: LabelKey;
+  'l:placeholder'?: LabelKey;
 };
 
 type HtmlAttrs<E> = Handlers<HTMLElementEventMap> &
@@ -29,7 +29,7 @@ type SvgAttrs<E> = {
   ref?: E;
   class?: string;
   viewBox?: string;
-  "aria-hidden"?: string;
+  'aria-hidden'?: string;
   cx?: string;
   cy?: string;
   r?: string;
@@ -46,10 +46,19 @@ type SvgAttrs<E> = {
   d?: string;
   points?: string;
   transform?: string;
-  "stroke-dasharray"?: string;
+  'stroke-dasharray'?: string;
 };
 
-type SvgTag = "svg" | "g" | "path" | "circle" | "ellipse" | "rect" | "line" | "polyline" | "polygon";
+type SvgTag =
+  | 'svg'
+  | 'g'
+  | 'path'
+  | 'circle'
+  | 'ellipse'
+  | 'rect'
+  | 'line'
+  | 'polyline'
+  | 'polygon';
 
 declare global {
   namespace JSX {

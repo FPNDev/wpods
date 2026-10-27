@@ -1,12 +1,12 @@
 /* First run: welcome, three facts (the last carries the startup switch), the not-an-Apple-app disclaimer with a link
    to the full terms, Agree and get started (= accepting it). */
-import { createSwitch } from "../components/common";
-import { setChecked } from "../dom";
-import { post } from "../host";
-import type { LabelKey } from "../i18n";
-import { Icon, type IconName } from "../icons";
-import { store } from "../state";
-import type { Ctx, Page } from "./page";
+import { createSwitch } from '../components/common';
+import { setChecked } from '../dom';
+import { post } from '../host';
+import type { LabelKey } from '../i18n';
+import { Icon, type IconName } from '../icons';
+import { store } from '../state';
+import type { Ctx, Page } from './page';
 
 const Fact = (p: { icon: IconName; title: LabelKey; desc: LabelKey }) => (
   <li>
@@ -21,9 +21,9 @@ const Fact = (p: { icon: IconName; title: LabelKey; desc: LabelKey }) => (
 );
 
 export const createFirstRun = (ctx: Ctx): Page => {
-  const startup = createSwitch("frStartupTitle", (value) => {
+  const startup = createSwitch('frStartupTitle', (value) => {
     store.startup = value;
-    post({ type: "setStartup", value });
+    post({ type: 'setStartup', value });
   });
   let readTerms!: HTMLButtonElement;
   const el = (
@@ -66,7 +66,7 @@ export const createFirstRun = (ctx: Ctx): Page => {
             class="wp-btn wp-btn--subtle"
             l:text="legal.readTerms"
             ref={readTerms}
-            onclick={() => ctx.go("legal")}
+            onclick={() => ctx.go('legal')}
           />
         </section>
         <div class="wp-empty__actions">
@@ -76,8 +76,8 @@ export const createFirstRun = (ctx: Ctx): Page => {
             l:text="firstRun.agree"
             onclick={() => {
               store.firstRun = false;
-              post({ type: "getStarted" });
-              ctx.update("page");
+              post({ type: 'getStarted' });
+              ctx.update('page');
             }}
           />
         </div>

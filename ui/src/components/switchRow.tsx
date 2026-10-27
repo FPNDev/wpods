@@ -2,8 +2,8 @@
    more content (notes, live values) can follow below; `checking` adds `busy` (blocks the switch; its spinner
    is not placed, the page shows one for the whole group).
    `desc: null` leaves the description to the render (it gets the id `<id>-desc`). */
-import { bindText, type LabelKey } from "../i18n";
-import { type Busy, createBusy, createSwitch } from "./common";
+import { bindText, type LabelKey } from '../i18n';
+import { type Busy, createBusy, createSwitch } from './common';
 
 export type SwitchRow = {
   row: HTMLDivElement;

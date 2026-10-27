@@ -18,7 +18,7 @@ body {
 .wp-titlebar {
   user-select: none;
 }
-[dir="rtl"] .wp-back .wp-icon {
+[dir='rtl'] .wp-back .wp-icon {
   transform: scaleX(-1);
 }
 
@@ -79,10 +79,10 @@ span.wp-menu__glyph {
 .wp-chip > .wp-chip__dot {
   display: none;
 }
-.wp-chip[data-state="starting"] > .wp-spinner,
-.wp-chip[data-state="problem"] > .wp-icon,
-.wp-chip[data-state="notActive"] > .wp-chip__dot,
-.wp-chip[data-state="live"] > .wp-chip__dot {
+.wp-chip[data-state='starting'] > .wp-spinner,
+.wp-chip[data-state='problem'] > .wp-icon,
+.wp-chip[data-state='notActive'] > .wp-chip__dot,
+.wp-chip[data-state='live'] > .wp-chip__dot {
   display: block;
 }
 
@@ -219,10 +219,10 @@ span.wp-menu__glyph {
 .wp-choice:disabled .wp-row__check {
   color: var(--text-disabled);
 }
-.wp-slider__input:is(:disabled, [aria-disabled="true"]) ~ .wp-slider__value {
+.wp-slider__input:is(:disabled, [aria-disabled='true']) ~ .wp-slider__value {
   color: var(--text-disabled);
 }
-.wp-slider:has(> .wp-slider__input:is(:disabled, [aria-disabled="true"]))
+.wp-slider:has(> .wp-slider__input:is(:disabled, [aria-disabled='true']))
   > .wp-slider__icon {
   color: var(--text-disabled);
 }
@@ -232,44 +232,47 @@ span.wp-menu__glyph {
    keeps its disabled look under the pointer too. The switch cursor and thumb rules for both states are in
    bundle.css. */
 .wp-switch
-  .wp-switch__input:is(:disabled, [aria-disabled="true"])
+  .wp-switch__input:is(:disabled, [aria-disabled='true'])
   + .wp-switch__track {
   background: var(--fill-control);
   box-shadow: inset 0 0 0 1px var(--text-disabled);
 }
 .wp-switch
-  .wp-switch__input:is(:disabled, [aria-disabled="true"]):checked
+  .wp-switch__input:is(:disabled, [aria-disabled='true']):checked
   + .wp-switch__track {
   background: var(--accent-disabled);
   box-shadow: inset 0 0 0 1px var(--accent-disabled);
 }
 .wp-seg__item
-  > .wp-seg__input:is(:disabled, [aria-disabled="true"])
+  > .wp-seg__input:is(:disabled, [aria-disabled='true'])
   + .wp-seg__face {
   color: var(--text-disabled);
   background: transparent;
   box-shadow: none;
 }
 .wp-seg__item
-  > .wp-seg__input:is(:disabled, [aria-disabled="true"]):checked
+  > .wp-seg__input:is(:disabled, [aria-disabled='true']):checked
   + .wp-seg__face {
   background: var(--fill-segment);
   box-shadow: var(--shadow-segment);
   color: var(--text-disabled);
 }
-.wp-seg__input:is(:disabled, [aria-disabled="true"])
+.wp-seg__input:is(:disabled, [aria-disabled='true'])
   + .wp-seg__face
   .wp-seg__disc {
   background: var(--fill-control);
   color: var(--text-disabled);
 }
-.wp-seg__item:has(.wp-seg__input:is(:disabled, [aria-disabled="true"])) {
+.wp-seg__item:has(.wp-seg__input:is(:disabled, [aria-disabled='true'])) {
   cursor: not-allowed;
 }
-.wp-slider__input:is(:disabled, [aria-disabled="true"]) {
+.wp-slider__input:is(:disabled, [aria-disabled='true']) {
   cursor: not-allowed;
 }
-.wp-slider__input:is(:disabled, [aria-disabled="true"])::-webkit-slider-runnable-track {
+.wp-slider__input:is(
+    :disabled,
+    [aria-disabled='true']
+  )::-webkit-slider-runnable-track {
   background: linear-gradient(
     to right,
     var(--text-disabled) var(--v),
@@ -277,7 +280,10 @@ span.wp-menu__glyph {
   );
 }
 .wp-slider
-  .wp-slider__input:is(:disabled, [aria-disabled="true"])::-webkit-slider-thumb {
+  .wp-slider__input:is(
+    :disabled,
+    [aria-disabled='true']
+  )::-webkit-slider-thumb {
   transform: none;
 }
 .wp-busy:not(.is-busy) {

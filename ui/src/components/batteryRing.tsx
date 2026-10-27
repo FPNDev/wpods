@@ -1,10 +1,10 @@
-import { setAttr, setHidden, setText } from "../dom";
-import { labelsVersion, t } from "../i18n";
-import { Glyph, Icon } from "../icons";
-import type { Batteries, Battery } from "../protocol";
+import { setAttr, setHidden, setText } from '../dom';
+import { labelsVersion, t } from '../i18n';
+import { Glyph, Icon } from '../icons';
+import type { Batteries, Battery } from '../protocol';
 
-type Part = "left" | "right" | "case" | "max";
-type CaseGlyph = "case-pro" | "case";
+type Part = 'left' | 'right' | 'case' | 'max';
+type CaseGlyph = 'case-pro' | 'case';
 type Ring = {
   update: (bat: Battery, ear: string, caseGlyph: CaseGlyph) => void;
 };
@@ -18,7 +18,7 @@ type BatteryRings = {
 };
 
 const RING_C = 2 * Math.PI * 23;
-const GLYPH = { left: "bud-left", right: "bud-right", max: "max" } as const;
+const GLYPH = { left: 'bud-left', right: 'bud-right', max: 'max' } as const;
 
 const createRing = (
   part: Part,
@@ -28,11 +28,11 @@ const createRing = (
   let fill!: SVGCircleElement;
   let bolt!: HTMLDivElement;
   let pct!: HTMLDivElement;
-  let caseGlyph: CaseGlyph = "case-pro";
+  let caseGlyph: CaseGlyph = 'case-pro';
   let glyph: Element = (
-    <Glyph name={part === "case" ? caseGlyph : GLYPH[part]} />
+    <Glyph name={part === 'case' ? caseGlyph : GLYPH[part]} />
   );
-  let key = "";
+  let key = '';
   const el = (
     <div class="wp-battery" role="img" hidden>
       <div class="wp-ring">
@@ -67,7 +67,7 @@ const createRing = (
       if (!bat) {
         return;
       }
-      if (part === "case" && nextCase !== caseGlyph) {
+      if (part === 'case' && nextCase !== caseGlyph) {
         caseGlyph = nextCase;
         const next = <Glyph name={nextCase} />;
         glyph.replaceWith(next);
@@ -79,35 +79,35 @@ const createRing = (
       }
       key = nextKey;
       const level = bat.charging
-        ? "charging"
+        ? 'charging'
         : bat.pct < 10
-          ? "low"
+          ? 'low'
           : bat.pct < 30
-            ? "warn"
-            : "ok";
+            ? 'warn'
+            : 'ok';
       el.className = `wp-battery wp-battery--${level}`;
       fill.setAttribute(
-        "stroke-dasharray",
+        'stroke-dasharray',
         `${((RING_C * Math.max(0, Math.min(100, bat.pct))) / 100).toFixed(2)} ${RING_C.toFixed(2)}`,
       );
       setHidden(bolt, !bat.charging);
       const name = t(`battery.${part}`);
-      setText(pct, t("battery.pct", { pct: bat.pct }));
+      setText(pct, t('battery.pct', { pct: bat.pct }));
       if (label && earLine) {
         const second =
-          part === "case" ? (bat.charging ? t("battery.charging") : "") : ear;
+          part === 'case' ? (bat.charging ? t('battery.charging') : '') : ear;
         setText(label, name);
         setText(earLine, second);
         setHidden(earLine, !second);
       }
-      let sr = t("battery.sr", { part: name, pct: bat.pct });
+      let sr = t('battery.sr', { part: name, pct: bat.pct });
       if (bat.charging) {
-        sr += `, ${t("battery.charging").toLowerCase()}`;
+        sr += `, ${t('battery.charging').toLowerCase()}`;
       }
       if (ear) {
         sr += `, ${ear.toLowerCase()}`;
       }
-      setAttr(el, "aria-label", sr);
+      setAttr(el, 'aria-label', sr);
     },
   };
 };
@@ -115,20 +115,20 @@ const createRing = (
 export const createBatteries = (compact: boolean): BatteryRings => {
   const el = (
     <div
-      class={compact ? "wp-batteries wp-batteries--compact" : "wp-batteries"}
+      class={compact ? 'wp-batteries wp-batteries--compact' : 'wp-batteries'}
     />
   ) as HTMLDivElement;
-  const left = createRing("left", compact, el);
-  const right = createRing("right", compact, el);
-  const box = createRing("case", compact, el);
-  const max = createRing("max", compact, el);
+  const left = createRing('left', compact, el);
+  const right = createRing('right', compact, el);
+  const box = createRing('case', compact, el);
+  const max = createRing('max', compact, el);
   return {
     el,
     update: (bat, ears, caseGlyph) => {
       left.update(bat?.left ?? null, ears.left, caseGlyph);
       right.update(bat?.right ?? null, ears.right, caseGlyph);
-      box.update(bat?.case ?? null, "", caseGlyph);
-      max.update(bat?.headphone ?? null, "", caseGlyph);
+      box.update(bat?.case ?? null, '', caseGlyph);
+      max.update(bat?.headphone ?? null, '', caseGlyph);
       return !!bat && !!(bat.left || bat.right || bat.case || bat.headphone);
     },
   };

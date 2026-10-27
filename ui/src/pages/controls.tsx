@@ -1,15 +1,15 @@
 /* Controls: double-press speed, press-and-hold duration, the modes press-and-hold cycles through, tone volume
    (each shown only when supported). */
-import { createChoiceList } from "../components/choiceList";
-import { type Busy, createBusy } from "../components/common";
-import { createSegmented, type Segmented } from "../components/segmented";
-import { setDisabled, setHidden, setText } from "../dom";
-import { post } from "../host";
-import { labelsVersion, t, type LabelKey } from "../i18n";
-import { Icon, type IconName } from "../icons";
-import type { HoldDuration, PressSpeed, StemMode } from "../protocol";
-import { capsOf, current, live, store } from "../state";
-import type { Ctx, Page } from "./page";
+import { createChoiceList } from '../components/choiceList';
+import { type Busy, createBusy } from '../components/common';
+import { createSegmented, type Segmented } from '../components/segmented';
+import { setDisabled, setHidden, setText } from '../dom';
+import { post } from '../host';
+import { labelsVersion, t, type LabelKey } from '../i18n';
+import { Icon, type IconName } from '../icons';
+import type { HoldDuration, PressSpeed, StemMode } from '../protocol';
+import { capsOf, current, live, store } from '../state';
+import type { Ctx, Page } from './page';
 
 type SegRow<V extends string> = {
   row: HTMLDivElement;
@@ -18,10 +18,10 @@ type SegRow<V extends string> = {
 };
 
 const STEM_ORDER: StemMode[] = [
-  "off",
-  "noiseCancellation",
-  "transparency",
-  "adaptive",
+  'off',
+  'noiseCancellation',
+  'transparency',
+  'adaptive',
 ];
 const STEM_MIN = 2;
 const DUCK_MIN = 10;
@@ -57,42 +57,42 @@ const segRow = <V extends string>(
 
 export const createControls = (ctx: Ctx): Page => {
   const press = segRow(
-    "double",
-    "controls.pressSpeed",
-    "controls.pressSpeedDesc",
+    'double',
+    'controls.pressSpeed',
+    'controls.pressSpeedDesc',
     createSegmented<PressSpeed>({
-      name: "pressSpeed",
-      legend: "controls.pressSpeed",
+      name: 'pressSpeed',
+      legend: 'controls.pressSpeed',
       items: [
-        { value: "default", label: "controls.default" },
-        { value: "slower", label: "controls.slower" },
-        { value: "slowest", label: "controls.slowest" },
+        { value: 'default', label: 'controls.default' },
+        { value: 'slower', label: 'controls.slower' },
+        { value: 'slowest', label: 'controls.slowest' },
       ],
       onChange: (value) => {
         if (store.state) {
           store.state.pressSpeed = value;
         }
-        post({ type: "setPressSpeed", value });
+        post({ type: 'setPressSpeed', value });
       },
     }),
   );
   const hold = segRow(
-    "hold",
-    "controls.holdDuration",
-    "controls.holdDurationDesc",
+    'hold',
+    'controls.holdDuration',
+    'controls.holdDurationDesc',
     createSegmented<HoldDuration>({
-      name: "holdDuration",
-      legend: "controls.holdDuration",
+      name: 'holdDuration',
+      legend: 'controls.holdDuration',
       items: [
-        { value: "default", label: "controls.default" },
-        { value: "shorter", label: "controls.shorter" },
-        { value: "shortest", label: "controls.shortest" },
+        { value: 'default', label: 'controls.default' },
+        { value: 'shorter', label: 'controls.shorter' },
+        { value: 'shortest', label: 'controls.shortest' },
       ],
       onChange: (value) => {
         if (store.state) {
           store.state.holdDuration = value;
         }
-        post({ type: "setHoldDuration", value });
+        post({ type: 'setHoldDuration', value });
       },
     }),
   );
@@ -102,10 +102,10 @@ export const createControls = (ctx: Ctx): Page => {
   const stemChecked = new Set<StemMode>();
   const stem = createChoiceList<StemMode>({
     items: [
-      { value: "off", label: "nc.off" },
-      { value: "transparency", label: "nc.transparency" },
-      { value: "adaptive", label: "nc.adaptive" },
-      { value: "noiseCancellation", label: "nc.noiseCancellation" },
+      { value: 'off', label: 'nc.off' },
+      { value: 'transparency', label: 'nc.transparency' },
+      { value: 'adaptive', label: 'nc.adaptive' },
+      { value: 'noiseCancellation', label: 'nc.noiseCancellation' },
     ],
     onPick: (mode) => {
       const d = current();
@@ -120,8 +120,8 @@ export const createControls = (ctx: Ctx): Page => {
         }
       }
       d.stemModes = modes;
-      post({ type: "setStemModes", id: d.id, modes });
-      ctx.update("controls");
+      post({ type: 'setStemModes', id: d.id, modes });
+      ctx.update('controls');
     },
   });
 
@@ -136,10 +136,10 @@ export const createControls = (ctx: Ctx): Page => {
   let duckVersion = -1;
   const showDuck = (value: number): void => {
     duck.style.setProperty(
-      "--v",
+      '--v',
       `${((value - DUCK_MIN) * 100) / (DUCK_MAX - DUCK_MIN)}%`,
     );
-    setText(duckValue, t("battery.pct", { pct: value }));
+    setText(duckValue, t('battery.pct', { pct: value }));
   };
   let pressGroup!: HTMLElement;
   let toneGroup!: HTMLElement;
@@ -150,7 +150,7 @@ export const createControls = (ctx: Ctx): Page => {
 
   const showTone = (value: string): void => {
     tone.style.setProperty(
-      "--v",
+      '--v',
       `${((Number(value) - TONE_MIN) * 100) / (TONE_MAX - TONE_MIN)}%`,
     );
     setText(toneValue, value);
@@ -205,9 +205,9 @@ export const createControls = (ctx: Ctx): Page => {
                   if (d) {
                     d.host.duckPercent = value;
                     post({
-                      type: "setHostSetting",
+                      type: 'setHostSetting',
                       id: d.id,
-                      name: "duckPercent",
+                      name: 'duckPercent',
                       value,
                     });
                   }
@@ -244,7 +244,7 @@ export const createControls = (ctx: Ctx): Page => {
                   if (store.state) {
                     store.state.toneVolume = value;
                   }
-                  post({ type: "setToneVolume", value });
+                  post({ type: 'setToneVolume', value });
                 }}
               />
               <span class="wp-slider__value" ref={toneValue} />
@@ -270,8 +270,8 @@ export const createControls = (ctx: Ctx): Page => {
     if (!shown) {
       return;
     }
-    stem.show("off", off);
-    stem.show("adaptive", adaptive);
+    stem.show('off', off);
+    stem.show('adaptive', adaptive);
     stemChecked.clear();
     for (const m of modes) {
       stemChecked.add(m);
@@ -305,8 +305,8 @@ export const createControls = (ctx: Ctx): Page => {
     const st = live(d);
     const pending = !!st && st.checking;
     const notReady = !!st && !st.ready;
-    const hasPress = caps.has("pressSpeed");
-    const hasHold = caps.has("holdDuration");
+    const hasPress = caps.has('pressSpeed');
+    const hasHold = caps.has('holdDuration');
     setHidden(pressGroup, !hasPress && !hasHold);
     renderSeg(
       press,
@@ -327,15 +327,15 @@ export const createControls = (ctx: Ctx): Page => {
 
     renderStem(
       d.stemModes,
-      caps.has("listeningMode"),
+      caps.has('listeningMode'),
       !(
-        caps.has("allowOff") && (st ? st.allowOff : d.saved.allowOff) === false
+        caps.has('allowOff') && (st ? st.allowOff : d.saved.allowOff) === false
       ),
-      caps.has("adaptive"),
+      caps.has('adaptive'),
       !st,
     );
 
-    setHidden(duckGroup, !caps.has("conversationAwareness"));
+    setHidden(duckGroup, !caps.has('conversationAwareness'));
     setDisabled(duck, !st);
     if (d.host.duckPercent !== lastDuck || duckVersion !== labelsVersion) {
       lastDuck = d.host.duckPercent;
@@ -344,7 +344,7 @@ export const createControls = (ctx: Ctx): Page => {
       showDuck(lastDuck);
     }
 
-    setHidden(toneGroup, !caps.has("toneVolume"));
+    setHidden(toneGroup, !caps.has('toneVolume'));
     const value = st ? st.toneVolume : d.saved.toneVolume;
     toneBusy.set(pending, notReady);
     setDisabled(tone, !st);

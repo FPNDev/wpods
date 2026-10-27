@@ -1,6 +1,6 @@
-import { setAttr, setClass } from "../dom";
-import type { LabelKey } from "../i18n";
-import { Icon, type IconName, Spinner } from "../icons";
+import { setAttr, setClass } from '../dom';
+import type { LabelKey } from '../i18n';
+import { Icon, type IconName, Spinner } from '../icons';
 
 export const Note = (p: {
   label: LabelKey;
@@ -8,8 +8,8 @@ export const Note = (p: {
   warning?: boolean;
 }): HTMLParagraphElement => {
   const el = (
-    <p class={p.warning ? "wp-note wp-note--warning" : "wp-note"}>
-      <Icon name={p.warning ? "warning" : "info"} />
+    <p class={p.warning ? 'wp-note wp-note--warning' : 'wp-note'}>
+      <Icon name={p.warning ? 'warning' : 'info'} />
       <span l:text={p.label} />
     </p>
   ) as HTMLParagraphElement;
@@ -20,15 +20,15 @@ export const Note = (p: {
 };
 
 const VALUE_KEYS = new Set([
-  " ",
-  "ArrowLeft",
-  "ArrowRight",
-  "ArrowUp",
-  "ArrowDown",
-  "Home",
-  "End",
-  "PageUp",
-  "PageDown",
+  ' ',
+  'ArrowLeft',
+  'ArrowRight',
+  'ArrowUp',
+  'ArrowDown',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
 ]);
 
 export type Busy = {
@@ -45,10 +45,10 @@ export const createBusy = (
       e.preventDefault();
     }
   };
-  control.addEventListener("click", stop, true);
-  control.addEventListener("mousedown", stop, true);
+  control.addEventListener('click', stop, true);
+  control.addEventListener('mousedown', stop, true);
   control.addEventListener(
-    "keydown",
+    'keydown',
     (e) => {
       if (VALUE_KEYS.has(e.key)) {
         stop(e);
@@ -65,10 +65,10 @@ export const createBusy = (
     spin,
     set: (spinning, block) => {
       blocked = block;
-      setClass(spin, "is-busy", spinning);
-      setAttr(control, "aria-busy", spinning ? "true" : null);
+      setClass(spin, 'is-busy', spinning);
+      setAttr(control, 'aria-busy', spinning ? 'true' : null);
       for (const item of items) {
-        setAttr(item, "aria-disabled", block ? "true" : null);
+        setAttr(item, 'aria-disabled', block ? 'true' : null);
       }
     },
   };

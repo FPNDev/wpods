@@ -1,4 +1,4 @@
-import { t } from "./i18n";
+import { t } from './i18n';
 import type {
   Batteries,
   Capability,
@@ -14,43 +14,43 @@ import type {
   MicStatus,
   State,
   ToastId,
-} from "./protocol";
+} from './protocol';
 
 export type Section =
-  | "page"
-  | "title"
-  | "hero"
-  | "menu"
-  | "nc"
-  | "mic"
-  | "features"
-  | "controls"
-  | "windows"
-  | "langs"
-  | "firstRun";
+  | 'page'
+  | 'title'
+  | 'hero'
+  | 'menu'
+  | 'nc'
+  | 'mic'
+  | 'features'
+  | 'controls'
+  | 'windows'
+  | 'langs'
+  | 'firstRun';
 type Entry = Device & { capSet: Set<Capability> };
 
 const BATTERY_PARTS = {
-  left: "left",
-  right: "right",
-  case: "case",
-  headphone: "max",
+  left: 'left',
+  right: 'right',
+  case: 'case',
+  headphone: 'max',
 } as const;
 const DEVICE_SECTIONS: Section[] = [
-  "page",
-  "hero",
-  "menu",
-  "nc",
-  "mic",
-  "features",
-  "controls",
-  "windows",
+  'page',
+  'hero',
+  'menu',
+  'nc',
+  'mic',
+  'features',
+  'controls',
+  'windows',
 ];
 const ALL_SECTIONS: Section[] = [
   ...DEVICE_SECTIONS,
-  "title",
-  "langs",
-  "firstRun",
+  'title',
+  'langs',
+  'firstRun',
 ];
 
 export const store = {
@@ -61,13 +61,13 @@ export const store = {
   selected: null as DeviceId | null,
   state: null as State | null,
   stateCaps: new Set<Capability>(),
-  mic: "notActive" as MicStatus,
+  mic: 'notActive' as MicStatus,
   startup: false,
   firstRun: false,
-  language: "",
+  language: '',
   languages: [] as Language[],
   languageByCode: new Map<string, Language>(),
-  windowsLanguageName: "",
+  windowsLanguageName: '',
   micCatalog: {
     standard: [],
     voiceIsolation: [],
@@ -76,7 +76,7 @@ export const store = {
   } as MicCatalog,
   micConfig: {
     modes: [],
-    models: { standard: "", voiceIsolation: "", wideSpectrum: "" },
+    models: { standard: '', voiceIsolation: '', wideSpectrum: '' },
     enhancement: null,
   } as MicConfig,
   micEnabled: new Set<MicMode>(),
@@ -87,7 +87,7 @@ export const store = {
   lastBattery: new Map<DeviceId, Batteries>(),
   lowSaid: new Set<string>(),
   handsFreeApplying: new Set<DeviceId>(),
-  announce: "",
+  announce: '',
   toast: null as ToastId | null,
   toastDevice: null as DeviceId | null,
   toastCode: null as string | null,
@@ -102,9 +102,9 @@ export const mark = (...sections: Section[]): void => {
 };
 
 const NEXT_MODE: Record<MicMode, MicMode> = {
-  voiceIsolation: "standard",
-  standard: "wideSpectrum",
-  wideSpectrum: "voiceIsolation",
+  voiceIsolation: 'standard',
+  standard: 'wideSpectrum',
+  wideSpectrum: 'voiceIsolation',
 };
 export const effectiveMode = (saved: MicMode): MicMode => {
   let mode = saved;
@@ -116,25 +116,25 @@ export const effectiveMode = (saved: MicMode): MicMode => {
 export const applyMicConfig = (config: MicConfig): void => {
   store.micConfig = config;
   store.micEnabled = new Set(config.modes);
-  mark("mic");
+  mark('mic');
 };
 
 export const current = (): Entry | null =>
   store.selected === null ? null : (store.byId.get(store.selected) ?? null);
 export const live = (d: Entry): State | null =>
-  d.conn === "connected" && d.id === store.attached ? store.state : null;
+  d.conn === 'connected' && d.id === store.attached ? store.state : null;
 export const capsOf = (d: Entry): Set<Capability> =>
   live(d) ? store.stateCaps : d.capSet;
 
 const disconnecting = new Set<DeviceId>();
-const MASKED = new Set<Conn>(["connected", "reconnecting", "connecting"]);
+const MASKED = new Set<Conn>(['connected', 'reconnecting', 'connecting']);
 let lastDevices: Device[] = [];
 
 export const beginDisconnect = (id: DeviceId): void => {
   disconnecting.add(id);
   const d = store.byId.get(id);
   if (d) {
-    d.conn = "notConnected";
+    d.conn = 'notConnected';
   }
 };
 
@@ -146,7 +146,7 @@ const applyDevices = (devices: Device[], attached: DeviceId | null): void => {
     const entry = { ...d, capSet: new Set(d.caps) };
     if (disconnecting.has(d.id)) {
       if (MASKED.has(d.conn)) {
-        entry.conn = "notConnected";
+        entry.conn = 'notConnected';
       } else {
         disconnecting.delete(d.id);
       }
@@ -173,8 +173,8 @@ const applyBattery = (battery: Batteries): void => {
   }
   store.state.battery = battery;
   store.lastBattery.set(store.attached, battery);
-  const name = store.byId.get(store.attached)?.name ?? "";
-  let said = "";
+  const name = store.byId.get(store.attached)?.name ?? '';
+  let said = '';
   for (const [part, ring] of Object.entries(BATTERY_PARTS)) {
     const b = battery[part as keyof Batteries];
     if (!b) {
@@ -185,14 +185,14 @@ const applyBattery = (battery: Batteries): void => {
     } else if (!store.lowSaid.has(part)) {
       store.lowSaid.add(part);
       said +=
-        (said ? ". " : "") +
-        t("battery.low", { name, part: t(`battery.${ring}`), pct: b.pct });
+        (said ? '. ' : '') +
+        t('battery.low', { name, part: t(`battery.${ring}`), pct: b.pct });
     }
   }
   if (said) {
     store.announce = said;
   }
-  mark("hero");
+  mark('hero');
 };
 
 const applyState = (state: State | null): void => {
@@ -201,13 +201,13 @@ const applyState = (state: State | null): void => {
   if (state) {
     applyBattery(state.battery);
   }
-  mark("hero", "nc", "mic", "features", "controls", "windows");
+  mark('hero', 'nc', 'mic', 'features', 'controls', 'windows');
 };
 
 export const apply = (msg: HostToMain): void => {
   const st = store.state;
   switch (msg.type) {
-    case "init":
+    case 'init':
       store.startup = msg.startup;
       store.firstRun = msg.firstRun;
       store.language = msg.language;
@@ -229,59 +229,59 @@ export const apply = (msg: HostToMain): void => {
       store.ready = true;
       mark(...ALL_SECTIONS);
       break;
-    case "labels":
+    case 'labels':
       store.relabel = true;
       mark(...ALL_SECTIONS);
       break;
-    case "devices":
+    case 'devices':
       applyDevices(msg.devices, msg.attached);
       break;
-    case "state":
+    case 'state':
       applyState(msg.state);
       break;
-    case "battery":
+    case 'battery':
       applyBattery(msg.battery);
       break;
-    case "ear":
+    case 'ear':
       if (st) {
         st.ear = msg.ear;
-        mark("hero", "nc");
+        mark('hero', 'nc');
       }
       break;
-    case "listeningMode":
+    case 'listeningMode':
       if (st) {
         st.listeningMode = msg.listeningMode;
-        mark("nc");
+        mark('nc');
       }
       break;
-    case "settings":
+    case 'settings':
       if (st) {
         Object.assign(st, msg.settings);
-        mark("nc", "mic", "features", "controls");
+        mark('nc', 'mic', 'features', 'controls');
       }
       break;
-    case "heartRate":
+    case 'heartRate':
       if (st) {
         st.heartRate = msg.heartRate;
         st.heartRateBpm = msg.heartRateBpm;
-        mark("features");
+        mark('features');
       }
       break;
-    case "caps":
+    case 'caps':
       if (st) {
         st.caps = msg.caps;
         store.stateCaps = new Set(msg.caps);
-        mark("hero", "nc", "mic", "features", "controls");
+        mark('hero', 'nc', 'mic', 'features', 'controls');
       }
       break;
-    case "checking":
+    case 'checking':
       if (st) {
         st.checking = msg.checking;
         st.ready = msg.ready;
-        mark("nc", "mic", "features", "controls");
+        mark('nc', 'mic', 'features', 'controls');
       }
       break;
-    case "hostSettings": {
+    case 'hostSettings': {
       const d = store.byId.get(msg.id);
       if (msg.handsFreeApplying) {
         store.handsFreeApplying.add(msg.id);
@@ -290,33 +290,33 @@ export const apply = (msg: HostToMain): void => {
       }
       if (d) {
         d.host = msg.host;
-        mark("mic", "windows", "controls");
+        mark('mic', 'windows', 'controls');
       }
       break;
     }
-    case "mic":
+    case 'mic':
       store.mic = msg.status;
-      mark("mic");
+      mark('mic');
       break;
-    case "micConfig":
+    case 'micConfig':
       applyMicConfig(msg.config);
       break;
-    case "micStage":
-      store.micLoading[msg.slot] = msg.state === "loading" ? msg.id : null;
-      mark("mic");
+    case 'micStage':
+      store.micLoading[msg.slot] = msg.state === 'loading' ? msg.id : null;
+      mark('mic');
       break;
-    case "prefs":
+    case 'prefs':
       if (msg.startup !== undefined) {
         store.startup = msg.startup;
       }
-      mark("windows", "firstRun");
+      mark('windows', 'firstRun');
       break;
-    case "toast":
+    case 'toast':
       store.toast = msg.toast;
       store.toastDevice = msg.device;
       store.toastCode = msg.code ?? null;
       if (
-        msg.toast === "disconnectFailed" &&
+        msg.toast === 'disconnectFailed' &&
         msg.device !== null &&
         disconnecting.delete(msg.device)
       ) {

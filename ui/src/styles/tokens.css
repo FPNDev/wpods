@@ -1,5 +1,5 @@
 :root,
-[data-theme="light"] {
+[data-theme='light'] {
   --bg-window: #f2f2f4;
   --surface-card: #ffffff;
   --surface-card-hover: #f7f7f9;
@@ -55,7 +55,7 @@
   --shadow-flyout:
     0 8px 24px rgba(0, 0, 0, 0.14), 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
-[data-theme="dark"] {
+[data-theme='dark'] {
   --bg-window: #1c1c1f;
   --surface-card: #2a2a2e;
   --surface-card-hover: #313136;
@@ -142,13 +142,13 @@
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-enter: cubic-bezier(0, 0, 0, 1);
   --font-text:
-    "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui,
+    'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui,
     sans-serif;
   --font-display:
-    "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", system-ui,
+    'Segoe UI Variable Display', 'Segoe UI Variable', 'Segoe UI', system-ui,
     sans-serif;
   --font-small:
-    "Segoe UI Variable Small", "Segoe UI Variable", "Segoe UI", system-ui,
+    'Segoe UI Variable Small', 'Segoe UI Variable', 'Segoe UI', system-ui,
     sans-serif;
 }
 .t-body-strong {

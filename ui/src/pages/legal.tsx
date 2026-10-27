@@ -1,10 +1,10 @@
 /* Legal: not affiliated with Apple, trademarks, WPods' own features, third-party software, license, no warranty,
    requests. The notices and the license open from the exe folder in the default text viewer (host). Also the
    one-line footer that links here from Home and the No AirPods page. */
-import { post } from "../host";
-import type { LabelKey } from "../i18n";
-import { Icon } from "../icons";
-import type { Ctx, Page } from "./page";
+import { post } from '../host';
+import type { LabelKey } from '../i18n';
+import { Icon } from '../icons';
+import type { Ctx, Page } from './page';
 
 type LegalFoot = { el: HTMLParagraphElement; link: HTMLButtonElement };
 
@@ -12,13 +12,13 @@ export const LegalFoot = (ctx: Ctx): LegalFoot => {
   let link!: HTMLButtonElement;
   const el = (
     <p class="wp-group__foot wp-legal-foot">
-      <span l:text="legal.footer" />{" "}
+      <span l:text="legal.footer" />{' '}
       <button
         type="button"
         class="wp-link wp-focusable"
         l:text="legal.link"
         ref={link}
-        onclick={() => ctx.go("legal")}
+        onclick={() => ctx.go('legal')}
       />
     </p>
   ) as HTMLParagraphElement;
@@ -26,7 +26,7 @@ export const LegalFoot = (ctx: Ctx): LegalFoot => {
   return { el, link };
 };
 
-type Open = { label: LabelKey; name: "license" | "notices" };
+type Open = { label: LabelKey; name: 'license' | 'notices' };
 
 const Section = (p: {
   title: LabelKey;
@@ -51,7 +51,7 @@ const Section = (p: {
       <button
         type="button"
         class="wp-row wp-row--nav"
-        onclick={() => post({ type: "openLegal", name })}
+        onclick={() => post({ type: 'openLegal', name })}
       >
         <span class="wp-row__text">
           <span class="wp-row__title" l:text={label} />
@@ -86,12 +86,12 @@ export const createLegal = (): Page => {
       <Section
         title="legal.thirdPartyTitle"
         body="legal.thirdPartyBody"
-        open={{ label: "legal.openNotices", name: "notices" }}
+        open={{ label: 'legal.openNotices', name: 'notices' }}
       />
       <Section
         title="legal.licenseTitle"
         body="legal.licenseBody"
-        open={{ label: "legal.openLicense", name: "license" }}
+        open={{ label: 'legal.openLicense', name: 'license' }}
       />
       <Section title="legal.warrantyTitle" body="legal.warrantyBody" />
       <Section title="legal.contactTitle" body="legal.contactBody" />

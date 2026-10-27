@@ -1,7 +1,7 @@
-import { setText } from "../dom";
-import { t } from "../i18n";
-import { Glyph, Icon } from "../icons";
-import type { Batteries, DeviceId, Offer } from "../protocol";
+import { setText } from '../dom';
+import { t } from '../i18n';
+import { Glyph, Icon } from '../icons';
+import type { Batteries, DeviceId, Offer } from '../protocol';
 
 type OfferList = {
   el: HTMLDivElement;
@@ -17,17 +17,17 @@ type PickButton = {
 
 const batteryMeta = (b: Batteries): string => {
   if (b.headphone) {
-    return t("battery.pct", { pct: b.headphone.pct });
+    return t('battery.pct', { pct: b.headphone.pct });
   }
-  let out = "";
+  let out = '';
   for (const [part, key] of [
-    ["left", "popup.metaLeft"],
-    ["right", "popup.metaRight"],
-    ["case", "popup.metaCase"],
+    ['left', 'popup.metaLeft'],
+    ['right', 'popup.metaRight'],
+    ['case', 'popup.metaCase'],
   ] as const) {
     const bat = b[part];
     if (bat) {
-      out += (out ? " \u00B7 " : "") + t(key, { pct: bat.pct });
+      out += (out ? ' \u00B7 ' : '') + t(key, { pct: bat.pct });
     }
   }
   return out;
@@ -65,7 +65,7 @@ export const createOfferList = (o: {
     const btn = (
       <button type="button" class="wp-pick" onclick={() => o.onPick(offer.id)}>
         <span class="wp-pick__art">
-          <Glyph name={offer.art === "max" ? "max" : "pair"} />
+          <Glyph name={offer.art === 'max' ? 'max' : 'pair'} />
         </span>
         <span class="wp-pick__text">
           <span class="wp-pick__name" ref={name} />
@@ -85,10 +85,10 @@ export const createOfferList = (o: {
         sub,
         t(
           n === 2
-            ? "popup.multiSubTwo"
+            ? 'popup.multiSubTwo'
             : n === 3
-              ? "popup.multiSubThree"
-              : "popup.multiSubOther",
+              ? 'popup.multiSubThree'
+              : 'popup.multiSubOther',
           { count: n },
         ),
       );

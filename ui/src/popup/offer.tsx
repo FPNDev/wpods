@@ -1,8 +1,8 @@
-import { createBatteries } from "../components/batteryRing";
-import { setAttr, setClass, setText } from "../dom";
-import { t } from "../i18n";
-import { Art, Spinner } from "../icons";
-import type { Offer } from "../protocol";
+import { createBatteries } from '../components/batteryRing';
+import { setAttr, setClass, setText } from '../dom';
+import { t } from '../i18n';
+import { Art, Spinner } from '../icons';
+import type { Offer } from '../protocol';
 
 type OfferView = {
   el: HTMLDivElement;
@@ -18,8 +18,8 @@ export const createOfferView = (o: {
   let connect!: HTMLButtonElement;
   let connectLabel!: HTMLSpanElement;
   let secondary!: HTMLButtonElement;
-  let art = Art({ model: "pro", class: "wp-popup__art" });
-  let artModel = "pro";
+  let art = Art({ model: 'pro', class: 'wp-popup__art' });
+  let artModel = 'pro';
   const batteries = createBatteries(true);
   const el = (
     <div class="wp-popup__view">
@@ -55,21 +55,21 @@ export const createOfferView = (o: {
     render: (offer, busy) => {
       if (offer.art !== artModel) {
         artModel = offer.art;
-        const next = Art({ model: offer.art, class: "wp-popup__art" });
+        const next = Art({ model: offer.art, class: 'wp-popup__art' });
         art.replaceWith(next);
         art = next;
       }
-      setAttr(art, "aria-label", t(`art.${offer.art}`));
+      setAttr(art, 'aria-label', t(`art.${offer.art}`));
       setText(name, offer.name);
       batteries.update(
         offer.batteries,
-        { left: "", right: "" },
-        offer.art === "pro" ? "case-pro" : "case",
+        { left: '', right: '' },
+        offer.art === 'pro' ? 'case-pro' : 'case',
       );
-      setClass(connect, "is-loading", busy);
-      setAttr(connect, "aria-disabled", busy ? "true" : null);
-      setText(connectLabel, t(busy ? "popup.connecting" : "popup.connect"));
-      setText(secondary, t(busy ? "popup.cancel" : "popup.notNow"));
+      setClass(connect, 'is-loading', busy);
+      setAttr(connect, 'aria-disabled', busy ? 'true' : null);
+      setText(connectLabel, t(busy ? 'popup.connecting' : 'popup.connect'));
+      setText(secondary, t(busy ? 'popup.cancel' : 'popup.notNow'));
     },
   };
 };

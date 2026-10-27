@@ -1,17 +1,17 @@
-import type { Section } from "../state";
+import type { Section } from '../state';
 
 export type PageName =
-  | "firstRun"
-  | "empty"
-  | "home"
-  | "controls"
-  | "hearing"
-  | "windows"
-  | "language"
-  | "pair"
-  | "enhancement"
-  | "micModes"
-  | "legal";
+  | 'firstRun'
+  | 'empty'
+  | 'home'
+  | 'controls'
+  | 'hearing'
+  | 'windows'
+  | 'language'
+  | 'pair'
+  | 'enhancement'
+  | 'micModes'
+  | 'legal';
 
 export type Page = {
   el: HTMLDivElement;

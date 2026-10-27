@@ -1,24 +1,24 @@
-import { Note } from "../components/common";
-import { createSegmented } from "../components/segmented";
-import { createSwitchRow, type SwitchRow } from "../components/switchRow";
-import { setChecked, setDisabled, setHidden, setText } from "../dom";
-import { post } from "../host";
-import { t } from "../i18n";
-import { Icon, Spinner } from "../icons";
-import type { Theme } from "../protocol";
-import { current, live, store } from "../state";
-import { getTheme, getUseAccent, setThemePrefs } from "../theme";
-import type { Ctx, Page } from "./page";
+import { Note } from '../components/common';
+import { createSegmented } from '../components/segmented';
+import { createSwitchRow, type SwitchRow } from '../components/switchRow';
+import { setChecked, setDisabled, setHidden, setText } from '../dom';
+import { post } from '../host';
+import { t } from '../i18n';
+import { Icon, Spinner } from '../icons';
+import type { Theme } from '../protocol';
+import { current, live, store } from '../state';
+import { getTheme, getUseAccent, setThemePrefs } from '../theme';
+import type { Ctx, Page } from './page';
 
 export const createWindowsSettings = (ctx: Ctx): Page => {
   const hostToggle =
-    (name: "disableHandsFree" | "lowLatency") =>
+    (name: 'disableHandsFree' | 'lowLatency') =>
     (value: boolean): void => {
       const d = current();
       if (d) {
         d.host[name] = value;
-        post({ type: "setHostSetting", id: d.id, name, value });
-        ctx.update("windows");
+        post({ type: 'setHostSetting', id: d.id, name, value });
+        ctx.update('windows');
       }
     };
   let forDevice!: HTMLHeadingElement;
@@ -26,58 +26,63 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
   let toLanguage!: HTMLButtonElement;
   let toMicModes!: HTMLButtonElement;
   const handsFree = createSwitchRow({
-    id: "hfpTitle",
-    title: "windows.handsFree",
-    desc: "windows.handsFreeDesc",
-    onChange: hostToggle("disableHandsFree"),
+    id: 'hfpTitle',
+    title: 'windows.handsFree',
+    desc: 'windows.handsFreeDesc',
+    onChange: hostToggle('disableHandsFree'),
   });
   // While the host applies a change (Windows takes a few seconds) a spinner takes the switch's place.
   const handsFreeSwitch = handsFree.row.lastElementChild as HTMLElement;
   const handsFreeSpin = (
-    <span class="wp-switch-spin" role="img" l:aria-label="common.checking" hidden>
+    <span
+      class="wp-switch-spin"
+      role="img"
+      l:aria-label="common.checking"
+      hidden
+    >
       <Spinner class="wp-spinner--sm" />
     </span>
   ) as HTMLSpanElement;
   handsFree.row.append(handsFreeSpin);
   const latency = createSwitchRow({
-    id: "latencyTitle",
-    title: "windows.latency",
-    desc: "windows.latencyDesc",
+    id: 'latencyTitle',
+    title: 'windows.latency',
+    desc: 'windows.latencyDesc',
     stack: true,
-    onChange: hostToggle("lowLatency"),
+    onChange: hostToggle('lowLatency'),
   });
-  const latencyNote = Note({ label: "windows.latencyNote", warning: true });
+  const latencyNote = Note({ label: 'windows.latencyNote', warning: true });
   latencyNote.hidden = true;
   latency.row.append(latencyNote);
   const startup = createSwitchRow({
-    id: "startupTitle",
-    title: "windows.startup",
-    desc: "windows.startupDesc",
+    id: 'startupTitle',
+    title: 'windows.startup',
+    desc: 'windows.startupDesc',
     onChange: (value) => {
       store.startup = value;
-      post({ type: "setStartup", value });
+      post({ type: 'setStartup', value });
     },
   });
   const accent = createSwitchRow({
-    id: "accentTitle",
-    title: "windows.accent",
-    desc: "windows.accentDesc",
+    id: 'accentTitle',
+    title: 'windows.accent',
+    desc: 'windows.accentDesc',
     onChange: (value) => {
       setThemePrefs({ useAccent: value });
-      post({ type: "setAccent", value });
+      post({ type: 'setAccent', value });
     },
   });
   const theme = createSegmented<Theme>({
-    name: "theme",
-    legend: "windows.theme",
+    name: 'theme',
+    legend: 'windows.theme',
     items: [
-      { value: "light", label: "windows.themeLight" },
-      { value: "dark", label: "windows.themeDark" },
-      { value: "auto", label: "windows.themeAuto" },
+      { value: 'light', label: 'windows.themeLight' },
+      { value: 'dark', label: 'windows.themeDark' },
+      { value: 'auto', label: 'windows.themeAuto' },
     ],
     onChange: (value) => {
       setThemePrefs({ theme: value });
-      post({ type: "setTheme", theme: value });
+      post({ type: 'setTheme', theme: value });
     },
   });
 
@@ -97,7 +102,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
             type="button"
             class="wp-row wp-row--nav"
             ref={toMicModes}
-            onclick={() => ctx.go("micModes")}
+            onclick={() => ctx.go('micModes')}
           >
             <span class="wp-row__text">
               <span class="wp-row__title" l:text="mic.modes" />
@@ -121,7 +126,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
             type="button"
             class="wp-row wp-row--nav"
             ref={toLanguage}
-            onclick={() => ctx.go("language")}
+            onclick={() => ctx.go('language')}
           >
             <span class="wp-row__text">
               <span class="wp-row__title" l:text="lang.title" />
@@ -137,7 +142,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     </div>
   ) as HTMLDivElement;
 
-  const renderHost =(row: SwitchRow, on: boolean, locked: boolean): void => {
+  const renderHost = (row: SwitchRow, on: boolean, locked: boolean): void => {
     setChecked(row.input, on);
     setDisabled(row.input, locked);
   };
@@ -147,7 +152,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
       return;
     }
     const locked = !live(d);
-    setText(forDevice, t("windows.forDevice", { name: d.name }));
+    setText(forDevice, t('windows.forDevice', { name: d.name }));
     renderHost(handsFree, d.host.disableHandsFree, locked);
     const applying = store.handsFreeApplying.has(d.id);
     setHidden(handsFreeSwitch, applying);
@@ -158,16 +163,16 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     theme.set(getTheme());
     setChecked(accent.input, getUseAccent());
     const lang = store.languageByCode.get(store.language);
-    setText(langValue, lang ? lang.originalName : t("lang.sameAsWindows"));
+    setText(langValue, lang ? lang.originalName : t('lang.sameAsWindows'));
   };
 
   return {
     el,
     sections: { windows: render },
     returnFocus: (from) =>
-      from === "language"
+      from === 'language'
         ? toLanguage
-        : from === "micModes"
+        : from === 'micModes'
           ? toMicModes
           : null,
   };

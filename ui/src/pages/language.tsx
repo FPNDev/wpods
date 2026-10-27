@@ -1,10 +1,10 @@
-import { setHidden, setText } from "../dom";
-import { post } from "../host";
-import { t } from "../i18n";
-import { Icon } from "../icons";
-import { store } from "../state";
-import { createCheck } from "./enhancement";
-import type { Ctx, Page } from "./page";
+import { setHidden, setText } from '../dom';
+import { post } from '../host';
+import { t } from '../i18n';
+import { Icon } from '../icons';
+import { store } from '../state';
+import { createCheck } from './enhancement';
+import type { Ctx, Page } from './page';
 
 type Row = { el: HTMLButtonElement; hay: string };
 
@@ -21,8 +21,8 @@ export const createLanguage = (ctx: Ctx): Page => {
   const pick = (code: string): void => {
     if (code !== store.language) {
       store.language = code;
-      post({ type: "setLanguage", code });
-      ctx.update("langs", "windows");
+      post({ type: 'setLanguage', code });
+      ctx.update('langs', 'windows');
     }
   };
   const filter = (): void => {
@@ -36,7 +36,7 @@ export const createLanguage = (ctx: Ctx): Page => {
     }
     setHidden(none, visible > 0);
     if (visible === 0) {
-      setText(none, t("lang.noMatch", { query }));
+      setText(none, t('lang.noMatch', { query }));
     }
   };
 
@@ -52,7 +52,7 @@ export const createLanguage = (ctx: Ctx): Page => {
           ref={search}
           oninput={filter}
           onkeydown={(e) => {
-            if (e.key === "Escape" && search.value) {
+            if (e.key === 'Escape' && search.value) {
               e.stopPropagation();
             }
           }}
@@ -66,7 +66,7 @@ export const createLanguage = (ctx: Ctx): Page => {
             role="radio"
             aria-checked="false"
             ref={auto}
-            onclick={() => pick("")}
+            onclick={() => pick('')}
           >
             <span class="wp-row__lead">
               <Icon name="globe" />
@@ -130,7 +130,7 @@ export const createLanguage = (ctx: Ctx): Page => {
     sections: {
       langs: () => {
         check(
-          store.language === "" ? auto : (byCode.get(store.language) ?? null),
+          store.language === '' ? auto : (byCode.get(store.language) ?? null),
         );
         if (!none.hidden) {
           filter();
@@ -138,7 +138,7 @@ export const createLanguage = (ctx: Ctx): Page => {
       },
     },
     leave: () => {
-      search.value = "";
+      search.value = '';
       filter();
     },
   };

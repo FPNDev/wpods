@@ -1,9 +1,9 @@
-import type { MainToHost, PopupToHost } from "./protocol";
+import type { MainToHost, PopupToHost } from './protocol';
 
 type WebView = {
   postMessage(message: unknown): void;
   addEventListener(
-    type: "message",
+    type: 'message',
     listener: (e: { data: unknown }) => void,
   ): void;
 };
@@ -21,5 +21,5 @@ export const post = (message: MainToHost | PopupToHost): void => {
 };
 
 export const listen = <M>(apply: (message: M) => void): void => {
-  webview?.addEventListener("message", (e) => apply(e.data as M));
+  webview?.addEventListener('message', (e) => apply(e.data as M));
 };

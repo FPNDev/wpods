@@ -1,11 +1,11 @@
 /* Toast: one at a time, closes itself after --dur-toast (paused while hovered or focused), x closes it at once.
    Only its buttons take the pointer (app.css), so it never blocks the controls under it. */
-import { setHidden, setText } from "../dom";
-import { t } from "../i18n";
-import { Icon } from "../icons";
-import type { ToastId } from "../protocol";
+import { setHidden, setText } from '../dom';
+import { t } from '../i18n';
+import { Icon } from '../icons';
+import type { ToastId } from '../protocol';
 
-type ToastAction = "reconnect" | "tryAgain" | "openSettings";
+type ToastAction = 'reconnect' | 'tryAgain' | 'openSettings';
 type Toast = {
   el: HTMLDivElement;
   show: (id: ToastId, code: string | null) => void;
@@ -13,9 +13,9 @@ type Toast = {
 };
 
 const ACTIONS: Record<ToastId, ToastAction | null> = {
-  noResponse: "reconnect",
-  connectFailed: "tryAgain",
-  bluetoothOff: "openSettings",
+  noResponse: 'reconnect',
+  connectFailed: 'tryAgain',
+  bluetoothOff: 'openSettings',
   micFailed: null,
   lowLatencyFailed: null,
   handsFreeFailed: null,
@@ -54,7 +54,7 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
       onfocusin={pause}
       onfocusout={arm}
       onkeydown={(e) => {
-        if (e.key === "Escape") {
+        if (e.key === 'Escape') {
           e.stopPropagation();
           hide();
         }
@@ -101,7 +101,7 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
     show: (id, faultCode) => {
       if (!ms) {
         ms =
-          parseFloat(getComputedStyle(el).getPropertyValue("--dur-toast")) ||
+          parseFloat(getComputedStyle(el).getPropertyValue('--dur-toast')) ||
           4000;
       }
       shown = id;

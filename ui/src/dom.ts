@@ -8,8 +8,8 @@ export const setHidden = (
   el: HTMLElement | SVGElement,
   hidden: boolean,
 ): void => {
-  if (el.hasAttribute("hidden") !== hidden) {
-    el.toggleAttribute("hidden", hidden);
+  if (el.hasAttribute('hidden') !== hidden) {
+    el.toggleAttribute('hidden', hidden);
   }
 };
 
@@ -50,7 +50,7 @@ export const createAnnouncer = (el: Element): ((text: string) => void) => {
   let frame = 0;
   return (text) => {
     cancelAnimationFrame(frame);
-    setText(el, "");
+    setText(el, '');
     frame = requestAnimationFrame(() => setText(el, text));
   };
 };

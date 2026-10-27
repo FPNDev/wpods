@@ -1,57 +1,57 @@
 /* Nearby popup entry (NearbyPopup component). Protocol: scratchpad ui-protocol.md (v2), section 4.
    Never focuses itself; the host focuses the window on Win+Shift+A and sends `focus`. */
-import { applyCommon } from "../common";
+import { applyCommon } from '../common';
 import {
   createAnnouncer,
   createFrame,
   setAttr,
   setHidden,
   setText,
-} from "../dom";
-import { listen, post } from "../host";
-import { t } from "../i18n";
-import { Icon } from "../icons";
-import type { HostToPopup, Offer } from "../protocol";
-import { createOfferView } from "./offer";
-import { createOfferList } from "./offerList";
+} from '../dom';
+import { listen, post } from '../host';
+import { t } from '../i18n';
+import { Icon } from '../icons';
+import type { HostToPopup, Offer } from '../protocol';
+import { createOfferView } from './offer';
+import { createOfferList } from './offerList';
 
-type View = "none" | "offer" | "connecting" | "connected" | "failed" | "multi";
+type View = 'none' | 'offer' | 'connecting' | 'connected' | 'failed' | 'multi';
 
 let ready = false;
 let offers: Offer[] = [];
-let view: View = "none";
+let view: View = 'none';
 let dev: Offer | null = null;
 let seen = new Set<string>();
-let announceText = "";
+let announceText = '';
 let confirmFor: string | null = null;
 let lastHeight = 0;
 
 const dismiss = (): void => {
-  if (view === "connecting") {
-    post({ type: "popupCancel" });
+  if (view === 'connecting') {
+    post({ type: 'popupCancel' });
   }
-  const ids = view === "multi" ? offers.map((o) => o.id) : dev ? [dev.id] : [];
+  const ids = view === 'multi' ? offers.map((o) => o.id) : dev ? [dev.id] : [];
   if (ids.length) {
-    post({ type: "popupDismiss", ids });
+    post({ type: 'popupDismiss', ids });
   }
 };
 
 const offerView = createOfferView({
   onConnect: () => {
-    if (view === "offer" && dev) {
-      post({ type: "popupConnect", id: dev.id });
+    if (view === 'offer' && dev) {
+      post({ type: 'popupConnect', id: dev.id });
     }
   },
   onSecondary: () => {
-    if (view === "connecting") {
-      post({ type: "popupCancel" });
+    if (view === 'connecting') {
+      post({ type: 'popupCancel' });
     } else {
       dismiss();
     }
   },
 });
 const list = createOfferList({
-  onPick: (id) => post({ type: "popupConnect", id }),
+  onPick: (id) => post({ type: 'popupConnect', id }),
   onNotNow: dismiss,
 });
 
@@ -92,7 +92,7 @@ const root = (
           ref={retry}
           onclick={() => {
             if (dev) {
-              post({ type: "popupConnect", id: dev.id });
+              post({ type: 'popupConnect', id: dev.id });
             }
           }}
         />
@@ -124,12 +124,12 @@ const setOffers = (next: Offer[]): void => {
   let active: Offer | null = null;
   const now = new Set<string>();
   for (const o of next) {
-    if (!active && o.state !== "offer") {
+    if (!active && o.state !== 'offer') {
       active = o;
     }
     now.add(o.id);
     if (!seen.has(o.id)) {
-      announceText = t("popup.nearbyA11y", { name: o.name });
+      announceText = t('popup.nearbyA11y', { name: o.name });
     }
   }
   seen = now;
@@ -137,11 +137,11 @@ const setOffers = (next: Offer[]): void => {
   view = active
     ? active.state
     : next.length === 1
-      ? "offer"
+      ? 'offer'
       : next.length > 1
-        ? "multi"
-        : "none";
-  if (view !== "connected") {
+        ? 'multi'
+        : 'none';
+  if (view !== 'connected') {
     confirmFor = null;
   }
 };
@@ -150,37 +150,37 @@ const render = (): void => {
   if (!ready) {
     return;
   }
-  setHidden(card, view === "none");
-  setHidden(offerView.el, view !== "offer" && view !== "connecting");
-  setHidden(list.el, view !== "multi");
-  setHidden(done, view !== "connected");
-  setHidden(failed, view !== "failed");
+  setHidden(card, view === 'none');
+  setHidden(offerView.el, view !== 'offer' && view !== 'connecting');
+  setHidden(list.el, view !== 'multi');
+  setHidden(done, view !== 'connected');
+  setHidden(failed, view !== 'failed');
   if (announceText) {
     const text = announceText;
-    announceText = "";
+    announceText = '';
     announcer(text);
   }
-  if (view === "multi") {
+  if (view === 'multi') {
     list.render(offers);
-    setAttr(card, "aria-label", t("popup.multiTitle"));
+    setAttr(card, 'aria-label', t('popup.multiTitle'));
     return;
   }
   if (!dev) {
     return;
   }
-  setAttr(card, "aria-label", t("popup.nearbyA11y", { name: dev.name }));
-  if (view === "offer" || view === "connecting") {
-    offerView.render(dev, view === "connecting");
-  } else if (view === "connected") {
+  setAttr(card, 'aria-label', t('popup.nearbyA11y', { name: dev.name }));
+  if (view === 'offer' || view === 'connecting') {
+    offerView.render(dev, view === 'connecting');
+  } else if (view === 'connected') {
     setText(doneName, dev.name);
     if (confirmFor !== dev.id) {
       confirmFor = dev.id;
       const id = dev.id;
       const ms =
         parseFloat(
-          getComputedStyle(card).getPropertyValue("--dur-popup-confirm"),
+          getComputedStyle(card).getPropertyValue('--dur-popup-confirm'),
         ) || 2500;
-      setTimeout(() => post({ type: "popupDismiss", ids: [id] }), ms);
+      setTimeout(() => post({ type: 'popupDismiss', ids: [id] }), ms);
     }
   }
 };
@@ -189,21 +189,21 @@ const schedule = createFrame(render);
 listen<HostToPopup>((msg) => {
   applyCommon(msg);
   switch (msg.type) {
-    case "init":
+    case 'init':
       setOffers(msg.offers);
       ready = true;
       break;
-    case "offers":
+    case 'offers':
       setOffers(msg.offers);
       break;
-    case "focus":
+    case 'focus':
       requestAnimationFrame(() => {
         const target =
-          view === "multi"
+          view === 'multi'
             ? list.first()
-            : view === "failed"
+            : view === 'failed'
               ? retry
-              : view === "connected"
+              : view === 'connected'
                 ? close
                 : offerView.connect;
         target?.focus();
@@ -215,8 +215,8 @@ listen<HostToPopup>((msg) => {
   schedule();
 });
 
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
     dismiss();
   }
 });
@@ -225,8 +225,8 @@ new ResizeObserver((entries) => {
   const height = Math.ceil(entries[0].borderBoxSize[0].blockSize);
   if (height !== lastHeight) {
     lastHeight = height;
-    post({ type: "popupSize", height });
+    post({ type: 'popupSize', height });
   }
 }).observe(card);
 
-post({ type: "ready", page: "popup" });
+post({ type: 'ready', page: 'popup' });

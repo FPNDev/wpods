@@ -1,7 +1,7 @@
-import { setAttr, setHidden, setText } from "../dom";
-import { t } from "../i18n";
-import { Glyph, Icon } from "../icons";
-import type { Device, DeviceId } from "../protocol";
+import { setAttr, setHidden, setText } from '../dom';
+import { t } from '../i18n';
+import { Glyph, Icon } from '../icons';
+import type { Device, DeviceId } from '../protocol';
 
 type DeviceMenu = {
   el: HTMLDivElement;
@@ -62,7 +62,7 @@ export const createDeviceMenu = (o: {
         }}
       >
         <span class="wp-menu__glyph">
-          <Glyph name={d.art === "max" ? "max" : "pair"} />
+          <Glyph name={d.art === 'max' ? 'max' : 'pair'} />
         </span>
         <span class="wp-menu__text">
           <span class="wp-menu__title" ref={title} />
@@ -106,7 +106,7 @@ export const createDeviceMenu = (o: {
       item.index = i;
       setText(item.title, d.name);
       setText(item.meta, t(`status.${d.conn}`));
-      setAttr(item.btn, "aria-checked", String(checked));
+      setAttr(item.btn, 'aria-checked', String(checked));
       setHidden(item.check, !checked);
       if (prev.nextSibling !== item.btn) {
         menu.insertBefore(item.btn, prev.nextSibling);
@@ -135,7 +135,7 @@ export const createDeviceMenu = (o: {
     }
     open = false;
     setHidden(menu, true);
-    button.setAttribute("aria-expanded", "false");
+    button.setAttribute('aria-expanded', 'false');
     if (refocus) {
       button.focus();
     }
@@ -144,7 +144,7 @@ export const createDeviceMenu = (o: {
     open = true;
     syncItems();
     setHidden(menu, false);
-    button.setAttribute("aria-expanded", "true");
+    button.setAttribute('aria-expanded', 'true');
     focusItem(checkedAt < 0 ? items.length : checkedAt);
   };
 
@@ -164,10 +164,10 @@ export const createDeviceMenu = (o: {
           }
         }}
         onkeydown={(e) => {
-          if (e.key === "ArrowDown" && !open) {
+          if (e.key === 'ArrowDown' && !open) {
             e.preventDefault();
             openMenu();
-          } else if (e.key === "Escape" && open) {
+          } else if (e.key === 'Escape' && open) {
             e.stopPropagation();
             close(true);
           }
@@ -187,17 +187,17 @@ export const createDeviceMenu = (o: {
         ref={menu}
         onkeydown={(e) => {
           let next: number | null = null;
-          if (e.key === "ArrowDown") {
+          if (e.key === 'ArrowDown') {
             next = focusAt + 1;
-          } else if (e.key === "ArrowUp") {
+          } else if (e.key === 'ArrowUp') {
             next = focusAt - 1;
-          } else if (e.key === "Home") {
+          } else if (e.key === 'Home') {
             next = 0;
-          } else if (e.key === "End") {
+          } else if (e.key === 'End') {
             next = items.length;
-          } else if (e.key === "Tab") {
+          } else if (e.key === 'Tab') {
             close(false);
-          } else if (e.key === "Escape") {
+          } else if (e.key === 'Escape') {
             e.preventDefault();
             e.stopPropagation();
             close(true);
@@ -232,7 +232,7 @@ export const createDeviceMenu = (o: {
     </div>
   ) as HTMLDivElement;
 
-  document.addEventListener("pointerdown", (e) => {
+  document.addEventListener('pointerdown', (e) => {
     if (open && !el.contains(e.target as Node)) {
       close(false);
     }

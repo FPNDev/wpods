@@ -2,36 +2,43 @@
    iPhone or iPad (0x2C enrolled); until then the note at the bottom says so instead of where the settings come from,
    and the switches are off and disabled. While the AirPods are checked the switches are locked and each group title
    shows the spinner. */
-import { createBusy, Note } from "../components/common";
-import { createSwitchRow, type SwitchRow } from "../components/switchRow";
-import { setAttr, setChecked, setClass, setDisabled, setHidden, setText } from "../dom";
-import { post } from "../host";
-import { type LabelKey, t } from "../i18n";
-import { capsOf, current, live, store } from "../state";
-import type { Ctx, Page } from "./page";
+import { createBusy, Note } from '../components/common';
+import { createSwitchRow, type SwitchRow } from '../components/switchRow';
+import {
+  setAttr,
+  setChecked,
+  setClass,
+  setDisabled,
+  setHidden,
+  setText,
+} from '../dom';
+import { post } from '../host';
+import { type LabelKey, t } from '../i18n';
+import { capsOf, current, live, store } from '../state';
+import type { Ctx, Page } from './page';
 
-const NOTE_ID = "hearingNote";
+const NOTE_ID = 'hearingNote';
 
 export const createHearing = (ctx: Ctx): Page => {
   const aid = createSwitchRow({
-    id: "h-aid",
-    title: "features.hearingAid",
+    id: 'h-aid',
+    title: 'features.hearingAid',
     desc: null,
     checking: true,
     onChange: (on) => {
       if (store.state) {
         store.state.hearingAidEnabled = on;
       }
-      post({ type: "setHearingAid", value: on });
-      ctx.update("features");
+      post({ type: 'setHearingAid', value: on });
+      ctx.update('features');
     },
   });
   setHidden(aid.desc, true);
   const assistRow = (
     title: LabelKey,
     desc: LabelKey | null,
-    field: "mediaAssistMedia" | "mediaAssistCalls",
-    name: "media" | "calls",
+    field: 'mediaAssistMedia' | 'mediaAssistCalls',
+    name: 'media' | 'calls',
   ): SwitchRow => {
     const row = createSwitchRow({
       id: `h-${name}`,
@@ -42,22 +49,22 @@ export const createHearing = (ctx: Ctx): Page => {
         if (store.state) {
           store.state[field] = on;
         }
-        post({ type: "setMediaAssist", name, value: on });
-        ctx.update("features");
+        post({ type: 'setMediaAssist', name, value: on });
+        ctx.update('features');
       },
     });
     setHidden(row.desc, !desc);
     return row;
   };
-  const music = assistRow("hearing.music", null, "mediaAssistMedia", "media");
+  const music = assistRow('hearing.music', null, 'mediaAssistMedia', 'media');
   const calls = assistRow(
-    "hearing.calls",
-    "hearing.callsDesc",
-    "mediaAssistCalls",
-    "calls",
+    'hearing.calls',
+    'hearing.callsDesc',
+    'mediaAssistCalls',
+    'calls',
   );
 
-  const note = Note({ label: "features.hearingAidDesc", id: NOTE_ID });
+  const note = Note({ label: 'features.hearingAidDesc', id: NOTE_ID });
   const noteText = note.lastElementChild as HTMLSpanElement;
   let aidGroup!: HTMLElement;
   let aidTitle!: HTMLHeadingElement;
@@ -102,10 +109,10 @@ export const createHearing = (ctx: Ctx): Page => {
     block: boolean,
   ): void => {
     r.busy?.set(false, block);
-    setClass(r.row, "is-disabled", !setUp);
+    setClass(r.row, 'is-disabled', !setUp);
     setChecked(r.input, setUp && !!value);
     setDisabled(r.input, !usable);
-    setAttr(r.input, "aria-describedby", setUp ? null : NOTE_ID);
+    setAttr(r.input, 'aria-describedby', setUp ? null : NOTE_ID);
   };
 
   const render = (): void => {
@@ -120,9 +127,9 @@ export const createHearing = (ctx: Ctx): Page => {
     const block = checking || (!!st && !st.ready);
     const setUp = pods.hearingAidEnrolled !== false;
     const enrolled = !!st && st.hearingAidEnrolled === true;
-    setText(noteText, t(setUp ? "features.hearingAidDesc" : "hearing.setup"));
-    setHidden(aidGroup, !caps.has("hearingAid"));
-    setHidden(assistGroup, !caps.has("mediaAssist"));
+    setText(noteText, t(setUp ? 'features.hearingAidDesc' : 'hearing.setup'));
+    setHidden(aidGroup, !caps.has('hearingAid'));
+    setHidden(assistGroup, !caps.has('mediaAssist'));
     aidBusy.set(checking, false);
     assistBusy.set(checking, false);
     renderRow(

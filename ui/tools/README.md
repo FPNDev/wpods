@@ -46,19 +46,19 @@ const row = (
 ```
 
 ```ts
-import { bindText as __lText } from "./i18n";
+import { bindText as __lText } from './i18n';
 let title!: HTMLSpanElement;
-const e_1 = document.createElement("button");
-e_1.setAttribute("type", "button");
-e_1.className = "wp-row";
-e_1.addEventListener("click", onPick);
-const e_2 = document.createElement("span");
-e_2.className = "wp-row__title";
+const e_1 = document.createElement('button');
+e_1.setAttribute('type', 'button');
+e_1.className = 'wp-row';
+e_1.addEventListener('click', onPick);
+const e_2 = document.createElement('span');
+e_2.className = 'wp-row__title';
 title = e_2;
-const e_3 = document.createElement("span");
-e_3.className = "wp-row__desc";
-e_3.append(__lText("lang.foot"));
-const e_4 = Icon({ name: "check" });
+const e_3 = document.createElement('span');
+e_3.className = 'wp-row__desc';
+e_3.append(__lText('lang.foot'));
+const e_4 = Icon({ name: 'check' });
 e_1.append(e_2, e_3, e_4);
 const row = e_1;
 ```

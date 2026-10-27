@@ -1,8 +1,8 @@
 /* Segmented control: a radio group in a fieldset with a hidden legend. Keeps its inputs by value and the checked
    value, so every update touches only the inputs that change. */
-import { setAttr, setDisabled, setHidden } from "../dom";
-import { bindText, type LabelKey } from "../i18n";
-import { Icon, type IconName } from "../icons";
+import { setAttr, setDisabled, setHidden } from '../dom';
+import { bindText, type LabelKey } from '../i18n';
+import { Icon, type IconName } from '../icons';
 
 type SegItem<V extends string> = { value: V; label: LabelKey; icon?: IconName };
 export type Segmented<V extends string> = {
@@ -24,7 +24,7 @@ export const createSegmented = <V extends string>(o: {
   const labels = new Map<V, HTMLLabelElement>();
   let current: V | null = null;
   const el = (
-    <fieldset class={o.icons ? "wp-seg wp-seg--icons" : "wp-seg"}>
+    <fieldset class={o.icons ? 'wp-seg wp-seg--icons' : 'wp-seg'}>
       <legend class="wp-sr" l:text={o.legend} />
     </fieldset>
   ) as HTMLFieldSetElement;
@@ -72,7 +72,7 @@ export const createSegmented = <V extends string>(o: {
     const input = inputs.get(value);
     if (input) {
       setDisabled(input, disabled);
-      setAttr(input, "aria-describedby", describedBy);
+      setAttr(input, 'aria-describedby', describedBy);
     }
   };
   return {

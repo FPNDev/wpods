@@ -7,8 +7,8 @@
 <pre id="out"></pre>
 <script>
   var SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 256];
-  var src = new URLSearchParams(location.search).get("src") || "appicon.js";
-  var script = document.createElement("script");
+  var src = new URLSearchParams(location.search).get('src') || 'appicon.js';
+  var script = document.createElement('script');
   script.src = src;
   script.onload = function () {
     var lines = [],
@@ -16,18 +16,18 @@
     SIZES.forEach(function (size, i) {
       var img = new Image();
       img.onload = function () {
-        var canvas = document.createElement("canvas");
+        var canvas = document.createElement('canvas');
         canvas.width = size;
         canvas.height = size;
-        canvas.getContext("2d").drawImage(img, 0, 0, size, size);
-        lines[i] = size + " " + canvas.toDataURL("image/png").split(",")[1];
+        canvas.getContext('2d').drawImage(img, 0, 0, size, size);
+        lines[i] = size + ' ' + canvas.toDataURL('image/png').split(',')[1];
         pending--;
         if (pending === 0) {
-          document.getElementById("out").textContent = lines.join("\n");
+          document.getElementById('out').textContent = lines.join('\n');
         }
       };
       img.src =
-        "data:image/svg+xml;charset=utf-8," +
+        'data:image/svg+xml;charset=utf-8,' +
         encodeURIComponent(window.WPods.appIcon(size));
     });
   };
