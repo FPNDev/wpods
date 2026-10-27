@@ -71,7 +71,7 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 
 - Off, Transparency, Adaptive (on models that support it) and Noise Cancellation.
 - Noise Cancellation and Adaptive need both AirPods in, unless you turn on "Noise cancellation with one AirPod".
-- "Allow 'Off' in listening modes" adds Off to the stem cycle (AirPods Max: the noise control button).
+- "Allow 'Off' in listening modes" adds Off to the modes you switch between by pressing and holding the stem (AirPods Max: the noise control button).
 
 ### Controls
 
@@ -87,7 +87,7 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 
 - **Conversation awareness** lowers your media and brings voices forward when you speak.
 - **Personalized Volume** adjusts media volume to your surroundings.
-- **Hearing Assistance** (AirPods Pro 2 and Pro 3) has Hearing Aid, and Media Assist for music and video and for calls. They use the hearing settings from your iPhone or iPad, so set up hearing there first. Hearing Aid works in Transparency. Media Assist for calls applies only to calls that use Hands-Free mode.
+- **Hearing Assistance** (AirPods Pro 2 and Pro 3): Hearing Aid, plus Media Assist for music, video and calls. Both use the hearing settings from your iPhone or iPad, so set those up there first. Hearing Aid works in Transparency. Media Assist for calls only works when the call uses Hands-Free mode.
 - **Heart rate** (AirPods Pro 3) shows your BPM from the AirPods sensors. Not a medical device.
 
 ### Microphone
@@ -95,7 +95,7 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mic-modes-dark.png"><img src="docs/screenshots/mic-modes-light.png" width="360" alt="WPods mic modes settings"></picture></p>
 
 - Microphone side: Automatic, Always Left or Always Right.
-- **Mic modes:** Standard, Voice Isolation and Wide Spectrum. Pick one on the Home screen. Turn modes on or off and choose the model for each mode in Windows settings > Mic modes. Each model shows how heavy it is on your PC and how much delay it adds.
+- **Mic modes:** Standard, Voice Isolation and Wide Spectrum. Pick one on the Home screen. Turn modes on or off and choose the model for each mode in WPods' Windows settings page > Mic modes. Each model shows how heavy it is on your PC and how much delay it adds.
 - **Voice enhancement:** Off, Apple-inspired, Clear voice auto level or Clear voice full-range level. Applies to every pair.
 
 > [!NOTE]
@@ -116,7 +116,7 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 
 For each pair (while connected):
 
-- **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. With Hands-Free on, an app that uses the Hands-Free mic gets the AirPods mic, and the "Headset (A2DP)" mic pauses until that app lets go.
+- **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. If you leave Hands-Free mode on, an app that uses the Hands-Free mic takes over the AirPods mic, and "Headset (A2DP)" goes quiet until that app stops using it.
 - **Low audio latency** gives less delay for games and calls. It keeps your AirPods awake and may use more battery.
 
 For the app:
@@ -142,9 +142,7 @@ On first launch, WPods shows a short welcome with the terms and a note that it i
 
 ## Supported AirPods
 
-Every model shows battery.
-
-Supports AirPods (1st, 2nd and 3rd gen), AirPods 4 and 4 (ANC), AirPods 5, AirPods Pro (1st gen), Pro 2 and Pro 3, and AirPods Max (1st gen) and Max 2.
+Supports AirPods (1st, 2nd and 3rd gen), AirPods 4 and 4 (ANC), AirPods 5, AirPods Pro (1st gen), Pro 2 and Pro 3, and AirPods Max (1st gen) and Max 2. Battery works on all of them. Other features depend on the model:
 
 - "Noise cancellation with one AirPod" works on AirPods 4 (ANC), AirPods 5 and all AirPods Pro.
 - "Allow 'Off' in listening modes" works on AirPods Pro 2 and AirPods Pro 3.
@@ -190,7 +188,7 @@ Based on each project's README, website and source code as of 2026-10-26. If som
 - Administrator rights to install.
 - Bluetooth.
 - Secure Boot turned off.
-- A restart.
+- A restart during install.
 - Internet during setup, if .NET 10 Desktop Runtime or Microsoft Edge WebView2 Runtime are missing. Setup downloads them and runs them only if they are signed by Microsoft.
 
 ### Test Mode
@@ -222,8 +220,8 @@ With Test Mode on, Windows shows a "Test Mode" watermark in the corner of your d
    - Create a desktop shortcut (off by default).
    - Start WPods when I sign in (on by default).
 5. Setup installs .NET and WebView2 if missing, turns on Test Mode, and installs WPods and its drivers.
-6. **Restart Windows.** The drivers load, and WPods can connect, only after the restart.
-7. **Open WPods** and agree to the welcome screen. Open your AirPods case near your PC (AirPods Max: take them out of the Smart Case) and click **Connect**. Not paired yet? Use "Pair new AirPods" or "Open Bluetooth settings".
+6. **Restart Windows.** WPods can't connect until you restart, because the drivers load at startup.
+7. **Open WPods** and accept the terms on the welcome screen. Open your AirPods case near your PC (AirPods Max: take them out of the Smart Case) and click **Connect**. Not paired yet? Use "Pair new AirPods" or "Open Bluetooth settings".
 
 If the driver install fails, run Setup again.
 
@@ -233,7 +231,7 @@ If the driver install fails, run Setup again.
 
 1. Open Windows **Settings > Apps > Installed apps**, find **WPods** and choose **Uninstall**.
 2. Choose whether to also remove your WPods settings (No by default). It then removes the drivers and the startup entry.
-3. If WPods Setup turned Test Mode on, it asks "Turn Windows test mode off as well?" (default No). Say **Yes** to restore the default Windows protection.
+3. If WPods Setup turned Test Mode on, it asks "Turn Windows test mode off as well?" (default No). Say **Yes** to undo the security change.
 
 To turn Test Mode off yourself, open a Command Prompt as administrator, run this, then restart:
 
@@ -251,7 +249,7 @@ Arabic, Bangla, Bulgarian, Catalan, Chinese (Simplified; Traditional, Taiwan; Tr
 
 Arabic, Hebrew and Urdu use a right-to-left layout. Translations other than English and Ukrainian were made with AI help and have not been reviewed by native speakers yet. Spotted something off? Please [open an issue](https://github.com/FPNDev/wpods/issues).
 
-Choose "Same as Windows" or pick a language in Windows settings. It switches right away.
+Choose "Same as Windows" or pick a language in WPods' Windows settings page. It switches right away.
 
 ## Help and feedback
 
