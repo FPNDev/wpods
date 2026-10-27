@@ -1,4 +1,5 @@
 import { applyCommon } from './common';
+import { createOverlayScroll } from './components/scrollbar';
 import { createToast } from './components/toast';
 import { createAnnouncer, createFrame, setHidden, setText } from './dom';
 import { listen, post } from './host';
@@ -145,6 +146,7 @@ const shell = (
   </div>
 );
 document.body.append(shell);
+shell.append(createOverlayScroll(body));
 const announcer = createAnnouncer(announce);
 
 const pageOf = (name: PageName): Built => {

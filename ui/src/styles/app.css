@@ -211,6 +211,44 @@ span.wp-menu__glyph {
   overflow-wrap: anywhere;
 }
 
+/* Overlay scrollbar thumb (components/scrollbar.tsx): no track, the wide box is the hit area, ::before is the pill. */
+.wp-scroll {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  width: 12px;
+  z-index: 10;
+  opacity: 0.4;
+  touch-action: none;
+  transition: opacity var(--dur-slow) var(--ease-standard);
+}
+.wp-scroll::before {
+  content: '';
+  position: absolute;
+  inset: 0 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-primary) 25%, transparent);
+  transition:
+    inset var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard);
+}
+.wp-scroll--on,
+.wp-scroll:hover {
+  opacity: 1;
+  transition-duration: var(--dur-fast);
+}
+.wp-scroll:hover::before,
+.wp-scroll--drag::before {
+  inset: 0 3px;
+  background: color-mix(in srgb, var(--text-primary) 40%, transparent);
+}
+@media (forced-colors: active) {
+  .wp-scroll::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+}
+
 .wp-choice:disabled {
   cursor: not-allowed;
   background: transparent;
