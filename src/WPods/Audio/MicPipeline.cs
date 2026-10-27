@@ -5,7 +5,10 @@ namespace WPods.Audio;
 
 public enum MicStatus
 {
-    /// <summary>No app captures from "Headset (A2DP)", or one captures while no AirPods are attached.</summary>
+    /// <summary>
+    /// No app captures from "Headset (A2DP)", or one captures while no AirPods are attached or while Hands-Free has
+    /// their mic.
+    /// </summary>
     NotActive,
     /// <summary>An app captures and AirPods are attached; no START written yet in this session.</summary>
     Starting,
@@ -516,6 +519,7 @@ public sealed class MicPipeline
         if (_handsFreeMic)
         {
             Log.Info("mic", "Hands-Free mic in use by an app, no START");
+            UpdateStatusLocked("Hands-Free mic");
         }
     }
 
@@ -534,6 +538,7 @@ public sealed class MicPipeline
         if (inUse)
         {
             HoldLocked(reason);
+            UpdateStatusLocked(reason);
             return;
         }
         CompleteHandsFreeEndedLocked();
@@ -781,17 +786,18 @@ public sealed class MicPipeline
         }
     }
 
-    // While capturing: no session -> NotActive; a fault (M1 wins over M2) -> Problem; START written or audio
-    // decoded -> Live; else Starting. While not capturing only OnCaptureChanged sets the status.
+    // While capturing: no session or Hands-Free has the mic -> NotActive; a fault (M1 wins over M2) -> Problem; START
+    // written or audio decoded -> Live; else Starting. While not capturing only OnCaptureChanged sets the status.
     private void UpdateStatusLocked(string reason)
     {
         if (!_capturing)
         {
             return;
         }
-        string? fault = _session is null ? null : _nativeFailed ? "M1" : _startFailed ? "M2" : null;
+        bool off = _session is null || _handsFreeAudio || _handsFreeMic;
+        string? fault = off ? null : _nativeFailed ? "M1" : _startFailed ? "M2" : null;
         _faultCode = fault;
-        SetStatusLocked(_session is null ? MicStatus.NotActive : fault is not null ? MicStatus.Problem : _started ? MicStatus.Live : MicStatus.Starting, reason);
+        SetStatusLocked(off ? MicStatus.NotActive : fault is not null ? MicStatus.Problem : _started ? MicStatus.Live : MicStatus.Starting, reason);
     }
 
     private void ArmLocked(long dueMs) => _timer.Change(Math.Max(dueMs, 1), Timeout.Infinite);
