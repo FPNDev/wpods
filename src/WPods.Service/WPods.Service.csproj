@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- LocalSystem service: runs the Bluetooth adapter through WinUSB + usbip-win2, the AAP channels and the virtual mic. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>WPods.Service</AssemblyName>
+    <RootNamespace>WPods.Service</RootNamespace>
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+    <Content Include="$(NuGetPackageRoot)system.serviceprocess.servicecontroller\10.0.0\THIRD-PARTY-NOTICES.TXT" Link="dotnet-THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
