@@ -1,0 +1,70 @@
+name: Bug report
+description: Something doesn't work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this! The details below help us find the cause quickly.
+        Not sure where to find something? See [Reporting a problem](https://github.com/FPNDev/wpods#reporting-a-problem) in the README.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: "I clicked Connect, the AirPods connected, but noise control stayed greyed out."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: If you can make it happen again, how?
+      placeholder: |
+        1. Open the AirPods case next to the PC
+        2. Click Connect in WPods
+        3. ...
+  - type: input
+    id: wpods-version
+    attributes:
+      label: WPods version
+      description: In WPods, open the Windows settings page. The version is shown under Updates.
+      placeholder: "0.3.0"
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      description: Press Win+R, type `winver` and press Enter. Copy the version and build, for example "24H2 (OS Build 26100.2605)".
+      placeholder: "Windows 11 24H2 (OS Build 26100.2605)"
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Bluetooth adapter
+      description: |
+        Device Manager > Bluetooth: the adapter's name, and its USB ID (right-click it > Properties > Details > Hardware Ids, the line like `USB\VID_8087&PID_0033`). See "How do I find my Bluetooth adapter?" in the README.
+      placeholder: "Intel(R) Wireless Bluetooth(R), USB\\VID_8087&PID_0033"
+    validations:
+      required: true
+  - type: input
+    id: airpods
+    attributes:
+      label: AirPods model
+      placeholder: "AirPods Pro 2 (USB-C)"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Please attach the WPods logs: zip `C:\ProgramData\WPods\logs` and `%LOCALAPPDATA%\WPods\logs` and drag the zip here. If the zip is over 25 MB, upload it to a file-sharing service and paste the link. See "How do I get the WPods logs?" in the README.
+      placeholder: "Drag the zip with both logs folders here."
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else?
+      description: Other Bluetooth devices you use with this PC, screenshots, or anything that might help.

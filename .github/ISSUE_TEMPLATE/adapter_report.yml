@@ -1,0 +1,57 @@
+name: Bluetooth adapter report
+description: Tell us how WPods works with your Bluetooth adapter, good or bad.
+labels: ["adapter"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        WPods works with your PC's Bluetooth adapter directly, and every adapter model is a little different. So far it has been tested on an Intel AX211 only, so every report helps, including "it just works"!
+  - type: input
+    id: adapter
+    attributes:
+      label: Bluetooth adapter
+      description: |
+        Device Manager > Bluetooth: the adapter's name, and its USB ID (right-click it > Properties > Details > Hardware Ids, the line like `USB\VID_8087&PID_0033`). See "How do I find my Bluetooth adapter?" in the README.
+      placeholder: "Realtek Bluetooth Adapter, USB\\VID_0BDA&PID_8771"
+    validations:
+      required: true
+  - type: input
+    id: pc
+    attributes:
+      label: PC or motherboard model
+      description: Optional. Helps when the adapter is built in.
+      placeholder: "Lenovo ThinkPad T14 Gen 3"
+  - type: dropdown
+    id: result
+    attributes:
+      label: How does it work?
+      options:
+        - Everything works
+        - Mostly works (tell us what doesn't below)
+        - Doesn't work
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: What works and what doesn't? Which other Bluetooth devices did you try (mouse, keyboard, speaker, controller)?
+  - type: input
+    id: versions
+    attributes:
+      label: WPods and Windows version
+      description: WPods version from its Windows settings page; Windows version from `winver`.
+      placeholder: "WPods 0.3.0, Windows 11 24H2 (OS Build 26100.2605)"
+    validations:
+      required: true
+  - type: input
+    id: airpods
+    attributes:
+      label: AirPods model
+      placeholder: "AirPods 4 (ANC)"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (if something doesn't work)
+      description: |
+        Zip `C:\ProgramData\WPods\logs` and `%LOCALAPPDATA%\WPods\logs` and drag the zip here. If the zip is over 25 MB, upload it to a file-sharing service and paste the link.
