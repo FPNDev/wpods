@@ -1,12 +1,14 @@
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 
 namespace WPods.Service;
 
 /// <summary>
 /// HCI proxy between Windows' Bluetooth stack and the controller. Hides the service's own AAP channels (PSM 0x1001,
-/// local CIDs from 0x7F40, signaling ids from 0xC0) and their completed-packet counts from Windows; outbound ACL from
-/// both sides shares the controller buffers, and ours never goes between fragments of a Windows L2CAP PDU.
+/// local CIDs from 0x7F40, signaling ids from 0xC0), its Hands-Free decline (RFCOMM, same ranges) and their
+/// completed-packet counts from Windows; outbound ACL from both sides shares the controller buffers, and ours never goes
+/// between fragments of a Windows L2CAP PDU.
 /// </summary>
 internal sealed class HciProxy
 {
@@ -16,6 +18,12 @@ internal sealed class HciProxy
     // Controller ACL buffers our own packets may hold at once.
     private const int MaxOursOutstanding = 1;
     private static readonly TimeSpan OpenTimeout = TimeSpan.FromSeconds(10);
+    private const ushort RfcommPsm = 0x0003;
+    // The whole Hands-Free decline normally takes well under a second; past this it is cut short.
+    private static readonly TimeSpan DeclineTimeout = TimeSpan.FromSeconds(5);
+    // Hands-Free DLC up and no AT command yet: closing it ends the AirPods wait
+    private static readonly TimeSpan SilentTimeout = TimeSpan.FromSeconds(1);
+    private static readonly byte[] AtError = "\r\nERROR\r\n"u8.ToArray();
 
     // Guards all state below; Monitor.Wait/PulseAll on it for controller buffers.
     private readonly object _gate = new();
@@ -43,6 +51,8 @@ internal sealed class HciProxy
     // Send time of Windows' unanswered command (0 = none pending) and the controller's last reported version.
     private long _commandSentAt;
     private byte[]? _localVersion;
+    // The controller's BD_ADDR (Read_BD_ADDR answer); 0 until Windows asked for it.
+    private ulong _localAddress;
 
     /// <summary>
     /// The controller lost its state: Hardware_Error, or a changed local version (firmware reloaded or lost).
@@ -299,8 +309,9 @@ internal sealed class HciProxy
                 if (head.Length >= 8)
                 {
                     ushort cid = BinaryPrimitives.ReadUInt16LittleEndian(head[6..]);
-                    link.InboundOurs = (link.Aap is { } ch && cid == ch.LocalCid) || (cid == 0x0001 && SignalingIsOursLocked(link, head[8..]))
-                        || (cid == 0x0001 && (link.Aap is not null || link.Ids.Count > 0) && HasSeveralCommands(head));
+                    link.InboundOurs = (link.Aap is { } ch && cid == ch.LocalCid) || (link.Decline is { } decline && cid == decline.LocalCid)
+                        || (cid == 0x0001 && SignalingIsOursLocked(link, head[8..]))
+                        || (cid == 0x0001 && (link.Aap is not null || link.Decline is not null || link.Ids.Count > 0) && HasSeveralCommands(head));
                     if (cid == 0x0001 && !link.InboundOurs && link.Ids.Count > 0 && head.Length >= 10)
                     {
                         Log.Info("aap", $"{link.Address:X12}: signaling 0x{head[8]:X2} id 0x{head[9]:X2} for Windows while ours wait ({link.Ids.Count})");
@@ -769,8 +780,10 @@ internal sealed class HciProxy
                 {
                     int handle = BinaryPrimitives.ReadUInt16LittleEndian(e.AsSpan(3)) & 0x0FFF;
                     ulong address = ReadAddress(e.AsSpan(5));
-                    _links[handle] = new Link(handle, address, le: false);
+                    var link = new Link(handle, address, le: false);
+                    _links[handle] = link;
                     Log.Info("hci", $"ACL link 0x{handle:X3} to {address:X12}");
+                    PrepareDeclineLocked(link);
                     break;
                 }
             case 0x3E when e.Length >= 6 && e[2] is 0x01 or 0x0A or 0x29 && e[3] == 0:
@@ -818,6 +831,10 @@ internal sealed class HciProxy
                         {
                             ConnectLocked(ch);
                         }
+                        if (!was && link.Encrypted && link.Decline is { Step: DeclineStep.Waiting } decline)
+                        {
+                            ConnectDeclineLocked(link, decline);
+                        }
                     }
                     break;
                 }
@@ -840,6 +857,10 @@ internal sealed class HciProxy
             _aclMaxLength = BinaryPrimitives.ReadUInt16LittleEndian(e.AsSpan(6));
             _aclBuffers = BinaryPrimitives.ReadUInt16LittleEndian(e.AsSpan(9));
             Log.Info("hci", $"controller ACL buffers: {_aclBuffers} x {_aclMaxLength} bytes");
+        }
+        else if (opcode == 0x1009 && e.Length >= 12)
+        {
+            _localAddress = ReadAddress(e.AsSpan(6));
         }
         else if (opcode is 0x2002 or 0x2060 && e.Length >= 9)
         {
@@ -954,12 +975,13 @@ internal sealed class HciProxy
 
     private static byte[] Cids(ushort a, ushort b) => [(byte)a, (byte)(a >> 8), (byte)b, (byte)(b >> 8)];
 
-    // Responses to the request are routed to `ch`. A Disconnection Request names our CID second (DCID, SCID).
-    private void SignalLocked(Link link, AapChannel? ch, byte code, ReadOnlySpan<byte> data)
+    // Responses to the request are routed to `ch`, or by `localCid` when there is no AAP channel (the Hands-Free decline).
+    // A Disconnection Request names our CID second (DCID, SCID).
+    private void SignalLocked(Link link, AapChannel? ch, byte code, ReadOnlySpan<byte> data, ushort localCid = 0)
     {
         byte id = link.NextId;
         link.NextId = link.NextId == 0xFF ? (byte)0xC0 : (byte)(link.NextId + 1);
-        ushort cid = code == 0x06 ? BinaryPrimitives.ReadUInt16LittleEndian(data[2..]) : ch?.LocalCid ?? 0;
+        ushort cid = code == 0x06 ? BinaryPrimitives.ReadUInt16LittleEndian(data[2..]) : ch?.LocalCid ?? localCid;
         link.Ids[id] = new Request(ch, code, cid);
         Log.Info("aap", $"{link.Address:X12}: sending signaling 0x{code:X2} id 0x{id:X2} {Convert.ToHexString(data)}");
         SendCommandLocked(link, code, id, data);
@@ -1027,9 +1049,25 @@ internal sealed class HciProxy
             int at = code == 0x05 ? 4 : 6;
             return code == request.Code + 1 && sig.Length >= at + 2 && BinaryPrimitives.ReadUInt16LittleEndian(sig[at..]) == request.Cid;
         }
+        // The AirPods open RFCOMM for Hands-Free while Windows has it off: refused here at once (see RefusesRfcommLocked).
+        if (code == 0x02)
+        {
+            return sig.Length >= 8 && BinaryPrimitives.ReadUInt16LittleEndian(sig[4..]) == RfcommPsm && RefusesRfcommLocked(link);
+        }
         // Configure_Request and Disconnection_Request name the destination CID first: ours.
-        return code is 0x04 or 0x06 && sig.Length >= 6 && link.Aap is { } ch && BinaryPrimitives.ReadUInt16LittleEndian(sig[4..]) == ch.LocalCid;
+        if (code is not (0x04 or 0x06) || sig.Length < 6)
+        {
+            return false;
+        }
+        ushort dcid = BinaryPrimitives.ReadUInt16LittleEndian(sig[4..]);
+        return (link.Aap is { } ch && dcid == ch.LocalCid) || (link.Decline is { } decline && dcid == decline.LocalCid);
     }
+
+    // Windows answers an RFCOMM channel from the AirPods while their Hands-Free service is off, but never their first
+    // Hands-Free command: the AirPods hold back their settings report until it times out. Read from Windows' own
+    // state each time, so a change in WPods or in Windows' settings applies at once.
+    private bool RefusesRfcommLocked(Link link) =>
+        link.AapDevice && BluetoothRegistry.HandsFreeEnabled(_localAddress, link.Address) == false;
 
     private void StartPduLocked(Link link, ReadOnlySpan<byte> l2)
     {
@@ -1107,6 +1145,10 @@ internal sealed class HciProxy
             }
             ch.Deliver(pdu[4..]);
         }
+        else if (link.Decline is { } decline && cid == decline.LocalCid)
+        {
+            OnDeclineFrameLocked(link, decline, pdu.AsSpan(4));
+        }
         else
         {
             Log.Info("aap", $"dropped PDU cid 0x{cid:X4} ({pdu.Length - 4} bytes): no open channel");
@@ -1130,8 +1172,21 @@ internal sealed class HciProxy
                     {
                         return; // pending
                     }
-                    if (!link.Ids.Remove(id, out Request request) || request.Channel is not { } requester)
+                    if (!link.Ids.Remove(id, out Request request))
                     {
+                        return;
+                    }
+                    if (IsDeclineRequest(link, request, out HandsFreeDecline? decline))
+                    {
+                        OnDeclineConnectedLocked(link, decline, result, BinaryPrimitives.ReadUInt16LittleEndian(d));
+                        return;
+                    }
+                    if (request.Channel is not { } requester)
+                    {
+                        if (request.Code == 0x02 && result == 0)
+                        {
+                            SignalLocked(link, null, 0x06, Cids(BinaryPrimitives.ReadUInt16LittleEndian(d), request.Cid));
+                        }
                         return;
                     }
                     if (requester != ch)
@@ -1155,6 +1210,11 @@ internal sealed class HciProxy
                     SignalLocked(link, ch, 0x04, config);
                     break;
                 }
+            case 0x04 when link.Decline is { } decline && BinaryPrimitives.ReadUInt16LittleEndian(d) == decline.LocalCid:
+                SendCommandLocked(link, 0x05, id, [(byte)decline.RemoteCid, (byte)(decline.RemoteCid >> 8), 0, 0, 0, 0]);
+                decline.RemoteConfigured = true;
+                CheckDeclineOpenLocked(link, decline);
+                break;
             case 0x04 when ch is not null:
                 SendCommandLocked(link, 0x05, id, [(byte)ch.RemoteCid, (byte)(ch.RemoteCid >> 8), 0, 0, 0, 0]);
                 ch.RemoteConfigured = true;
@@ -1169,7 +1229,23 @@ internal sealed class HciProxy
                     }
                     // Only the answer to this channel's own request counts: a late answer for an earlier channel may
                     // name the same CID.
-                    if (!link.Ids.Remove(id, out Request request) || ch is null || request.Channel != ch)
+                    if (!link.Ids.Remove(id, out Request request))
+                    {
+                        return;
+                    }
+                    if (IsDeclineRequest(link, request, out HandsFreeDecline? decline))
+                    {
+                        if (result != 0)
+                        {
+                            Log.Warn("hfp", $"{link.Address:X12}: Hands-Free decline: configuration refused, result {result}");
+                            CloseDeclineLocked(link, decline);
+                            return;
+                        }
+                        decline.LocalConfigured = true;
+                        CheckDeclineOpenLocked(link, decline);
+                        return;
+                    }
+                    if (ch is null || request.Channel != ch)
                     {
                         return;
                     }
@@ -1185,6 +1261,11 @@ internal sealed class HciProxy
                     CheckOpenLocked(ch);
                     break;
                 }
+            case 0x06 when link.Decline is { } decline && BinaryPrimitives.ReadUInt16LittleEndian(d) == decline.LocalCid:
+                SendCommandLocked(link, 0x07, id, Cids(decline.LocalCid, decline.RemoteCid));
+                Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: channel closed by the AirPods");
+                link.Decline = null;
+                break;
             case 0x06 when ch is not null:
                 SendCommandLocked(link, 0x07, id, Cids(ch.LocalCid, ch.RemoteCid));
                 Log.Info("aap", $"{link.Address:X12}: channel closed by the AirPods");
@@ -1192,19 +1273,35 @@ internal sealed class HciProxy
                 ch.End(0);
                 break;
             case 0x07:
-                link.Ids.Remove(id);
+                if (link.Ids.Remove(id, out Request closed) && link.Decline is { Step: DeclineStep.Closing } closing && closed.Cid == closing.LocalCid)
+                {
+                    link.Decline = null;
+                }
                 break;
             case 0x01:
                 {
-                    bool forChannel = link.Ids.Remove(id, out Request rejected) && rejected.Channel is not null && rejected.Channel == ch && !ch.IsOpen;
-                    if (forChannel)
+                    if (!link.Ids.Remove(id, out Request rejected))
+                    {
+                        break;
+                    }
+                    if (ch is not null && rejected.Channel == ch && !ch.IsOpen)
                     {
                         Log.Warn("aap", $"{link.Address:X12}: command rejected");
-                        DropLocked(ch!);
-                        ch!.End(Protocol.ErrorRefused);
+                        DropLocked(ch);
+                        ch.End(Protocol.ErrorRefused);
+                    }
+                    else if (IsDeclineRequest(link, rejected, out HandsFreeDecline? decline))
+                    {
+                        Log.Warn("hfp", $"{link.Address:X12}: Hands-Free decline: command rejected");
+                        link.Decline = null;
                     }
                     break;
                 }
+            case 0x02 when d.Length >= 4:
+                // RefusesRfcommLocked said so: "PSM not supported", Windows never sees the request.
+                Log.Info("hfp", $"{link.Address:X12}: Hands-Free is off in Windows: the AirPods' RFCOMM channel refused");
+                SendCommandLocked(link, 0x03, id, [0, 0, d[2], d[3], 0x02, 0x00, 0, 0]);
+                break;
         }
     }
 
@@ -1228,6 +1325,153 @@ internal sealed class HciProxy
             ch.Link.Aap = null;
         }
         ch.IsOpen = false;
+    }
+
+    // AirPods whose Hands-Free service is off in Windows 
+    // never sets Hands-Free up, and the
+    // holds back their settings report until their own attempt times out.
+    // A Hands-Free connection from here ends that
+    // wait at once.
+    private void PrepareDeclineLocked(Link link)
+    {
+        (bool aap, byte channel) = BluetoothRegistry.ReadServices(link.Address);
+        link.AapDevice = aap;
+        if (!aap || BluetoothRegistry.HandsFreeEnabled(_localAddress, link.Address) != false)
+        {
+            return;
+        }
+        if (channel == 0)
+        {
+            Log.Info("hfp", $"{link.Address:X12}: Hands-Free is off in Windows, but no cached Hands-Free channel: not declined");
+            return;
+        }
+        link.Decline = new HandsFreeDecline(NextCidLocked(), channel);
+        Log.Info("hfp", $"{link.Address:X12}: Hands-Free is off in Windows: declining it on RFCOMM channel {channel} once encrypted");
+    }
+
+    private void ConnectDeclineLocked(Link link, HandsFreeDecline decline)
+    {
+        decline.Step = DeclineStep.Connecting;
+        SignalLocked(link, null, 0x02, Cids(RfcommPsm, decline.LocalCid), decline.LocalCid);
+        _ = CutDeclineShortAsync(link, decline, DeclineTimeout);
+    }
+
+    private static bool IsDeclineRequest(Link link, Request request, [NotNullWhen(true)] out HandsFreeDecline? decline)
+    {
+        decline = link.Decline;
+        return request.Channel is null && decline is not null && request.Cid == decline.LocalCid;
+    }
+
+    private void OnDeclineConnectedLocked(Link link, HandsFreeDecline decline, ushort result, ushort remoteCid)
+    {
+        if (result != 0)
+        {
+            Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: the AirPods refused the RFCOMM channel, result {result}");
+            link.Decline = null;
+            return;
+        }
+        decline.RemoteCid = remoteCid;
+        SignalLocked(link, null, 0x04, [(byte)remoteCid, (byte)(remoteCid >> 8), 0, 0], decline.LocalCid);
+    }
+
+    private void CheckDeclineOpenLocked(Link link, HandsFreeDecline decline)
+    {
+        if (decline.RemoteConfigured && decline.LocalConfigured && decline.Step == DeclineStep.Connecting)
+        {
+            decline.Step = DeclineStep.Mux;
+            SendL2capLocked(link, decline.RemoteCid, Rfcomm.Command(0, Rfcomm.Sabm));
+        }
+    }
+
+    // Multiplexer up, PN, Hands-Free DLC up, Modem Status, then the AirPods' first AT command (AT+BRSF) gets ERROR and
+    // everything is closed again; without one within SilentTimeout it is closed all the same.
+    private void OnDeclineFrameLocked(Link link, HandsFreeDecline decline, ReadOnlySpan<byte> frame)
+    {
+        if (!Rfcomm.TryParse(frame, out byte dlci, out byte control, out ReadOnlySpan<byte> info))
+        {
+            return;
+        }
+        // Frame kind and size only, never the content.
+        Log.Info("hfp", $"{link.Address:X12}: RFCOMM in: DLC {dlci}, control 0x{control:X2}, {info.Length} bytes, step {decline.Step}");
+        switch (control)
+        {
+            case Rfcomm.Ua when dlci == 0 && decline.Step == DeclineStep.Mux:
+                decline.Step = DeclineStep.Pn;
+                SendL2capLocked(link, decline.RemoteCid, Rfcomm.ParameterNegotiation(decline.Dlci));
+                break;
+            case Rfcomm.Uih when dlci == 0 && decline.Step == DeclineStep.Pn && info.Length >= 1 && info[0] >> 2 == Rfcomm.PnType && (info[0] & 0x02) == 0:
+                decline.Step = DeclineStep.Dlc;
+                SendL2capLocked(link, decline.RemoteCid, Rfcomm.Command(decline.Dlci, Rfcomm.Sabm));
+                break;
+            case Rfcomm.Ua when dlci == decline.Dlci && decline.Step == DeclineStep.Dlc:
+                decline.Step = DeclineStep.Open;
+                SendL2capLocked(link, decline.RemoteCid, Rfcomm.ModemStatus(decline.Dlci));
+                _ = CutDeclineShortAsync(link, decline, SilentTimeout);
+                break;
+            case Rfcomm.Ua or Rfcomm.Dm when dlci == decline.Dlci && decline.Step is DeclineStep.Dlc or DeclineStep.ClosingDlc:
+                decline.Step = DeclineStep.ClosingMux;
+                SendL2capLocked(link, decline.RemoteCid, Rfcomm.Command(0, Rfcomm.Disc));
+                break;
+            case Rfcomm.Ua or Rfcomm.Dm when dlci == 0 && decline.Step is DeclineStep.Mux or DeclineStep.ClosingMux:
+                CloseDeclineLocked(link, decline);
+                break;
+            case Rfcomm.Disc:
+                SendL2capLocked(link, decline.RemoteCid, Rfcomm.Response(dlci, Rfcomm.Ua));
+                if (dlci == 0)
+                {
+                    CloseDeclineLocked(link, decline);
+                }
+                else if (dlci == decline.Dlci && decline.Step == DeclineStep.Open)
+                {
+                    decline.Step = DeclineStep.ClosingMux;
+                    SendL2capLocked(link, decline.RemoteCid, Rfcomm.Command(0, Rfcomm.Disc));
+                }
+                break;
+            case Rfcomm.Uih when dlci == 0 && info.Length >= 1 && (info[0] & 0x02) != 0:
+                {
+                    // A multiplexer command (Modem Status and the like): answered with the same values.
+                    byte[] answer = info.ToArray();
+                    answer[0] &= 0xFD;
+                    SendL2capLocked(link, decline.RemoteCid, Rfcomm.Data(0, answer));
+                    break;
+                }
+            case Rfcomm.Uih when dlci == decline.Dlci && decline.Step == DeclineStep.Open && info.Length > 0:
+                Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: first command ({info.Length} bytes) answered ERROR, closing");
+                SendL2capLocked(link, decline.RemoteCid, Rfcomm.Data(decline.Dlci, AtError));
+                decline.Step = DeclineStep.ClosingDlc;
+                SendL2capLocked(link, decline.RemoteCid, Rfcomm.Command(decline.Dlci, Rfcomm.Disc));
+                break;
+        }
+    }
+
+    // link.Decline stays until the AirPods answer the Disconnection Request (case 0x07), so their late frames still land here.
+    private void CloseDeclineLocked(Link link, HandsFreeDecline decline)
+    {
+        if (decline.Step == DeclineStep.Closing)
+        {
+            return;
+        }
+        Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: closing the RFCOMM channel");
+        decline.Step = DeclineStep.Closing;
+        if (decline.RemoteCid == 0)
+        {
+            link.Decline = null;
+            return;
+        }
+        SignalLocked(link, null, 0x06, Cids(decline.RemoteCid, decline.LocalCid));
+    }
+
+    private async Task CutDeclineShortAsync(Link link, HandsFreeDecline decline, TimeSpan delay)
+    {
+        await Task.Delay(delay).ConfigureAwait(false);
+        lock (_gate)
+        {
+            if (link.Decline == decline && decline.Step != DeclineStep.Closing && _links.TryGetValue(link.Handle, out Link? current) && current == link)
+            {
+                Log.Warn("hfp", $"{link.Address:X12}: Hands-Free decline not done after {delay.TotalMilliseconds:0} ms (step {decline.Step}): closing it");
+                CloseDeclineLocked(link, decline);
+            }
+        }
     }
 
     // Tells the app that call audio (Hands-Free) starts or ended on the link, so it stops the AirPods' mic stream
@@ -1353,12 +1597,52 @@ internal sealed class HciProxy
         public byte[]? RxPdu;
         public int RxHave;
         public AapChannel? Aap;
+        /// <summary>Windows' cached SDP records of the device list AAP (PSM 0x1001): AirPods.</summary>
+        public bool AapDevice;
+        public HandsFreeDecline? Decline;
         public byte NextId = 0xC0;
         public readonly Dictionary<byte, Request> Ids = [];
     }
 
-    /// <summary>Our pending signaling request; Channel is null once the app gave up, Cid is our CID in the response.</summary>
+    /// <summary>
+    /// Our pending signaling request; Channel is null once the app gave up and for the Hands-Free decline, Cid is our CID
+    /// in the response.
+    /// </summary>
     internal readonly record struct Request(AapChannel? Channel, byte Code, ushort Cid);
+
+    /// <summary>Our RFCOMM channel to the AirPods' Hands-Free service (see PrepareDeclineLocked); hidden from Windows.</summary>
+    internal sealed class HandsFreeDecline(ushort localCid, byte channel)
+    {
+        public ushort LocalCid { get; } = localCid;
+        /// <summary>The AirPods' Hands-Free server channel as seen from the session initiator (direction bit 0).</summary>
+        public byte Dlci { get; } = (byte)(channel << 1);
+        public ushort RemoteCid;
+        public bool RemoteConfigured;
+        public bool LocalConfigured;
+        public DeclineStep Step;
+    }
+
+    internal enum DeclineStep
+    {
+        /// <summary>For encryption.</summary>
+        Waiting,
+        /// <summary>L2CAP connection and configuration.</summary>
+        Connecting,
+        /// <summary>SABM on DLC 0 sent.</summary>
+        Mux,
+        /// <summary>Parameter Negotiation (credit-based flow control) for the Hands-Free DLC sent.</summary>
+        Pn,
+        /// <summary>SABM on the Hands-Free DLC sent.</summary>
+        Dlc,
+        /// <summary>Hands-Free DLC up, waiting for the AirPods' first AT command.</summary>
+        Open,
+        /// <summary>DISC on the Hands-Free DLC sent.</summary>
+        ClosingDlc,
+        /// <summary>DISC on DLC 0 sent.</summary>
+        ClosingMux,
+        /// <summary>L2CAP Disconnection Request sent.</summary>
+        Closing,
+    }
 }
 
 /// <summary>One AAP channel per app connection; <see cref="Messages"/> holds framed pipe messages for the app.</summary>
