@@ -2,6 +2,8 @@
 #ifndef AppVersion
   #error AppVersion is not defined: build with build.ps1
 #endif
+; Fetched by ..\native\fetch-usbip.ps1 into ..\.build\deps.
+#define UsbipSetup "USBip-0.9.8.1-x64.exe"
 
 [Setup]
 AppId={{08E1B0A8-4D58-46F6-B9EC-006F5CC3A69F}
@@ -23,10 +25,12 @@ SetupIconFile=..\src\WPods\Assets\WPods.ico
 WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
-; Restart Manager closes WPods gracefully; it must not restart it (it would run elevated).
+; Restart Manager closes only the app and never restarts it (it would run elevated). The service keeps running
+; through the copy (see MoveServiceFilesAside); stopped by Restart Manager, it would leave the adapter on WinUSB.
 CloseApplications=yes
+CloseApplicationsFilter=WPods.exe
 RestartApplications=no
-; Never offer a reboot: drivers.ps1 reports a pending restart itself.
+; Only NeedRestart offers a restart; a Test Mode change applies at the user's next restart.
 RestartIfNeededByRun=no
 SetupLogging=yes
 OutputDir=..\dist
@@ -35,8 +39,11 @@ OutputBaseFilename=WPods-Setup
 [Tasks]
 Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: startup; Description: "Start WPods when I sign in"; Check: IsFirstInstall
+Name: autoupdate; Description: "Keep WPods up to date automatically"
 
 [InstallDelete]
+; Service files the previous update moved aside while the service used them (see MoveServiceFilesAside).
+Type: files; Name: "{app}\*.old-*"
 ; Folders fully owned by the app: drop files a previous version had (e.g. a removed locale would stay selectable).
 Type: filesandordirs; Name: "{app}\web"
 Type: filesandordirs; Name: "{app}\locales"
@@ -44,12 +51,15 @@ Type: filesandordirs; Name: "{app}\licenses"
 
 [Files]
 Source: "..\.build\publish\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\.build\drivers\NTAPD\*"; DestDir: "{app}\drivers\NTAPD"; Flags: ignoreversion
-Source: "..\.build\drivers\NTA2DPVM\*"; DestDir: "{app}\drivers\NTA2DPVM"; Flags: ignoreversion
+; Removes the drivers of WPods 0.2.x and older (updates and uninstall).
 Source: "drivers.ps1"; DestDir: "{app}\drivers"; Flags: ignoreversion
+; Extracted to {tmp} and run by PrepareToInstall, before any file is copied.
+Source: "..\.build\deps\{#UsbipSetup}"; Flags: dontcopy
 
 [UninstallDelete]
 Type: files; Name: "{app}\drivers\installed.txt"
+; Updates the service downloaded.
+Type: filesandordirs; Name: "{commonappdata}\WPods\updates"
 
 [Icons]
 Name: "{autoprograms}\WPods"; Filename: "{app}\WPods.exe"
@@ -58,9 +68,11 @@ Name: "{autodesktop}\WPods"; Filename: "{app}\WPods.exe"; Tasks: desktopicon
 [Run]
 ; The app writes the HKCU Run value itself, as the user who started Setup (never the elevating admin).
 Filename: "{app}\WPods.exe"; Parameters: "--register-startup"; Tasks: startup; Check: IsFirstInstall; Flags: runasoriginaluser waituntilterminated
-Filename: "{app}\WPods.exe"; Description: "{cm:LaunchProgram,WPods}"; Flags: postinstall runasoriginaluser nowait
+Filename: "{app}\WPods.exe"; Description: "{cm:LaunchProgram,WPods}"; Check: not FromService; Flags: postinstall runasoriginaluser nowait
 
 [UninstallRun]
+; Runs before the service and usbip-win2 are removed (usPostUninstall); the RunOnceId matches the
+; entry of WPods 0.2.x, so it runs once.
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\drivers\drivers.ps1"" -Uninstall"; Flags: runhidden waituntilterminated logoutput; RunOnceId: "Drivers"
 
 [Code]
@@ -71,6 +83,10 @@ const
   WebView2File = 'MicrosoftEdgeWebview2Setup.exe';
   WebView2Key = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
+  UsbipSetup = '{#UsbipSetup}';
+  ServiceName = 'WPodsService';
+  // HKLM 64-bit view: TestSigningByWPods (WPods 0.2.x turned Test Mode on), UsbipInstalledByWPods.
+  WPodsKey = 'SOFTWARE\WPods';
   // Exit code of RunMicrosoftInstaller when the file is not validly signed by Microsoft Corporation.
   NotMicrosoftSigned = 22352;
   SystemCodeIntegrityInformation = 103;
@@ -90,14 +106,41 @@ type
 
 var
   DownloadPage: TDownloadWizardPage;
-  SecureBootPage: TWizardPage;
+  BluetoothPage: TOutputMsgWizardPage;
+  AdapterChecked: Boolean;
+  // "Leave Test Mode" page and its controls; nil when the page is not needed (see NeedsLeavePage).
+  LeavePage: TWizardPage;
+  LeaveTestModeBox: TNewCheckBox;
+  FirmwareButton: TNewButton;
+  RecoveryKeyBox: TNewCheckBox;
+  // BitLocker('status') result, read once for the Leave Test Mode page.
+  BitLockerStatus: Integer;
+  // {current} has testsigning set (it may only apply after the next restart).
+  TestModeConfigured: Boolean;
+  // This run turned test signing off (so it is not done twice).
+  TestModeTurnedOff: Boolean;
+  // Setup closes itself for the firmware restart: no "Exit Setup?" question.
+  ClosingForFirmware: Boolean;
   RemoveSettings: Boolean;
   FirstInstall: Boolean;
+  // Uninstall: the Bluetooth adapter is back on Windows' own driver, so usbip-win2 may go.
+  AdapterRestored: Boolean;
+  // Uninstall: usbip-win2 was installed by Setup but stays, so its marker must stay too.
+  UsbipKept: Boolean;
+  // Uninstall: this run removed usbip-win2 (and with it the virtual adapter's device nodes).
+  UsbipRemoved: Boolean;
+  // Uninstall: the service files were kept aside, so the service is removed at the end (usPostUninstall).
+  ServiceKeptForLater: Boolean;
   // BitLocker on the OS drive was suspended by this run (so only this run may resume it).
   BitLockerSuspendedByRun: Boolean;
-  // This run changed the boot configuration (testsigning on), so DeinitializeSetup undoes it if Setup stops early.
-  TestSigningSetByRun: Boolean;
-  InstallFinished: Boolean;
+  // This run installed usbip-win2, which works only after a restart.
+  UsbipJustInstalled: Boolean;
+  // The stamp of the service files MoveServiceFilesAside renamed ('' = none moved, or moved back).
+  MovedAsideStamp: String;
+  // The files are installed (ssPostInstall reached): no rollback can take the new service files away any more.
+  FilesInstalled: Boolean;
+  // The Select Tasks page was shown (it shows the current auto-update choice, see CurPageChanged).
+  TasksPageShown: Boolean;
 
 function InitializeSetup: Boolean;
 begin
@@ -111,6 +154,12 @@ end;
 function IsFirstInstall: Boolean;
 begin
   Result := FirstInstall;
+end;
+
+// Started silently as SYSTEM by the WPods service to install an update; the service reopens the app.
+function FromService: Boolean;
+begin
+  Result := ExpandConstant('{param:FROMSERVICE|0}') = '1';
 end;
 
 function NtQuerySystemInformation(InfoClass: Integer; var Info: TCodeIntegrityInformation; InfoLength: Cardinal;
@@ -130,6 +179,34 @@ begin
   Result := '''' + Result + '''';
 end;
 
+// 'Setup' or 'Uninstall', for messages shared by both.
+function Who: String;
+begin
+  if IsUninstaller then
+    Result := 'Uninstall'
+  else
+    Result := 'Setup';
+end;
+
+function WPodsFlag(const Name: String): Boolean;
+var
+  Value: Cardinal;
+begin
+  Result := RegQueryDWordValue(HKLM64, WPodsKey, Name, Value) and (Value = 1);
+end;
+
+// WPods 0.2.x turned Windows test signing on (it wrote this marker).
+function TestSigningByWPods: Boolean;
+begin
+  Result := WPodsFlag('TestSigningByWPods');
+end;
+
+procedure DeleteTestSigningMarker;
+begin
+  RegDeleteValue(HKLM64, WPodsKey, 'TestSigningByWPods');
+  RegDeleteKeyIfEmpty(HKLM64, WPodsKey);
+end;
+
 // Running state, not the boot configuration: a TESTSIGNING change only applies after a restart.
 function TestSigningOn: Boolean;
 var
@@ -142,7 +219,7 @@ begin
     ((Info.Options and CodeIntegrityOptionTestSign) <> 0);
 end;
 
-// Secure Boot blocks test signing. HKLM 64-bit view; a missing value or 0 means off or a legacy BIOS.
+// HKLM 64-bit view; a missing value or 0 means off or a legacy BIOS.
 function SecureBootOn: Boolean;
 var
   Value: Cardinal;
@@ -151,20 +228,10 @@ begin
     'UEFISecureBootEnabled', Value) and (Value = 1);
 end;
 
-// Test signing cannot be turned on while Secure Boot is on, and there is nothing to do when it already runs.
-function SecureBootBlocksInstall: Boolean;
-begin
-  Result := SecureBootOn and not TestSigningOn;
-end;
-
-// Runs Action ('status', 'suspend' or 'resume') for BitLocker (or Device encryption) on the OS drive through WMI
-// Win32_EncryptableVolume, which needs no BitLocker PowerShell module (missing on some Windows Home installs).
-// Returns the script exit code (BitLockerOff, BitLockerSuspended, BitLockerOn, BitLockerConverting), any other value
-// is a failure, -1 when PowerShell could not run. Protection off while encryption or decryption still runs (or is
-// paused) is BitLockerConverting, not BitLockerOff. No volume record for the OS drive is a failure for 'status' and
-// 'suspend' (nothing to resume for 'resume'). Changing testsigning or Secure Boot while BitLocker protects the drive
-// makes Windows ask for the recovery key, so callers treat every failure as "may be protected".
-function BitLocker(const Action: String): Integer;
+// BitLocker 'status', 'suspend' (for RebootCount restarts) or 'resume' on the OS drive via WMI, as the BitLocker
+// module is missing on some Home installs. Any result but a BitLocker* code is a failure, which callers treat as
+// "may be protected": a boot configuration change under BitLocker makes Windows ask for the recovery key.
+function BitLocker(const Action: String; const RebootCount: Integer): Integer;
 var
   Code: Integer;
 begin
@@ -182,7 +249,7 @@ begin
     'if ($p -ne 1) { exit 1 }; ' +
     'if ($a -eq ''status'') { exit ' + IntToStr(BitLockerOn) + ' }; ' +
     'if ((Invoke-CimMethod -InputObject $v -MethodName DisableKeyProtectors ' +
-    '-Arguments @{DisableCount = [uint32]1}).ReturnValue -ne 0) { exit 1 }; ' +
+    '-Arguments @{DisableCount = [uint32]' + IntToStr(RebootCount) + '}).ReturnValue -ne 0) { exit 1 }; ' +
     'if ((Invoke-CimMethod -InputObject $v -MethodName GetProtectionStatus).ProtectionStatus -ne 0) { exit 1 }; ' +
     'exit ' + IntToStr(BitLockerSuspended) + ' } catch { exit 1 }"', '', SW_HIDE, ewWaitUntilTerminated, Code) then begin
     Log('Could not run PowerShell for BitLocker ' + Action + ': ' + SysErrorMessage(Code));
@@ -191,15 +258,13 @@ begin
   Result := Code;
 end;
 
-// Returns the BitLocker('suspend') exit code. Only BitLockerOff (not protected: off or already suspended) and
-// BitLockerSuspended (this call suspended it for the next restart) are safe, see BitLockerSafe; BitLockerConverting
-// and every other value (any error or doubt) are not.
-function SuspendBitLocker: Integer;
+// Only BitLockerOff (off or already suspended) and BitLockerSuspended allow a boot change, see BitLockerSafe.
+function SuspendBitLocker(const RebootCount: Integer): Integer;
 begin
-  Result := BitLocker('suspend');
+  Result := BitLocker('suspend', RebootCount);
   if Result = BitLockerSuspended then begin
     BitLockerSuspendedByRun := True;
-    Log('BitLocker suspended on the OS drive until the next restart.');
+    Log(Format('BitLocker suspended on the OS drive for the next %d restart(s).', [RebootCount]));
   end else if Result = BitLockerOff then
     Log('BitLocker does not protect the OS drive (off or already suspended).')
   else if Result = BitLockerConverting then
@@ -214,31 +279,30 @@ begin
   Result := (Code = BitLockerOff) or (Code = BitLockerSuspended);
 end;
 
-// Resumes BitLocker only when this run suspended it. False when it stays suspended (until the next restart).
+// Resumes BitLocker only when this run suspended it; false when it stays suspended.
 function ResumeBitLocker: Boolean;
 begin
   Result := True;
   if not BitLockerSuspendedByRun then
     Exit;
-  Result := BitLocker('resume') = BitLockerOff;
+  Result := BitLocker('resume', 0) = BitLockerOff;
   if Result then begin
     BitLockerSuspendedByRun := False;
     Log('BitLocker resumed on the OS drive.');
   end else
-    Log('Could not resume BitLocker on the OS drive; it stays suspended until the next restart.');
+    Log('Could not resume BitLocker on the OS drive; it stays suspended for the restarts it was suspended for.');
 end;
 
-// How to suspend BitLocker for one restart by hand, for every case Setup cannot do it safely itself.
-function BitLockerManualSteps: String;
+// How to suspend BitLocker for RebootCount restarts by hand, for every case Setup cannot do it safely itself.
+function BitLockerManualSteps(const RebootCount: Integer): String;
 begin
-  Result := 'To suspend BitLocker (or Device encryption) for the next restart, open Windows PowerShell or Terminal ' +
-    'as administrator and run:' + #13#10 +
-    'manage-bde -protectors -disable ' + ExpandConstant('{sd}') + ' -RebootCount 1' + #13#10#13#10 +
+  Result := 'To suspend BitLocker (or Device encryption) yourself, open Windows PowerShell or Terminal as ' +
+    'administrator and run:' + #13#10 +
+    'manage-bde -protectors -disable ' + ExpandConstant('{sd}') + ' -RebootCount ' + IntToStr(RebootCount) + #13#10#13#10 +
     'Keep your BitLocker recovery key at hand: https://aka.ms/myrecoverykey';
 end;
 
-// Boot configuration, not the running state: True when {current} already has testsigning set (it applies after the
-// next restart). Read through WMI BcdObject; a failed read counts as not set, which takes the checked path.
+// Boot configuration, not the running state: {current} has testsigning set. A failed read counts as not set.
 function TestSigningConfigured: Boolean;
 var
   Code: Integer;
@@ -251,88 +315,62 @@ begin
     '} catch { exit 0 }"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = BcdTestSigningSet);
 end;
 
-// Turns Windows test signing on before any file is copied. Returns '' on success, else a specific error to abort
-// Setup with (nothing is installed on failure). The boot configuration is changed only when the OS drive is confirmed
-// not BitLocker-protected or was suspended by this run. On success it records that Setup, not the user, made the change.
-function EnableTestSigning: String;
+// Turns test signing off only when BitLocker is confirmed off or suspended, else Windows asks for the recovery key.
+// The suspend covers 2 restarts: this change and turning Secure Boot back on.
+function TurnTestSigningOff(const ShowDone: Boolean): Boolean;
 var
   Code: Integer;
-  Failure: String;
+  Manual, Msg: String;
 begin
-  Result := '';
-  if SecureBootOn then begin
-    Result := 'Setup could not turn on Windows test signing: Secure Boot is on and must be turned off ' +
-      'first.' + #13#10#13#10 + 'No changes were made and nothing was installed.';
-    Exit;
-  end;
-  if TestSigningConfigured then begin
-    Log('Windows test signing is already set in the boot configuration; it takes effect after a restart.');
-    Exit;
-  end;
-  Code := SuspendBitLocker;
+  Result := False;
+  Manual := 'To turn Test Mode off yourself:' + #13#10#13#10 + BitLockerManualSteps(2) + #13#10#13#10 +
+    'Then run: bcdedit /set testsigning off' + #13#10 + 'Then restart Windows.';
+  Code := SuspendBitLocker(2);
   if Code = BitLockerConverting then begin
-    Result := 'BitLocker (or Device encryption) is still encrypting or decrypting drive ' + ExpandConstant('{sd}') +
-      ', so Setup did not turn on Windows test signing: changing it now could make Windows ask for the BitLocker ' +
-      'recovery key. Nothing was installed.' + #13#10#13#10 + 'Wait until encryption or decryption finishes ' +
-      '(manage-bde -status shows its progress), then run Setup again.';
+    SuppressibleMsgBox('Windows Test Mode was left on: BitLocker (or Device encryption) is still encrypting or ' +
+      'decrypting drive ' + ExpandConstant('{sd}') + '. Wait until it finishes.' + #13#10#13#10 + Manual,
+      mbError, MB_OK, IDOK);
     Exit;
   end;
   if not BitLockerSafe(Code) then begin
-    Result := 'Setup could not confirm that BitLocker (or Device encryption) is off or suspended on drive ' +
-      ExpandConstant('{sd}') + ', so it did not turn on Windows test signing. Changing it while BitLocker protects ' +
-      'the drive makes Windows ask for the BitLocker recovery key. Nothing was installed.' + #13#10#13#10 +
-      BitLockerManualSteps + #13#10#13#10 + 'Then run Setup again.';
+    SuppressibleMsgBox('Windows Test Mode was left on: ' + Who + ' could not confirm that BitLocker (or Device ' +
+      'encryption) is off or suspended on drive ' + ExpandConstant('{sd}') + '. Turning Test Mode off while ' +
+      'BitLocker protects the drive makes Windows ask for the BitLocker recovery key.' + #13#10#13#10 + Manual,
+      mbError, MB_OK, IDOK);
     Exit;
   end;
-  if not Exec(ExpandConstant('{sys}\bcdedit.exe'), '/set testsigning on', '', SW_HIDE, ewWaitUntilTerminated, Code) then
-    Failure := 'Setup could not run bcdedit to turn on Windows test signing: ' + SysErrorMessage(Code)
+  if not Exec(ExpandConstant('{sys}\bcdedit.exe'), '/set testsigning off', '', SW_HIDE, ewWaitUntilTerminated,
+    Code) then
+    Log('Could not run bcdedit to turn Windows test signing off: ' + SysErrorMessage(Code))
   else if Code <> 0 then
-    Failure := Format('Setup could not turn on Windows test signing (bcdedit exit code %d).', [Code])
+    Log(Format('Could not turn Windows test signing off (bcdedit exit code %d).', [Code]))
   else begin
-    TestSigningSetByRun := True;
-    Log('Windows test signing turned on; a restart is required for it to take effect.');
-    // Marker so Uninstall can offer to turn test mode back off. RegWriteDWordValue creates SOFTWARE\WPods if needed.
-    if not RegWriteDWordValue(HKLM64, 'SOFTWARE\WPods', 'TestSigningByWPods', 1) then
-      Log('Could not record HKLM64\SOFTWARE\WPods\TestSigningByWPods.');
+    Result := True;
+    Log('Windows test signing turned off; it takes effect after a restart.');
+    if ShowDone then begin
+      Msg := 'Windows Test Mode turns off when you restart Windows.';
+      if BitLockerSuspendedByRun then
+        Msg := Msg + ' BitLocker is suspended for the next 2 restarts, so restart soon. If you turn Secure Boot ' +
+          'back on during one of them, Windows does not ask for the BitLocker recovery key.';
+      SuppressibleMsgBox(Msg + #13#10#13#10 +
+        'If you turn Secure Boot back on later, suspend BitLocker first, or Windows may ask for the BitLocker ' +
+        'recovery key.' + #13#10#13#10 + BitLockerManualSteps(1), mbInformation, MB_OK, IDOK);
+    end;
     Exit;
   end;
   // bcdedit failed, so the boot configuration is unchanged: undo this run's suspend.
-  if ResumeBitLocker then
-    Result := Failure + #13#10#13#10 + 'No changes were made and nothing was installed.'
-  else
-    Result := Failure + #13#10#13#10 + 'Nothing was installed. BitLocker stays suspended until the next restart.';
+  ResumeBitLocker;
+  SuppressibleMsgBox(Who + ' could not turn Windows Test Mode off.' + #13#10#13#10 + Manual, mbError, MB_OK, IDOK);
 end;
 
-// Full wizard page, shown (only when blocked) right after the license: Secure Boot is on, so the drivers cannot load.
-procedure CreateSecureBootPage;
-var
-  Memo: TNewMemo;
+// TurnTestSigningOff, then the marker goes (it only stays while Test Mode may still be on).
+function LeaveTestMode(const ShowDone: Boolean): Boolean;
 begin
-  SecureBootPage := CreateCustomPage(wpLicense, 'Secure Boot is on',
-    'WPods cannot be installed until Secure Boot is turned off.');
-  Memo := TNewMemo.Create(SecureBootPage);
-  Memo.Parent := SecureBootPage.Surface;
-  Memo.Left := 0;
-  Memo.Top := 0;
-  Memo.Width := SecureBootPage.SurfaceWidth;
-  Memo.Height := SecureBootPage.SurfaceHeight;
-  Memo.ScrollBars := ssVertical;
-  Memo.ReadOnly := True;
-  Memo.WantReturns := False;
-  Memo.Text :=
-    'WPods uses test-signed drivers, which Windows loads only when test signing is on. Test signing requires ' +
-    'Secure Boot to be turned OFF, and Secure Boot is currently on.' + #13#10#13#10 +
-    'Before you change Secure Boot: if BitLocker or Device encryption is on, it must be suspended first, or Windows ' +
-    'asks for the BitLocker recovery key at the next start. When you click Exit Setup, Setup offers to suspend it ' +
-    'for the next restart only. Make sure you can get your recovery key: https://aka.ms/myrecoverykey' + #13#10#13#10 +
-    'To turn Secure Boot off:' + #13#10 +
-    '1. Restart straight into the UEFI firmware settings: open Windows PowerShell or Terminal as administrator and ' +
-    'run: shutdown /r /fw /t 0' + #13#10 +
-    'Do not restart Windows in between: the suspend lasts one restart only.' + #13#10 +
-    '2. Find the Secure Boot option (usually under a Boot, Security, or Authentication section).' + #13#10 +
-    '3. Set it to Disabled, then save and exit.' + #13#10#13#10 +
-    'After Windows starts again, run WPods Setup once more.' + #13#10#13#10 +
-    'Click Exit Setup to exit.';
+  Result := TurnTestSigningOff(ShowDone);
+  if Result then begin
+    TestModeTurnedOff := True;
+    DeleteTestSigningMarker;
+  end;
 end;
 
 { Mirrors the .NET host lookup: registered x64 install location (32-bit registry view), else Program Files\dotnet.
@@ -373,10 +411,26 @@ begin
   Result := WebView2InstalledIn(HKLM32) or WebView2InstalledIn(HKCU);
 end;
 
-// Runs a downloaded installer only if its Authenticode signature is Valid and the signer's organization is exactly
-// "Microsoft Corporation" (O= RDN; the .NET runtime installer is signed as CN=.NET, O=Microsoft Corporation).
-// The file stays open with write and delete denied from the check until the installer exits, so nothing can swap
-// it in between.
+function UsbipInstalled: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{commonpf64}\USBip\usbip.exe'));
+end;
+
+// usbip-win2 installed by an earlier run still waits for a restart (the service clears the value when it starts).
+function ServiceWaitsForRestart: Boolean;
+var
+  Value: Cardinal;
+begin
+  Result := RegQueryDWordValue(HKLM64, 'SOFTWARE\WPods\Service', 'WaitsForRestart', Value) and (Value = 1);
+end;
+
+function ServiceRegistered: Boolean;
+begin
+  Result := RegKeyExists(HKLM64, 'SYSTEM\CurrentControlSet\Services\' + ServiceName);
+end;
+
+// Runs a downloaded installer only if validly signed with O=Microsoft Corporation (.NET's signer is CN=.NET). The
+// file is held open, write and delete denied, until the installer exits, so it cannot be swapped after the check.
 function RunMicrosoftInstaller(const FileName, Params: String; var ResultCode: Integer): Boolean;
 var
   Script: String;
@@ -412,76 +466,370 @@ begin
   end;
 end;
 
+// Installs the bundled usbip-win2 and records it for Uninstall. Returns '' on success, else the error to show.
+function InstallUsbip: String;
+var
+  Code, I: Integer;
+  LogFile: String;
+  Lines: TArrayOfString;
+begin
+  Result := '';
+  DownloadPage.SetText('Preparing Bluetooth...', '');
+  DownloadPage.Show;
+  try
+    ExtractTemporaryFile(UsbipSetup);
+    LogFile := ExpandConstant('{tmp}\usbip-setup.log');
+    // No desktop shortcut: usbip-win2 is a part of WPods, not an app the user opens.
+    if not Exec(ExpandConstant('{tmp}\' + UsbipSetup), '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /MERGETASKS="!desktopicon" ' +
+      '/LOG="' + LogFile + '"', '', SW_HIDE, ewWaitUntilTerminated, Code) then
+      Result := 'Setup could not install a part WPods needs for Bluetooth (usbip-win2): ' + SysErrorMessage(Code) +
+        ' Nothing was installed.'
+    else begin
+      Log(Format('usbip-win2 installer exit code: %d', [Code]));
+      if UsbipInstalled then begin
+        UsbipJustInstalled := True;
+        if not RegWriteDWordValue(HKLM64, WPodsKey, 'UsbipInstalledByWPods', 1) then
+          Log('Could not record HKLM64\SOFTWARE\WPods\UsbipInstalledByWPods.');
+      end else begin
+        // Its log lives in {tmp}, which goes when Setup exits: keep it in this log.
+        if LoadStringsFromFile(LogFile, Lines) then
+          for I := 0 to GetArrayLength(Lines) - 1 do
+            Log('usbip-win2: ' + Lines[I]);
+        Result := Format('Setup could not install a part WPods needs for Bluetooth (usbip-win2, error %d). ' +
+          'Nothing was installed.', [Code]);
+      end;
+    end;
+  finally
+    DownloadPage.Hide;
+  end;
+end;
+
+// Stops the old service with the adapter kept on WinUSB, so InstallService starts the new one without a driver switch.
+procedure StopService;
+var
+  Code: Integer;
+  Exe: String;
+begin
+  Exe := ExpandConstant('{app}\WPods.Service.exe');
+  if not FileExists(Exe) then
+    Exit;
+  if not ExecAndLogOutput(Exe, '--stop', '', SW_HIDE, ewWaitUntilTerminated, Code, nil) then
+    Log('Could not run WPods.Service.exe --stop: ' + SysErrorMessage(Code))
+  else if Code <> 0 then
+    Log(Format('WPods.Service.exe --stop exit code: %d', [Code]));
+end;
+
+// Files the running service keeps open. Files in use can be renamed, so they are moved aside before the copy or
+// delete and the service (and Bluetooth) keeps running until the end; if a rename fails, it is stopped first.
+function ServiceFiles: TArrayOfString;
+begin
+  SetArrayLength(Result, 5);
+  Result[0] := 'WPods.Service.exe';
+  Result[1] := 'WPods.Service.dll';
+  Result[2] := 'System.ServiceProcess.ServiceController.dll';
+  Result[3] := 'System.Diagnostics.EventLog.dll';
+  Result[4] := 'System.Diagnostics.EventLog.Messages.dll';
+end;
+
+// Puts moved-aside files back where nothing replaced them: after a partial move or a cancelled or failed install.
+procedure MoveServiceFilesBack;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Path: String;
+begin
+  if MovedAsideStamp = '' then
+    Exit;
+  Names := ServiceFiles;
+  for I := 0 to GetArrayLength(Names) - 1 do begin
+    Path := ExpandConstant('{app}\') + Names[I];
+    if FileExists(Path + '.old-' + MovedAsideStamp) and not FileExists(Path) then
+      if RenameFile(Path + '.old-' + MovedAsideStamp, Path) then
+        Log('Moved ' + Path + ' back.')
+      else
+        Log('Could not move ' + Path + ' back.');
+  end;
+  MovedAsideStamp := '';
+end;
+
+// False when a file could not be moved aside; the files already moved are put back then.
+function MoveServiceFilesAside: Boolean;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Path: String;
+begin
+  Result := True;
+  Names := ServiceFiles;
+  MovedAsideStamp := GetDateTimeString('yyyymmddhhnnss', #0, #0);
+  for I := 0 to GetArrayLength(Names) - 1 do begin
+    Path := ExpandConstant('{app}\') + Names[I];
+    if FileExists(Path) and not RenameFile(Path, Path + '.old-' + MovedAsideStamp) then begin
+      Log('Could not move ' + Path + ' aside.');
+      MoveServiceFilesBack;
+      Result := False;
+      Exit;
+    end;
+  end;
+end;
+
+// Deletes the files moved aside, once the service that used them is gone (retries while its process exits).
+procedure DeleteServiceFilesAside;
+var
+  F: TFindRec;
+begin
+  if FindFirst(ExpandConstant('{app}\*.old-*'), F) then
+    try
+      repeat
+      begin
+        DelayDeleteFile(ExpandConstant('{app}\') + F.Name, 20);
+        if FileExists(ExpandConstant('{app}\') + F.Name) then
+          Log('Could not delete ' + F.Name);
+      end
+      until not FindNext(F);
+    finally
+      FindClose(F);
+    end;
+end;
+
+// Logs the Bluetooth LE, input and paired classic devices to the Setup log and C:\ProgramData\WPods-bluetooth.txt,
+// which is kept after uninstall.
+procedure LogBluetoothDevices(const Stage: String);
+var
+  Code: Integer;
+begin
+  ExecAndLogOutput(PowerShell, '-NoProfile -NonInteractive -Command "' +
+    '$o = @(''=== ' + Stage + ' '' + (Get-Date -Format ''yyyy-MM-dd HH:mm:ss'')); ' +
+    '$p = @{}; foreach ($d in Get-PnpDevice -ErrorAction SilentlyContinue) { $p[$d.InstanceId] = $d }; ' +
+    'foreach ($c in ''BTHLE'', ''BTHLEDevice'', ''BTHENUM'') { ' +
+    'foreach ($k in Get-ChildItem (''HKLM:\SYSTEM\CurrentControlSet\Enum\'' + $c) -ErrorAction SilentlyContinue) { ' +
+    'foreach ($i in Get-ChildItem $k.PSPath) { $id = $c + ''\'' + $k.PSChildName + ''\'' + $i.PSChildName; ' +
+    'if ($c -eq ''BTHENUM'' -and $id -notmatch ''Dev_|00001124|00001812'') { continue }; ' +
+    '$d = $p[$id]; $o += (''{0} | present={1} | {2}'' -f $id, $d.Present, $d.FriendlyName) } } }; ' +
+    '$o += ''paired classic: '' + ((Get-ChildItem HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices ' +
+    '-ErrorAction SilentlyContinue).PSChildName -join '', ''); ' +
+    '$o | Add-Content C:\ProgramData\WPods-bluetooth.txt; $o"', '', SW_HIDE, ewWaitUntilTerminated, Code, nil);
+end;
+
+// Pages: Leave Test Mode.
+
+// A word-wrapped label at Top, as wide as the page, as high as its text.
+function AddText(const Page: TWizardPage; const Top: Integer; const Text: String): TNewStaticText;
+begin
+  Result := TNewStaticText.Create(Page);
+  Result.Parent := Page.Surface;
+  Result.Top := Top;
+  Result.Width := Page.SurfaceWidth;
+  Result.AutoSize := False;
+  Result.WordWrap := True;
+  Result.Caption := Text;
+  Result.AdjustHeight;
+end;
+
+// Next needs the recovery key box when Test Mode is to change with BitLocker maybe on; the firmware restart always
+// needs it, plus the Test Mode box while testsigning is still set.
+procedure UpdateLeavePage(Sender: TObject);
+var
+  KeyOk: Boolean;
+begin
+  KeyOk := True;
+  if RecoveryKeyBox <> nil then
+    KeyOk := RecoveryKeyBox.Checked;
+  WizardForm.NextButton.Enabled := KeyOk or not LeaveTestModeBox.Checked;
+  if FirmwareButton <> nil then
+    FirmwareButton.Enabled := KeyOk and (LeaveTestModeBox.Checked or not TestModeConfigured);
+end;
+
+// Restarts into the UEFI firmware settings so the user can turn Secure Boot back on. Setup closes without installing.
+// Test Mode is turned off first when the box is ticked; BitLocker is suspended first either way.
+procedure FirmwareButtonClick(Sender: TObject);
+var
+  Code: Integer;
+  Msg: String;
+begin
+  Msg := 'Restart into your PC''s firmware settings now?' + #13#10#13#10 + 'Save your work first. Setup closes ' +
+    'without updating WPods; run it again after Windows starts.';
+  if LeaveTestModeBox.Checked and not TestModeTurnedOff then
+    Msg := Msg + ' Setup turns Test Mode off before the restart.';
+  if RecoveryKeyBox <> nil then
+    Msg := Msg + ' Setup suspends BitLocker for the restart, but keep your BitLocker recovery key at hand.';
+  if MsgBox(Msg, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then
+    Exit;
+  if LeaveTestModeBox.Checked and not TestModeTurnedOff then begin
+    // Suspends BitLocker for 2 restarts itself, and reports its own errors.
+    if not LeaveTestMode(False) then
+      Exit;
+  end else if not BitLockerSafe(SuspendBitLocker(1)) then begin
+    MsgBox('Setup did not restart: it could not confirm that BitLocker (or Device encryption) is off or suspended ' +
+      'on drive ' + ExpandConstant('{sd}') + '. Turning Secure Boot back on while BitLocker protects the drive ' +
+      'makes Windows ask for the BitLocker recovery key.' + #13#10#13#10 + BitLockerManualSteps(1), mbError, MB_OK);
+    Exit;
+  end;
+  if not Exec(ExpandConstant('{sys}\shutdown.exe'), '/r /fw /t 0', '', SW_HIDE, ewWaitUntilTerminated, Code) or
+    (Code <> 0) then begin
+    Log(Format('Could not restart into the firmware settings (code %d).', [Code]));
+    MsgBox(Format('Setup could not restart into the firmware settings (error %d). Your PC may not support ' +
+      'it.', [Code]), mbError, MB_OK);
+    Exit;
+  end;
+  Log('Restarting into the firmware settings.');
+  ClosingForFirmware := True;
+  WizardForm.Close;
+end;
+
+// Upgrade page, shown when Windows Test Mode is on: offers to turn it off (and Secure Boot back on), with a BitLocker
+// warning when BitLocker is on or Setup could not tell.
+procedure CreateLeavePage(const AfterID: Integer);
+var
+  Text: TNewStaticText;
+  Memo: TNewMemo;
+  Top: Integer;
+begin
+  LeavePage := CreateCustomPage(AfterID, 'Leave Test Mode',
+    'Windows Test Mode is on. This version of WPods no longer needs it.');
+  Text := AddText(LeavePage, 0, 'Older versions of WPods needed Windows Test Mode. If you tick the box, Setup ' +
+    'turns it off after it installs WPods; it takes effect when you restart Windows. Leave it on if other software ' +
+    'you use needs it.');
+  Top := Text.Top + Text.Height + ScaleY(6);
+  LeaveTestModeBox := TNewCheckBox.Create(LeavePage);
+  LeaveTestModeBox.Parent := LeavePage.Surface;
+  LeaveTestModeBox.Top := Top;
+  LeaveTestModeBox.Width := LeavePage.SurfaceWidth;
+  LeaveTestModeBox.Height := ScaleY(17);
+  LeaveTestModeBox.Caption := 'Turn Windows Test Mode off';
+  // Checked only when WPods turned it on: otherwise the user (or other software) did.
+  LeaveTestModeBox.Checked := TestSigningByWPods;
+  LeaveTestModeBox.OnClick := @UpdateLeavePage;
+  Top := Top + LeaveTestModeBox.Height + ScaleY(12);
+
+  if not SecureBootOn then begin
+    Text := AddText(LeavePage, Top, 'Secure Boot is off too. Setup cannot turn it back on, but you can ' +
+      '(if your PC supports it):' + #13#10 +
+      '1. Click the button below to restart into your PC''s firmware settings (Test Mode must be off first).' + #13#10 +
+      '2. Find Secure Boot (often under Boot or Security) and set it to Enabled.' + #13#10 +
+      '3. Save and exit.');
+    Top := Text.Top + Text.Height + ScaleY(6);
+    FirmwareButton := TNewButton.Create(LeavePage);
+    FirmwareButton.Parent := LeavePage.Surface;
+    FirmwareButton.Top := Top;
+    FirmwareButton.Width := ScaleX(220);
+    FirmwareButton.Height := WizardForm.NextButton.Height;
+    FirmwareButton.Caption := 'Restart into firmware settings...';
+    FirmwareButton.OnClick := @FirmwareButtonClick;
+    Top := Top + FirmwareButton.Height + ScaleY(12);
+  end;
+
+  if BitLockerStatus <> BitLockerOff then begin
+    RecoveryKeyBox := TNewCheckBox.Create(LeavePage);
+    RecoveryKeyBox.Parent := LeavePage.Surface;
+    RecoveryKeyBox.Height := ScaleY(17);
+    RecoveryKeyBox.Top := LeavePage.SurfaceHeight - RecoveryKeyBox.Height;
+    RecoveryKeyBox.Width := LeavePage.SurfaceWidth;
+    RecoveryKeyBox.Caption := 'I have my BitLocker recovery key or BitLocker is off';
+    RecoveryKeyBox.OnClick := @UpdateLeavePage;
+    Memo := TNewMemo.Create(LeavePage);
+    Memo.Parent := LeavePage.Surface;
+    Memo.Top := Top;
+    Memo.Width := LeavePage.SurfaceWidth;
+    Memo.Height := RecoveryKeyBox.Top - ScaleY(6) - Top;
+    Memo.ScrollBars := ssVertical;
+    Memo.ReadOnly := True;
+    Memo.WantReturns := False;
+    Memo.Font.Style := [fsBold];
+    if BitLockerStatus = BitLockerOn then
+      Memo.Text := 'BitLocker is on for drive ' + ExpandConstant('{sd}') + '.'
+    else
+      Memo.Text := 'Setup could not confirm that BitLocker is off for drive ' + ExpandConstant('{sd}') + '.';
+    Memo.Text := Memo.Text + ' Turning Test Mode off and turning Secure Boot back on both change what BitLocker ' +
+      'checks when Windows starts. Windows may then ask for your 48-digit BitLocker recovery key at the next ' +
+      'start.' + #13#10#13#10 + 'Get it now from https://aka.ms/myrecoverykey (or your printout or USB key) before ' +
+      'you continue. Setup suspends BitLocker before it changes anything, but keep the key at hand.';
+  end;
+end;
+
+// Needed on an update (or where WPods 0.2.x turned Test Mode on) while Test Mode is on or set. Never when silent: a
+// silent run changes nothing and keeps the marker, so Uninstall or a later Setup still offers it.
+function NeedsLeavePage: Boolean;
+begin
+  Result := False;
+  if WizardSilent or (FirstInstall and not TestSigningByWPods) then
+    Exit;
+  TestModeConfigured := TestSigningConfigured;
+  Result := TestModeConfigured or TestSigningOn;
+end;
+
 procedure InitializeWizard;
 begin
   DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), SetupMessage(msgPreparingDesc), nil);
   DownloadPage.ShowBaseNameInsteadOfUrl := True;
-  CreateSecureBootPage;
-end;
-
-// The Secure Boot block page (inserted after the license) appears only when Secure Boot blocks the install.
-function ShouldSkipPage(PageID: Integer): Boolean;
-begin
-  Result := (PageID = SecureBootPage.ID) and not SecureBootBlocksInstall;
-end;
-
-procedure CurPageChanged(CurPageID: Integer);
-begin
-  // The block page is terminal: Back is removed and Next becomes an exit, so Setup can never reach the install.
-  if CurPageID = SecureBootPage.ID then begin
-    WizardForm.BackButton.Visible := False;
-    WizardForm.NextButton.Caption := 'Exit Setup';
+  BluetoothPage := CreateOutputMsgPage(wpLicense, 'Bluetooth', 'What happens to your Bluetooth.',
+    'WPods works through your PC''s Bluetooth. Your other Bluetooth devices (headphones, speakers, mice, ' +
+    'keyboards, controllers) keep working as before, and you don''t need to pair them again.' + #13#10#13#10 +
+    'While Setup runs, Bluetooth turns off for a short while, and your USB devices (including keyboard and ' +
+    'mouse) may disconnect for a moment. If Setup asks you to restart Windows, Bluetooth comes back after the ' +
+    'restart.' + #13#10#13#10 +
+    'If something goes wrong, or when you uninstall WPods, your Bluetooth goes back to how it was before.' + #13#10#13#10 +
+    'Includes usbip-win2 (c) 2021-2026 Vadym Hrynchyshyn, BSD 2-Clause License');
+  if NeedsLeavePage then begin
+    BitLockerStatus := BitLocker('status', 0);
+    CreateLeavePage(BluetoothPage.ID);
   end;
 end;
 
-function NextButtonClick(CurPageID: Integer): Boolean;
-var
-  Code: Integer;
+// The Bluetooth adapter page explains the service, so it is shown until the service is registered.
+function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := CurPageID <> SecureBootPage.ID;
-  if Result then
-    Exit;
-  // On the block page the button exits Setup instead of advancing: the drivers cannot load with Secure Boot on.
-  Log('Secure Boot is on; Setup cannot continue.');
-  // A silent install exits by itself when this returns False before the install.
-  if WizardSilent then
-    Exit;
-  // Turning Secure Boot off while BitLocker protects the drive makes Windows ask for the recovery key: offer to
-  // suspend it for the one restart the user needs. It is never resumed here (that restart is the point).
-  Code := BitLocker('status');
-  if Code = BitLockerOn then begin
-    if MsgBox('BitLocker (or Device encryption) protects drive ' + ExpandConstant('{sd}') + '. Turning Secure Boot ' +
-      'off makes Windows ask for the BitLocker recovery key at the next start, unless BitLocker is suspended ' +
-      'first.' + #13#10#13#10 + 'Suspend BitLocker now, for the next restart only?',
-      mbConfirmation, MB_YESNO) = IDYES then begin
-      if BitLockerSafe(SuspendBitLocker) then
-        MsgBox('BitLocker is suspended until the next restart only. Turn Secure Boot off during that restart. ' +
-          'BitLocker turns back on by itself after Windows starts.' + #13#10#13#10 + 'To restart straight into the ' +
-          'firmware settings, open Windows PowerShell or Terminal as administrator and run: shutdown /r /fw /t 0',
-          mbInformation, MB_OK)
-      else
-        MsgBox('Setup could not suspend BitLocker.' + #13#10#13#10 + BitLockerManualSteps, mbError, MB_OK);
-    end;
-  end else if Code = BitLockerConverting then
-    MsgBox('BitLocker (or Device encryption) is still encrypting or decrypting drive ' + ExpandConstant('{sd}') +
-      '. Wait until it finishes before you turn Secure Boot off, then run WPods Setup again so it can offer to ' +
-      'suspend BitLocker.', mbError, MB_OK)
-  else if Code <> BitLockerOff then
-    MsgBox('Setup could not check whether BitLocker (or Device encryption) protects drive ' + ExpandConstant('{sd}') +
-      '. If it is on, suspend it before you turn Secure Boot off, or Windows asks for the BitLocker recovery ' +
-      'key.' + #13#10#13#10 + BitLockerManualSteps, mbError, MB_OK);
-  WizardForm.Close;
+  Result := (PageID = BluetoothPage.ID) and ServiceRegistered;
 end;
 
-// The block page exits without the "Exit Setup?" confirmation.
+// The PC's Bluetooth adapters: 0 = a USB adapter WPods can use (or none at all), 3 = only adapters not connected over
+// USB (UART, SDIO). Same rule as the service (code B3).
+function AdapterProblem: Integer;
+begin
+  if not Exec(PowerShell, '-NoProfile -NonInteractive -Command "' +
+    '$r = @(Get-PnpDevice -PresentOnly -Class Bluetooth -ErrorAction Ignore | Where-Object { $_.InstanceId -notmatch ''^BTH'' } | ForEach-Object InstanceId); ' +
+    'if (($r.Count -eq 0) -or ($r | Where-Object { $_ -match ''^USB\\VID_'' })) { exit 0 }; exit 3"', '', SW_HIDE,
+    ewWaitUntilTerminated, Result) then
+    Result := 0;
+  Log(Format('Bluetooth adapter check: %d', [Result]));
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  Problem: Integer;
+  AutoUpdate: Cardinal;
+begin
+  // An update shows the auto-update choice as it is now (the app may have changed it), not the one Setup remembers.
+  if (CurPageID = wpSelectTasks) and not TasksPageShown then begin
+    TasksPageShown := True;
+    if RegQueryDWordValue(HKLM64, 'SOFTWARE\WPods\Service', 'AutoUpdate', AutoUpdate) then
+      if AutoUpdate = 0 then
+        WizardSelectTasks('!autoupdate')
+      else
+        WizardSelectTasks('autoupdate');
+  end;
+  if LeavePage <> nil then
+    if CurPageID = LeavePage.ID then
+      UpdateLeavePage(nil);
+  // A warning only: Setup goes on either way (a USB dongle plugged in later works).
+  if (CurPageID = BluetoothPage.ID) and not AdapterChecked then begin
+    AdapterChecked := True;
+    Problem := AdapterProblem;
+    if Problem = 3 then
+      BluetoothPage.MsgLabel.Caption := 'Warning: your PC''s Bluetooth adapter isn''t connected over USB, so WPods ' +
+        'can''t work with it (error B3). A USB Bluetooth adapter, such as a small USB dongle, works.' + #13#10#13#10 +
+        BluetoothPage.MsgLabel.Caption;
+  end;
+end;
+
+// The firmware restart closes Setup without the "Exit Setup?" question.
 procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
 begin
-  if CurPageID = SecureBootPage.ID then
+  if ClosingForFirmware then
     Confirm := False;
 end;
 
-// Before any file is copied: installs the .NET 10 Desktop Runtime and WebView2 Runtime when missing, then turns on
-// Windows test signing when it is off (the test-signed drivers load after the required restart).
+// Before any file is copied: installs the .NET 10 Desktop Runtime, WebView2 Runtime and usbip-win2 when missing.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   NeedDotNet, NeedWebView2: Boolean;
@@ -513,12 +861,11 @@ begin
       DownloadPage.Hide;
     end;
   end;
-  // EnableTestSigning checks Secure Boot and BitLocker itself and changes nothing when it fails.
-  if (Result = '') and not TestSigningOn then
-    Result := EnableTestSigning;
+  if (Result = '') and not UsbipInstalled then
+    Result := InstallUsbip;
 end;
 
-// Ends WPods.exe from this install folder if Restart Manager did not close it (it holds the NTAPD driver).
+// Ends WPods.exe from this install folder if Restart Manager did not close it.
 procedure StopWPods;
 var
   Code: Integer;
@@ -528,149 +875,240 @@ begin
     'ForEach-Object { $_.Kill(); $_.WaitForExit(10000) | Out-Null }"', '', SW_HIDE, ewWaitUntilTerminated, Code);
 end;
 
-procedure InstallDrivers;
+// WPods 0.2.x left its driver packages or their record behind (drivers.ps1 removes them once it succeeds).
+function LegacyDriversLeft: Boolean;
+begin
+  Result := DirExists(ExpandConstant('{app}\drivers\NTAPD')) or DirExists(ExpandConstant('{app}\drivers\NTA2DPVM')) or
+    FileExists(ExpandConstant('{app}\drivers\installed.txt'));
+end;
+
+procedure RemoveLegacyDrivers;
 var
   Code: Integer;
-  Msg: String;
 begin
-  WizardForm.StatusLabel.Caption := 'Installing the WPods drivers...';
+  WizardForm.StatusLabel.Caption := 'Removing the drivers older versions of WPods used...';
   if not ExecAndLogOutput(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{app}\drivers\drivers.ps1') + '" -Install', '', SW_HIDE, ewWaitUntilTerminated, Code, nil) then
-    SuppressibleMsgBox('WPods was installed, but Setup could not start the driver installation: ' +
+    ExpandConstant('{app}\drivers\drivers.ps1') + '" -Uninstall', '', SW_HIDE, ewWaitUntilTerminated, Code, nil) then
+    SuppressibleMsgBox('Setup could not start removing the drivers older versions of WPods used: ' +
       SysErrorMessage(Code) + #13#10#13#10 + 'Run Setup again to retry.', mbError, MB_OK, IDOK)
-  else if (Code = 0) or (Code = 3010) then begin
-    // Test signing reads off only because it is set in the boot configuration (by Setup this run, or already): it
-    // takes effect after a restart, and the drivers load then. When it was already on, keep the lighter 3010
-    // "finish updating" note.
-    if not TestSigningOn then begin
-      Msg := 'WPods and its drivers were installed. Windows test mode turns on when Windows ' +
-        'restarts.' + #13#10#13#10 +
-        'You must restart Windows to finish. The drivers load, and WPods can connect to your ' +
-        'AirPods, only after you restart.';
-      if BitLockerSuspendedByRun then
-        Msg := Msg + ' BitLocker is suspended until you restart, so restart soon.';
-      SuppressibleMsgBox(Msg, mbInformation, MB_OK, IDOK);
-    end else if Code = 3010 then
-      SuppressibleMsgBox('The WPods drivers were installed. Restart Windows when convenient to finish updating them.',
-        mbInformation, MB_OK, IDOK);
-  end
-  else
-    SuppressibleMsgBox(Format('WPods was installed, but its drivers could not be installed (error %d). ' +
-      'WPods cannot connect to your AirPods until they are.' + #13#10#13#10 +
+  else if Code = 3010 then
+    Log('Old WPods drivers removed; Windows finishes removing them at the next restart.')
+  else if Code <> 0 then
+    SuppressibleMsgBox(Format('Setup could not remove all the drivers older versions of WPods used (error %d). ' +
+      'Run Setup again to retry. Details are in the setup log:' + #13#10 + '%s', [Code,
+      ExpandConstant('{log}')]), mbError, MB_OK, IDOK);
+end;
+
+// A failure keeps the app installed. Until the restart usbip-win2 needs, the service only starts with Windows, as a
+// takeover before it would leave every Bluetooth device without a working adapter.
+procedure InstallService;
+var
+  Code: Integer;
+  Params: String;
+begin
+  WizardForm.StatusLabel.Caption := 'Setting up the Bluetooth adapter...';
+  Params := '--install';
+  if UsbipJustInstalled or ServiceWaitsForRestart then
+    Params := '--install --no-start';
+  if not ExecAndLogOutput(ExpandConstant('{app}\WPods.Service.exe'), Params, '', SW_HIDE, ewWaitUntilTerminated,
+    Code, nil) then
+    SuppressibleMsgBox('WPods was installed, but Setup could not start setting up its background service: ' +
+      SysErrorMessage(Code) + #13#10#13#10 + 'Run Setup again to retry.', mbError, MB_OK, IDOK)
+  else if Code <> 0 then
+    SuppressibleMsgBox(Format('WPods was installed, but its background service could not be set up (error %d). ' +
+      'WPods cannot connect to your AirPods until it is.' + #13#10#13#10 +
       'Run Setup again to retry. Details are in the setup log:' + #13#10 + '%s', [Code, ExpandConstant('{log}')]),
       mbError, MB_OK, IDOK);
 end;
 
+// The service reads this value and the app's switch changes it; a silent update keeps the current choice.
+procedure SaveAutoUpdate;
+var
+  Value: Cardinal;
+begin
+  if not TasksPageShown and RegQueryDWordValue(HKLM64, 'SOFTWARE\WPods\Service', 'AutoUpdate', Value) then
+    Exit;
+  if WizardIsTaskSelected('autoupdate') then
+    Value := 1
+  else
+    Value := 0;
+  if not RegWriteDWordValue(HKLM64, 'SOFTWARE\WPods\Service', 'AutoUpdate', Value) then
+    Log('Could not write HKLM\SOFTWARE\WPods\Service\AutoUpdate.');
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssInstall then
-    StopWPods
-  else if CurStep = ssPostInstall then begin
-    // Files are in place: from here DeinitializeSetup keeps the test signing this run turned on.
-    InstallFinished := True;
-    InstallDrivers;
+  if CurStep = ssInstall then begin
+    StopWPods;
+    LogBluetoothDevices('install: before');
+    if not MoveServiceFilesAside then
+      StopService;
+  end else if CurStep = ssPostInstall then begin
+    FilesInstalled := True;
+    // Old drivers go before Test Mode does: a test-signed driver left behind would fail to load without it.
+    if LegacyDriversLeft then
+      RemoveLegacyDrivers;
+    // The old service still runs from the renamed files: restart it as the new one.
+    StopService;
+    InstallService;
+    if LeavePage <> nil then
+      if LeaveTestModeBox.Checked and not TestModeTurnedOff then begin
+        WizardForm.StatusLabel.Caption := 'Turning Windows Test Mode off...';
+        LeaveTestMode(True);
+      end;
+    if not FromService then
+      SaveAutoUpdate;
   end;
 end;
 
-// Setup stopped (canceled or failed) after turning test signing on but before the install finished: undo it.
+// A cancelled or failed install rolled back the new service files: the old service keeps running from the files moved
+// aside, and gets them back under their names, or it would not start again after a restart.
 procedure DeinitializeSetup;
-var
-  Code: Integer;
-  Msg: String;
 begin
-  if TestSigningSetByRun and not InstallFinished then begin
-    if Exec(ExpandConstant('{sys}\bcdedit.exe'), '/set testsigning off', '', SW_HIDE, ewWaitUntilTerminated, Code) and
-      (Code = 0) then begin
-      // No resume here: whether an in-session resume re-captures the BCD baseline after a set and reset is
-      // unverified, and this run's suspend ending at the next restart is safe either way.
-      RegDeleteValue(HKLM64, 'SOFTWARE\WPods', 'TestSigningByWPods');
-      RegDeleteKeyIfEmpty(HKLM64, 'SOFTWARE\WPods');
-      Log('Setup did not finish; Windows test signing turned back off.');
-      if BitLockerSuspendedByRun then
-        SuppressibleMsgBox('Setup did not finish, so it turned Windows test mode back off. BitLocker stays suspended ' +
-          'until the next restart, so restart soon.', mbInformation, MB_OK, IDOK);
-    end else begin
-      // The boot configuration may still have testsigning on: BitLocker must stay suspended until the next restart.
-      Log(Format('Setup did not finish and could not turn Windows test signing back off (code %d).', [Code]));
-      Msg := 'Setup stopped after turning on Windows test mode and could not turn it back off.';
-      if BitLockerSuspendedByRun then
-        Msg := Msg + ' BitLocker stays suspended until the next restart, so before restarting, open Windows ' +
-          'PowerShell or Terminal as administrator and run:'
-      else
-        Msg := Msg + ' Before restarting, open Windows PowerShell or Terminal as administrator and run:';
-      SuppressibleMsgBox(Msg + #13#10 + 'bcdedit /set testsigning off', mbError, MB_OK, IDOK);
+  if not FilesInstalled then
+    MoveServiceFilesBack;
+end;
+
+// Offers the restart usbip-win2 needs before Bluetooth works through WPods; never for an update the service runs.
+function NeedRestart: Boolean;
+begin
+  Result := (UsbipJustInstalled or ServiceWaitsForRestart) and not FromService;
+end;
+
+// Keeps the service running until the end of uninstall: its files are copied to {tmp}\svc, which UninstallService
+// runs at the end, and the open ones moved aside. False when that failed; the service is then removed first.
+function KeepServiceForLater: Boolean;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Dir: String;
+begin
+  Result := FileExists(ExpandConstant('{app}\WPods.Service.exe'));
+  if not Result then
+    Exit;
+  Dir := ExpandConstant('{tmp}\svc');
+  ForceDirectories(Dir);
+  Names := ServiceFiles;
+  SetArrayLength(Names, GetArrayLength(Names) + 2);
+  Names[GetArrayLength(Names) - 2] := 'WPods.Service.deps.json';
+  Names[GetArrayLength(Names) - 1] := 'WPods.Service.runtimeconfig.json';
+  for I := 0 to GetArrayLength(Names) - 1 do
+    if FileExists(ExpandConstant('{app}\') + Names[I]) and
+      not FileCopy(ExpandConstant('{app}\') + Names[I], Dir + '\' + Names[I], False) then begin
+      Log('Could not copy ' + Names[I] + ' for the late service removal.');
+      Result := False;
+      Exit;
     end;
+  Result := MoveServiceFilesAside;
+end;
+
+// Stops and deletes the WPods service, which gives the Bluetooth adapter back to Windows' own driver. If that fails,
+// it still tries to give the adapter back (--restore-native). AdapterRestored stays False when both fail.
+procedure UninstallService(const Exe: String);
+var
+  Code, RestoreCode: Integer;
+begin
+  AdapterRestored := True;
+  if not FileExists(Exe) then begin
+    // No service program but a registered service: nothing here can give the adapter back.
+    AdapterRestored := not ServiceRegistered;
+    if not AdapterRestored then begin
+      Log('WPods.Service.exe is missing but the service is registered: the adapter cannot be given back.');
+      SuppressibleMsgBox('Uninstall could not give your Bluetooth adapter back to Windows: a WPods file is missing. ' +
+        'It kept usbip-win2. Install WPods again, then uninstall it.', mbError, MB_OK, IDOK);
+    end;
+    Exit;
+  end;
+  if Exec(Exe, '--uninstall', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) then
+    Exit;
+  Log(Format('WPods.Service.exe --uninstall failed (code %d).', [Code]));
+  if not Exec(Exe, '--restore-native', '', SW_HIDE, ewWaitUntilTerminated, RestoreCode) then
+    RestoreCode := 1;
+  AdapterRestored := RestoreCode = 0;
+  if AdapterRestored then
+    SuppressibleMsgBox(Format('Uninstall could not remove the WPods background service (error %d), but it gave your ' +
+      'Bluetooth adapter back to Windows.', [Code]), mbError, MB_OK, IDOK)
+  else begin
+    Log(Format('WPods.Service.exe --restore-native failed (code %d).', [RestoreCode]));
+    SuppressibleMsgBox(Format('Uninstall could not give your Bluetooth adapter back to Windows (error %d), so it ' +
+      'kept usbip-win2. If Bluetooth does not work after you restart Windows, install WPods again.', [Code]),
+      mbError, MB_OK, IDOK);
   end;
 end;
 
-// Turns Windows test signing off (it takes effect after a restart), only when the OS drive is confirmed not
-// BitLocker-protected or was suspended by this run: changing it while BitLocker protects the drive makes Windows ask
-// for the recovery key.
-procedure TurnTestSigningOff;
+// Removes usbip-win2 when Setup installed it, and only once the adapter is back on Windows' own driver.
+procedure UninstallUsbip;
 var
   Code: Integer;
-  Manual, Msg: String;
+  Uninstaller: String;
 begin
-  Manual := 'To turn test mode off yourself:' + #13#10#13#10 + BitLockerManualSteps + #13#10#13#10 +
-    'Then run: bcdedit /set testsigning off' + #13#10 + 'Then restart Windows.';
-  Code := SuspendBitLocker;
-  if Code = BitLockerConverting then begin
-    SuppressibleMsgBox('Windows test mode was left on: BitLocker (or Device encryption) is still encrypting or ' +
-      'decrypting drive ' + ExpandConstant('{sd}') + '. Wait until it finishes.' + #13#10#13#10 + Manual,
-      mbError, MB_OK, IDOK);
+  if not WPodsFlag('UsbipInstalledByWPods') then
+    Exit;
+  if not AdapterRestored then begin
+    UsbipKept := True;
     Exit;
   end;
-  if not BitLockerSafe(Code) then begin
-    SuppressibleMsgBox('Windows test mode was left on: Uninstall could not confirm that BitLocker (or Device ' +
-      'encryption) is off or suspended on drive ' + ExpandConstant('{sd}') + '. Turning test mode off while ' +
-      'BitLocker protects the drive makes Windows ask for the BitLocker recovery key.' + #13#10#13#10 + Manual,
-      mbError, MB_OK, IDOK);
+  Uninstaller := ExpandConstant('{commonpf64}\USBip\unins000.exe');
+  if not FileExists(Uninstaller) then
     Exit;
+  UsbipRemoved := Exec(Uninstaller, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_HIDE, ewWaitUntilTerminated,
+    Code) and (Code = 0);
+  if not UsbipRemoved then begin
+    UsbipKept := True;
+    Log(Format('Could not uninstall usbip-win2 (code %d).', [Code]));
+    SuppressibleMsgBox(Format('Uninstall could not remove usbip-win2 (error %d). You can remove it yourself in ' +
+      'Windows Settings, Apps.', [Code]), mbError, MB_OK, IDOK);
   end;
-  if not Exec(ExpandConstant('{sys}\bcdedit.exe'), '/set testsigning off', '', SW_HIDE, ewWaitUntilTerminated,
-    Code) then
-    Log('Could not run bcdedit to turn Windows test signing off: ' + SysErrorMessage(Code))
-  else if Code <> 0 then
-    Log(Format('Could not turn Windows test signing off (bcdedit exit code %d).', [Code]))
-  else begin
-    Log('Windows test signing turned off; it takes effect after a restart.');
-    Msg := 'Windows test mode turns off when you restart Windows.';
-    if BitLockerSuspendedByRun then
-      Msg := Msg + ' BitLocker is suspended until you restart, so restart soon.';
-    SuppressibleMsgBox(Msg + #13#10#13#10 +
-      'If you turn Secure Boot back on later, suspend BitLocker first, or Windows asks for the BitLocker ' +
-      'recovery key.' + #13#10#13#10 + BitLockerManualSteps, mbInformation, MB_OK, IDOK);
-    Exit;
-  end;
-  // bcdedit failed, so the boot configuration is unchanged: undo this run's suspend.
-  ResumeBitLocker;
-  SuppressibleMsgBox('Uninstall could not turn Windows test mode off.' + #13#10#13#10 + Manual, mbError, MB_OK, IDOK);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   Startup: String;
-  Flag: Cardinal;
+  ReplugCode: Integer;
 begin
   if CurUninstallStep = usUninstall then begin
     RemoveSettings := SuppressibleMsgBox('Also remove your WPods settings?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2,
       IDNO) = IDYES;
     StopWPods;
+    LogBluetoothDevices('uninstall: before');
+    // The service (and Bluetooth through it) keeps running until the end; if its files cannot be kept for that, it
+    // goes now, before [UninstallRun] and the files.
+    ServiceKeptForLater := KeepServiceForLater;
+    if not ServiceKeptForLater then
+      UninstallService(ExpandConstant('{app}\WPods.Service.exe'));
   end else if CurUninstallStep = usPostUninstall then begin
+    if ServiceKeptForLater then begin
+      UninstallService(ExpandConstant('{tmp}\svc\WPods.Service.exe'));
+      DeleteServiceFilesAside;
+    end;
+    LogBluetoothDevices('uninstall: adapter back on its own driver');
     // {localappdata} and HKCU belong to the account Uninstall runs as (the signed-in user when they approve the
     // UAC prompt themselves; the admin's when another account elevates it).
     if RegQueryStringValue(HKCU, RunKey, 'WPods', Startup) and
       (Pos(Lowercase(ExpandConstant('{app}\WPods.exe')), Lowercase(Startup)) > 0) then
       RegDeleteValue(HKCU, RunKey, 'WPods');
-    if RemoveSettings then
+    if RemoveSettings then begin
       DelTree(ExpandConstant('{localappdata}\WPods'), True, True, True);
-    // Offer to undo the test mode Setup turned on, then drop the marker key whatever the answer.
-    if RegQueryDWordValue(HKLM64, 'SOFTWARE\WPods', 'TestSigningByWPods', Flag) and (Flag = 1) then begin
-      if SuppressibleMsgBox('Turn Windows test mode off as well? This takes effect after you restart Windows.',
+      RegDeleteValue(HKCU, 'SOFTWARE\WPods', 'AutoUpdate');
+      RegDeleteKeyIfEmpty(HKCU, 'SOFTWARE\WPods');
+    end;
+    UninstallUsbip;
+    // The native driver sets paired devices up while usbip-win2 still removes the virtual adapter's nodes, which can
+    // leave one failed ("driver error"); a re-plug sets them all up again.
+    if UsbipRemoved and ServiceKeptForLater then
+      Exec(ExpandConstant('{tmp}\svc\WPods.Service.exe'), '--replug', '', SW_HIDE, ewWaitUntilTerminated, ReplugCode);
+    LogBluetoothDevices('uninstall: after usbip-win2');
+    // Offer to undo the Test Mode WPods 0.2.x turned on (its drivers are gone by now).
+    if TestSigningByWPods then begin
+      if SuppressibleMsgBox('Turn Windows Test Mode off as well? This takes effect after you restart Windows.',
         mbConfirmation, MB_YESNO or MB_DEFBUTTON2,
         IDNO) = IDYES then
-        TurnTestSigningOff;
+        TurnTestSigningOff(True);
     end;
-    RegDeleteKeyIncludingSubkeys(HKLM64, 'SOFTWARE\WPods');
+    // Drop the marker key whatever the answer; keep only the usbip-win2 record while usbip-win2 stays.
+    if UsbipKept then
+      DeleteTestSigningMarker
+    else
+      RegDeleteKeyIncludingSubkeys(HKLM64, WPodsKey);
   end;
 end;

@@ -1,9 +1,6 @@
-# Builds everything and produces dist\WPods-Setup.exe:
-# native DLLs (only when an output is missing) -> driver packages (only when their sources changed) -> web UI ->
-# dotnet publish -> Inno Setup 6.
+# Builds the native DLLs, the web UI, the app and the service, and packs them into dist\WPods-Setup.exe.
 param(
-    [switch]$SkipNative, # never build the native DLLs (use .build\native\bin as is)
-    [switch]$SkipDrivers # use the driver packages already in .build\drivers
+    [switch]$SkipNative # never build the native DLLs (use .build\native\bin as is)
 )
 $ErrorActionPreference = 'Stop'
 
@@ -23,7 +20,7 @@ function Invoke-Script([string]$Script) {
 
 if (-not $SkipNative) {
     $nativeBin = Join-Path $build 'native\bin'
-    # Mic mode models (the files WPods.csproj ships from models\): downloaded ones, then the exported one.
+    # Downloaded mic models that WPods.csproj ships from models\.
     $fetched = 'dpdfnet2_48khz_hr', 'dpdfnet8_48khz_hr', 'fastenhancer48k_t', 'fastenhancer48k_b', 'fastenhancer48k_s',
         'fastenhancer48k_m', 'fastenhancer48k_l', 'gtcrn_simple', 'fevd_gtcrn_spec'
     $native = @(
@@ -33,7 +30,7 @@ if (-not $SkipNative) {
         @{ Script = 'native\build-deepfilter.ps1'; Outputs = 'deepfilter.dll', 'DeepFilterNet3_onnx.tar.gz' },
         @{ Script = 'native\build-webrtc-apm.ps1'; Outputs = 'webrtc_apm.dll' },
         @{ Script = 'native\fetch-models.ps1'; Outputs = @('onnxruntime.dll') + ($fetched | ForEach-Object { "models\$_.onnx" }) },
-        # Runs the export only when its output is missing (pinned venv under .build\native).
+        # Exports with a pinned venv under .build\native.
         @{ Script = 'native\export-models.ps1'; Outputs = 'models\nsnet2_48k.onnx' }
     )
     foreach ($step in $native) {
@@ -46,37 +43,14 @@ if (-not $SkipNative) {
     }
 }
 
-if (-not $SkipDrivers) {
-    # Rebuilt only when a driver source or the signing script changed: a rebuild restamps DriverVer, and a new
-    # DriverVer makes every app update reinstall (and restart) both drivers.
-    $sourceHash = Join-Path $build 'drivers\source.hash'
-    $sources = @(Get-ChildItem (Join-Path $root 'drivers\NTAPD'), (Join-Path $root 'drivers\NTA2DPVM') -File) +
-        @(Get-Item (Join-Path $root 'drivers\Public.h'), (Join-Path $root 'drivers\build.ps1'), (Join-Path $root 'tools\sign.ps1'))
-    $hash = @(foreach ($file in Get-FileHash -LiteralPath $sources.FullName -Algorithm SHA256) {
-        "$($file.Hash) $($file.Path.Substring($root.Length + 1))"
-    }) -join "`r`n"
-    $missing = $false
-    foreach ($name in 'NTAPD', 'NTA2DPVM') {
-        foreach ($file in "$name.inf", "$name.sys", "$name.cat", 'WPods-TestSigning.cer') {
-            if (-not (Test-Path (Join-Path $build "drivers\$name\$file"))) {
-                $missing = $true
-            }
-        }
-    }
-    if ($missing -or (Get-Content $sourceHash -Raw -ErrorAction Ignore) -ne $hash) {
-        # A failed build leaves no hash behind, so the next run builds again.
-        Remove-Item $sourceHash -ErrorAction Ignore
-        Invoke-Script 'drivers\build.ps1'
-        Set-Content $sourceHash $hash -NoNewline
-    }
-}
+# usbip-win2 installer for Setup; downloaded again only when its SHA-256 does not match.
+Invoke-Script 'native\fetch-usbip.ps1'
 
-# Web UI: ui\ (TypeScript + JSX via our build-time transform) -> src\WPods\web (generated, not committed).
+# Web UI: ui\ builds into src\WPods\web (generated, not committed).
 $ui = Join-Path $root 'ui'
 Push-Location $ui
 try {
-    # npm writes node_modules\.package-lock.json on install: missing or older than package-lock.json (e.g. after a
-    # pull) means the installed dependencies are stale.
+    # node_modules\.package-lock.json missing or older than package-lock.json means stale dependencies.
     $installed = Get-Item (Join-Path $ui 'node_modules\.package-lock.json') -ErrorAction Ignore
     if (-not $installed -or (Get-Item (Join-Path $ui 'package-lock.json')).LastWriteTimeUtc -gt $installed.LastWriteTimeUtc) {
         npm ci
@@ -99,6 +73,10 @@ if (Test-Path $publish) {
 dotnet publish (Join-Path $root 'src\WPods\WPods.csproj') -c Release -o $publish -p:Version=$Version
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed ($LASTEXITCODE)"
+}
+dotnet publish (Join-Path $root 'src\WPods.Service\WPods.Service.csproj') -c Release -o $publish -p:Version=$Version
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet publish (service) failed ($LASTEXITCODE)"
 }
 
 $innoKey = 'Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1'

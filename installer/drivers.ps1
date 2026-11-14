@@ -1,219 +1,78 @@
-# Installs or removes the WPods drivers (NTAPD, NTA2DPVM + its ROOT\NTA2DPVM device) from the packages next to
-# this script. Run elevated by WPods-Setup. Never changes boot settings, never reboots.
+# Removes the test-signed drivers of WPods 0.2.x and older (NTAPD, NTA2DPVM): devices, packages and certificates.
+# Run elevated by Setup and Uninstall; safe to run again, never changes boot settings, never reboots.
 # Exit codes: 0 done, 3010 done but Windows needs a restart to finish, 1 failed (details in the output).
 param(
-    [Parameter(Mandatory, ParameterSetName = 'Install')][switch]$Install,
-    [Parameter(Mandatory, ParameterSetName = 'Uninstall')][switch]$Uninstall
+    # The only mode; the uninstall entry of WPods 0.2.x runs "drivers.ps1 -Uninstall".
+    [switch]$Uninstall
 )
 $ErrorActionPreference = 'Stop'
 
-$infNames = 'ntapd.inf', 'nta2dpvm.inf'
-$hardwareId = 'WPods\NTA2DPVM'
-# Hardware ID of NTA2DPVM devnodes created by older builds: the current package no longer matches it.
-$legacyHardwareId = 'Root\NTA2DPVM'
-$record = Join-Path $PSScriptRoot 'installed.txt' # published names (oemNN.inf) of the packages this install owns
-# Every build signs with a new certificate (tools\sign.ps1), all with this subject.
+# Original INF name -> provider name of our packages (both must match, or the package is in $record).
+$packages = @{ 'ntapd.inf' = 'NTAPD'; 'nta2dpvm.inf' = 'NTA2DPVM' }
+$services = 'NTAPD', 'NTA2DPVM'
+# Both hardware IDs NTA2DPVM devnodes were created with.
+$hardwareIds = 'WPods\NTA2DPVM', 'Root\NTA2DPVM'
+$record = Join-Path $PSScriptRoot 'installed.txt' # published names (oemNN.inf) of the packages WPods 0.2.x installed
+# Each WPods 0.2.x build installed its own certificate, all with this subject.
 $certSubject = 'CN=WPods Test Signing'
 $certStores = 'Root', 'TrustedPublisher'
 
-# Driver-store packages whose original INF name is one of ours, keyed by published name. DISM objects: locale-safe.
+# Driver-store packages that are ours, keyed by published name. DISM objects: locale-safe. Published names are reused
+# after deletion, so a recorded name counts only while it still holds one of our INFs.
 function Get-StorePackages {
-    $packages = @{}
+    $recorded = @(Get-Content $record -ErrorAction Ignore)
+    $found = @{}
     foreach ($driver in Get-WindowsDriver -Online) {
-        if ((Split-Path $driver.OriginalFileName -Leaf) -in $infNames) {
-            $packages[$driver.Driver] = $driver
+        $inf = (Split-Path $driver.OriginalFileName -Leaf).ToLowerInvariant()
+        if ($packages.ContainsKey($inf) -and ($driver.ProviderName -eq $packages[$inf] -or $driver.Driver -in $recorded)) {
+            $found[$driver.Driver] = $driver
         }
     }
-    $packages
+    $found
 }
 
-# NTA2DPVM devnodes (current and legacy) are created in class MEDIA. Ignore: Get-PnpDevice errors when the class
-# has no device at all.
-function Get-Nta2dpvm([string]$Id = $hardwareId) {
-    Get-PnpDevice -Class MEDIA -ErrorAction Ignore | Where-Object { $_.HardwareID -contains $Id }
-}
-
-if ($Uninstall) {
-    $failed = $false
-    $restart = $false
-    try {
-        foreach ($device in @(Get-Nta2dpvm) + @(Get-Nta2dpvm $legacyHardwareId)) {
-            pnputil /remove-device $device.InstanceId | Out-Host
-            $failed = $failed -or ($LASTEXITCODE -notin 0, 3010)
-            $restart = $restart -or ($LASTEXITCODE -eq 3010)
-        }
-        $store = Get-StorePackages
-        foreach ($name in Get-Content $record -ErrorAction Ignore) {
-            # Published names are reused after deletion: only delete a recorded name that still holds one of our INFs.
-            if ($store.ContainsKey($name)) {
-                pnputil /delete-driver $name /uninstall | Out-Host
-                $failed = $failed -or ($LASTEXITCODE -notin 0, 3010)
-                $restart = $restart -or ($LASTEXITCODE -eq 3010)
-            }
-        }
-    } finally {
-        foreach ($certStore in $certStores) {
-            foreach ($trusted in Get-ChildItem "Cert:\LocalMachine\$certStore") {
-                if ($trusted.Subject -eq $certSubject) {
-                    Remove-Item $trusted.PSPath
-                }
-            }
-        }
-    }
-    if ($failed) {
-        exit 1
-    }
-    if ($restart) {
-        exit 3010
-    }
-    exit 0
-}
-
-# This build's packages are identified in the store by the version stampinf wrote into DriverVer (date,version).
-function Get-InfVersion([string]$Name) {
-    $line = Select-String -Path (Join-Path $PSScriptRoot "$Name\$Name.inf") -Pattern '^\s*DriverVer\s*=\s*[^,]+,\s*([\d.]+)' |
-        Select-Object -First 1
-    [version]$line.Matches[0].Groups[1].Value
-}
-$current = @{ 'ntapd.inf' = Get-InfVersion NTAPD; 'nta2dpvm.inf' = Get-InfVersion NTA2DPVM }
-
-function Test-Current($Package) {
-    [version]$Package.Version -eq $current[(Split-Path $Package.OriginalFileName -Leaf)]
-}
-
-# Owned = this build's packages + packages recorded by earlier installs that are still in the store ($Store: the
-# Get-StorePackages result).
-function Save-Record($Store) {
-    $previous = @(Get-Content $record -ErrorAction Ignore)
-    $owned = foreach ($package in $Store.Values) {
-        if ($package.Driver -in $previous -or (Test-Current $package)) {
-            $package.Driver
-        }
-    }
-    Set-Content $record $owned
-}
-
-function Add-DriverPackage([string]$Name) {
-    pnputil /add-driver (Join-Path $PSScriptRoot "$Name\$Name.inf") /install | Out-Host
-    $code = $LASTEXITCODE
-    # 259: no device needed an update; 3010: a device restart is pending.
-    if ($code -notin 0, 259, 3010) {
-        throw "pnputil /add-driver $Name.inf failed ($code)"
-    }
-    $code
-}
-
-# NTA2DPVM is root-enumerated: its ROOT\NTA2DPVM\nnnn devnode is created once (what devcon install does).
-Add-Type -TypeDefinition @'
-using System;
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-using System.Text;
-
-public static class RootDevnode
-{
-    [StructLayout(LayoutKind.Sequential)]
-    struct SP_DEVINFO_DATA { public int cbSize; public Guid ClassGuid; public int DevInst; public IntPtr Reserved; }
-
-    [DllImport("setupapi.dll", SetLastError = true)]
-    static extern IntPtr SetupDiCreateDeviceInfoList(ref Guid classGuid, IntPtr hwndParent);
-    [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool SetupDiCreateDeviceInfoW(IntPtr set, string deviceName, ref Guid classGuid, string description, IntPtr hwndParent, int flags, ref SP_DEVINFO_DATA data);
-    [DllImport("setupapi.dll", SetLastError = true)]
-    static extern bool SetupDiSetDeviceRegistryPropertyW(IntPtr set, ref SP_DEVINFO_DATA data, int property, byte[] buffer, int size);
-    [DllImport("setupapi.dll", SetLastError = true)]
-    static extern bool SetupDiCallClassInstaller(int installFunction, IntPtr set, ref SP_DEVINFO_DATA data);
-    [DllImport("setupapi.dll")]
-    static extern bool SetupDiDestroyDeviceInfoList(IntPtr set);
-
-    const int DICD_GENERATE_ID = 1;
-    const int SPDRP_HARDWAREID = 1;
-    const int DIF_REGISTERDEVICE = 0x19;
-
-    public static void Create(string name, Guid classGuid, string hardwareId)
-    {
-        IntPtr set = SetupDiCreateDeviceInfoList(ref classGuid, IntPtr.Zero);
-        if (set == new IntPtr(-1)) throw new Win32Exception();
-        try
-        {
-            var data = new SP_DEVINFO_DATA { cbSize = Marshal.SizeOf(typeof(SP_DEVINFO_DATA)) };
-            byte[] ids = Encoding.Unicode.GetBytes(hardwareId + "\0\0");
-            if (!SetupDiCreateDeviceInfoW(set, name, ref classGuid, null, IntPtr.Zero, DICD_GENERATE_ID, ref data) ||
-                !SetupDiSetDeviceRegistryPropertyW(set, ref data, SPDRP_HARDWAREID, ids, ids.Length) ||
-                !SetupDiCallClassInstaller(DIF_REGISTERDEVICE, set, ref data))
-            {
-                throw new Win32Exception();
-            }
-        }
-        finally
-        {
-            SetupDiDestroyDeviceInfoList(set);
-        }
+# Present and non-present devices run by our drivers, plus NTA2DPVM devnodes by hardware ID (also driverless ones).
+function Get-OurDevices {
+    Get-PnpDevice -ErrorAction Ignore | Where-Object {
+        $_.Service -in $services -or @($_.HardwareID | Where-Object { $_ -in $hardwareIds }).Count -gt 0
     }
 }
-'@
 
-function Install-Nta2dpvm {
-    if (-not (Get-Nta2dpvm)) {
-        [RootDevnode]::Create('NTA2DPVM', [Guid]'4d36e96c-e325-11ce-bfc1-08002be10318', $hardwareId)
-    }
-    Add-DriverPackage NTA2DPVM
-}
-
-$cer = Join-Path $PSScriptRoot 'NTAPD\WPods-TestSigning.cer'
-$thumbprint = [Security.Cryptography.X509Certificates.X509Certificate2]::new($cer).Thumbprint
-# Certificates of earlier builds stay trusted otherwise.
-foreach ($certStore in $certStores) {
-    foreach ($trusted in Get-ChildItem "Cert:\LocalMachine\$certStore") {
-        if ($trusted.Subject -eq $certSubject -and $trusted.Thumbprint -ne $thumbprint) {
-            Remove-Item $trusted.PSPath
-        }
-    }
-    if (-not (Test-Path "Cert:\LocalMachine\$certStore\$thumbprint")) {
-        Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\$certStore" | Out-Null
-    }
-}
-$store = $null
+$failed = $false
+$restart = $false
 try {
-    $ntapd = Add-DriverPackage NTAPD
-    foreach ($device in Get-Nta2dpvm $legacyHardwareId) {
+    foreach ($device in Get-OurDevices) {
         pnputil /remove-device $device.InstanceId | Out-Host
-        if ($LASTEXITCODE -notin 0, 3010) {
-            throw "pnputil /remove-device $($device.InstanceId) failed ($LASTEXITCODE)"
-        }
+        $failed = $failed -or ($LASTEXITCODE -notin 0, 3010)
+        $restart = $restart -or ($LASTEXITCODE -eq 3010)
     }
-    $nta2dpvm = Install-Nta2dpvm
-    # Code 14 (CM_PROB_NEED_RESTART): the running driver could not be unloaded for the update; a fresh devnode
-    # loads the new driver without a reboot.
-    $stuck = @(Get-Nta2dpvm | Where-Object ConfigManagerErrorCode -eq 14)
-    if ($stuck) {
-        foreach ($device in $stuck) {
-            pnputil /remove-device $device.InstanceId | Out-Host
-            if ($LASTEXITCODE -notin 0, 3010) {
-                throw "pnputil /remove-device $($device.InstanceId) failed ($LASTEXITCODE)"
-            }
-        }
-        $nta2dpvm = Install-Nta2dpvm
+    # /uninstall also takes the driver off devices that came back meanwhile (AirPods reconnecting).
+    foreach ($name in (Get-StorePackages).Keys) {
+        pnputil /delete-driver $name /uninstall | Out-Host
+        $failed = $failed -or ($LASTEXITCODE -notin 0, 3010)
+        $restart = $restart -or ($LASTEXITCODE -eq 3010)
     }
-    # Drop superseded packages; pnputil refuses (and we ignore) any package still in use by a device.
-    # Deleted ones leave $store, so Save-Record works on the same single DISM enumeration.
-    $store = Get-StorePackages
-    foreach ($package in @($store.Values)) {
-        if (-not (Test-Current $package)) {
-            pnputil /delete-driver $package.Driver | Out-Host
-            if ($LASTEXITCODE -eq 0) {
-                $store.Remove($package.Driver)
-            }
-        }
-    }
+} catch {
+    Write-Host $_
+    $failed = $true
 } finally {
-    # Failed before the store was read: read it now.
-    if ($null -eq $store) {
-        $store = Get-StorePackages
+    foreach ($certStore in $certStores) {
+        foreach ($trusted in Get-ChildItem "Cert:\LocalMachine\$certStore") {
+            if ($trusted.Subject -eq $certSubject) {
+                Remove-Item $trusted.PSPath
+                Write-Host "Removed certificate $($trusted.Thumbprint) from LocalMachine\$certStore"
+            }
+        }
     }
-    Save-Record $store
 }
-if (3010 -in $ntapd, $nta2dpvm) {
+if ($failed) {
+    exit 1
+}
+Remove-Item $record -ErrorAction Ignore
+foreach ($name in 'NTAPD', 'NTA2DPVM') {
+    Remove-Item (Join-Path $PSScriptRoot $name) -Recurse -Force -ErrorAction Ignore
+}
+if ($restart) {
     exit 3010
 }
 exit 0
