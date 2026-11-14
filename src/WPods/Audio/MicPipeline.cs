@@ -5,22 +5,13 @@ namespace WPods.Audio;
 
 public enum MicStatus
 {
-    /// <summary>
-    /// No app captures from "Headset (A2DP)", or one captures while no AirPods are attached or while Hands-Free has
-    /// their mic.
-    /// </summary>
+    /// <summary>No app captures, or one captures while no AirPods are attached or Hands-Free has their mic.</summary>
     NotActive,
     /// <summary>An app captures and AirPods are attached; no START written yet in this session.</summary>
     Starting,
-    /// <summary>
-    /// An app captures and a START was written (or audio decoded) in this session. Silence stays Live: the AirPods
-    /// send nothing while it is quiet.
-    /// </summary>
+    /// <summary>A START was written or audio decoded; silence stays Live, as the AirPods send nothing while it is quiet.</summary>
     Live,
-    /// <summary>
-    /// A software fault: the virtual mic device cannot be opened or read, the decoder failed to load, or a START
-    /// write failed.
-    /// </summary>
+    /// <summary>The virtual mic is unavailable, the decoder failed to load, a START write failed or no audio came.</summary>
     Problem,
 }
 
@@ -42,16 +33,9 @@ public enum StageLoad
 }
 
 /// <summary>
-/// AirPods mic -> \\.\NTA2DPVM. Starts the AirPods mic stream when an app starts capturing and stops it (0x58 STOP)
-/// when capture stops and before a user Disconnect or exit (<see cref="StopStreamAsync"/>); 0x58 packets are
-/// dropped unread while nothing captures. Decodes on the session read loop, in float
-/// until the end: AAC-ELD -> 48 kHz mono float -> make-up gain -> model of the effective mic mode
-/// (<see cref="MicConfig.EffectiveMode"/>) -> voice enhancement -> soft limiter + the only 16-bit conversion ->
-/// WriteFile. Stages (<see cref="MicCatalog"/>) are created on the thread pool on attach, on the attached pair's mic mode
-/// change and on a <see cref="MicConfig"/> change, and swapped in at a frame boundary; the replaced one is disposed on
-/// the thread pool. While capturing it logs the input (decoded, before gain) and output
-/// levels once per second.
-/// Create before <see cref="ConnectionManager.Start"/>.
+/// AirPods mic to virtual mic: streams 0x58 audio while an app captures, decodes AAC-ELD on the session read loop and
+/// runs gain, mode model, enhancement and limiter in float before one 16-bit conversion. Create before
+/// <see cref="ConnectionManager.Start"/>.
 /// </summary>
 public sealed class MicPipeline
 {
@@ -60,16 +44,21 @@ public sealed class MicPipeline
     private const int PcmCapacity = 2048;
     private const int StallAfterMs = 8000;
     private const int RestartEveryMs = 5000;
+    private const int FirstAudioMs = 1000;
+    // STARTs sent FirstAudioMs apart until audio comes; then NoAudioGiveUpMs more before the mic is a problem.
+    private const int StartTries = 3;
+    private const int NoAudioGiveUpMs = 5000;
     // Hands-Free mic check interval while an app captures. The AirPods drop the link when Hands-Free starts while
     // their mic streams here, and they report Hands-Free call audio only after that.
     private const int HandsFreePollMs = 50;
+    private const int MicNameWaitMs = 5000;
     // No START for this long after Hands-Free is enabled or starts being used: Windows lets it go and takes it again
     // within that time, and a START in between makes the AirPods drop the link.
     private const int HandsFreeHoldMs = 3000;
     private const int MaxConsecutiveErrors = 8;
     private const int LevelLogIntervalMs = 1000;
-    // Applied to the decoded signal before mode processing. Measured on AirPods Pro 2: normal speech
-    // -33..-40 dBFS RMS, peaks -20..-26 dBFS; +12 dB puts speech near -25 dBFS RMS, peaks under the limiter knee.
+    // AirPods Pro 2 speech decodes at -33..-40 dBFS RMS, peaks -20..-26 dBFS; +12 dB puts it near -25 dBFS RMS
+    // with peaks under the limiter knee.
     private const float MakeUpGain = 4f;
 
     private static readonly byte[] StartMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x01, 0x82, 0x00, 0x00, 0x00, 0x04, 0x96, 0x00];
@@ -82,6 +71,8 @@ public sealed class MicPipeline
     private readonly Lock _lock = new();
     private readonly Timer _timer;
     private readonly Timer _handsFreePoll;
+    // Falls back to the Windows name when the AirPods have not reported their own name soon after attach.
+    private readonly Timer _micNameFallback;
 
     // Read-loop state (one session at a time; reset on detach after its read loop ended).
     private readonly float[] _pcm = GC.AllocateArray<float>(PcmCapacity, pinned: true);
@@ -102,18 +93,26 @@ public sealed class MicPipeline
 
     // Shared state; written under _lock.
     private AapSession? _session;
+    // Name of the attached pair at attach (the Windows name unless the AirPods already reported theirs).
+    private string _pairName = "";
     private bool _startSent;
     // A START write succeeded or audio was decoded in this session.
     private bool _started;
     // The latest START write failed.
     private bool _startFailed;
+    // STARTs since the wait for audio began (BeginWaitLocked, or a stall re-send).
+    private int _startTries;
+    // No audio after StartTries STARTs, until audio comes or a new wait begins.
+    private bool _noAudio;
     private volatile string? _faultCode;
     private long _lastStart;
     private long _lastAudio;
     private volatile bool _capturing;
-    // Hands-Free has the AirPods mic, so no START is sent while either is set: the AirPods report its call audio
-    // (0x0E state bit 0x01), or an app records from the Hands-Free mic (polled while capturing).
+    // Hands-Free has the AirPods mic during call audio (seen by the service or reported in 0x0E) or while an app records
+    // from the Hands-Free mic. No START then: the AirPods' own mic stream running into it makes the controller fail.
     private bool _handsFreeAudio;
+    private bool _reportedCallAudio;
+    private bool _linkCallAudio;
     private bool _handsFreeMic;
     // Completed when both turn false or the session detaches.
     private TaskCompletionSource? _handsFreeEnded;
@@ -134,6 +133,7 @@ public sealed class MicPipeline
         _enhancement = new StageSlot("enhancement", _lock, (id, load, code) => ReportLocked(MicSlot.Enhancement, id, load, code));
         _timer = new Timer(static s => ((MicPipeline)s!).OnTimer(), this, Timeout.Infinite, Timeout.Infinite);
         _handsFreePoll = new Timer(static s => ((MicPipeline)s!).OnHandsFreePoll(), this, Timeout.Infinite, Timeout.Infinite);
+        _micNameFallback = new Timer(static s => ((MicPipeline)s!).SetMicDevice(allowPairName: true), this, Timeout.Infinite, Timeout.Infinite);
         _mic = new VirtualMic(OnCaptureChanged);
         connections.Attached += OnAttached;
         connections.Detached += OnDetached;
@@ -142,48 +142,35 @@ public sealed class MicPipeline
         _mic.Open();
     }
 
-    /// <summary>
-    /// Raised only on change, on the thread-pool thread that caused it (read loop, timer, capture-state wait or
-    /// session event), under an internal lock: handlers must not block (marshal with BeginInvoke).
-    /// </summary>
+    /// <summary>Raised on change, on the causing thread-pool thread under an internal lock; handlers must not block.</summary>
     public event Action<MicStatus>? StatusChanged;
 
-    /// <summary>
-    /// True when an app starts capturing from the virtual mic, false when it stops. Raised only on change, on the
-    /// capture-state wait thread under internal locks: handlers must not block.
-    /// </summary>
+    /// <summary>An app started (true) or stopped capturing; raised under internal locks, handlers must not block.</summary>
     public event Action<bool>? CaptureChanged;
 
     /// <summary>
-    /// Load state of a slot's newest request (address of the attached pair, 0 after detach; option id or null = none).
-    /// Raised in request order under the internal lock, on the thread that caused it: handlers must not block.
-    /// The last argument is why a load failed: "M4" the model file is missing, unreadable or damaged, "M0" anything
-    /// else; null otherwise (and for a load dropped by a detach).
+    /// Load state of a slot's newest request (pair address, 0 after detach; option id). The last argument is the failure
+    /// code: "M4" model file missing, unreadable or damaged, "M0" anything else. Under the lock; must not block.
     /// </summary>
     public event Action<ulong, MicSlot, string?, StageLoad, string?>? StageChanged;
 
     /// <summary>
-    /// A running stage threw and was dropped (address of the attached pair); its slot passes audio through until the
-    /// next request. Raised on the read loop under the internal lock: handlers must not block.
+    /// A running stage threw and was dropped; its slot passes audio through until the next request. Raised on the
+    /// read loop under the internal lock.
     /// </summary>
     public event Action<ulong>? StageStopped;
 
     public MicStatus Status => _status;
 
     /// <summary>
-    /// Why the status is <see cref="MicStatus.Problem"/> while an app captures: "M1" the decoder or voice processor
-    /// failed to load, "M2" a START write failed; null otherwise. Set before <see cref="StatusChanged"/> is raised, so
-    /// read it from that handler.
+    /// Problem cause: "M1" decoder or voice processor failed to load, "M2" START write failed, "M5" no audio after every
+    /// START. Set before <see cref="StatusChanged"/> is raised.
     /// </summary>
     public string? FaultCode => _faultCode;
 
-    /// <summary>An app captures from the virtual mic.</summary>
     public bool Capturing => _capturing;
 
-    /// <summary>
-    /// Hands-Free is in use on the attached pair: the AirPods report its call audio (0x0E state bit 0x01), or, while
-    /// an app captures from the virtual mic, an app records from the Hands-Free mic.
-    /// </summary>
+    /// <summary>Call audio on the attached pair, or, while capturing, an app recording from its Hands-Free mic.</summary>
     public bool HandsFreeInUse
     {
         get
@@ -195,10 +182,7 @@ public sealed class MicPipeline
         }
     }
 
-    /// <summary>
-    /// Completes when Hands-Free is no longer in use (<see cref="HandsFreeInUse"/>) or the session detaches; at once
-    /// when it is not.
-    /// </summary>
+    /// <summary>Completes when Hands-Free is no longer in use or the session detaches.</summary>
     public Task HandsFreeEndedAsync()
     {
         lock (_lock)
@@ -212,11 +196,7 @@ public sealed class MicPipeline
         }
     }
 
-    /// <summary>
-    /// Stops the AirPods mic stream (0x58 STOP) when a START was sent in the attached session. Completes when the
-    /// STOP was written, or at once when there is nothing to stop. Call before an intentional detach (user
-    /// Disconnect, exit): AirPods cut off mid-stream may reconnect on their own.
-    /// </summary>
+    /// <summary>Sends 0x58 STOP before an intentional detach: AirPods cut off mid-stream may reconnect on their own.</summary>
     public Task StopStreamAsync()
     {
         lock (_lock)
@@ -231,12 +211,15 @@ public sealed class MicPipeline
 
     private void OnAttached(AapSession session)
     {
+        string pairName = _connections.GetDevices().Find(d => d.Address == session.Address)?.Name ?? "";
         lock (_lock)
         {
             _session = session;
+            _pairName = pairName;
             _startSent = false;
             _started = false;
             _startFailed = false;
+            _noAudio = false;
             ResetHandsFreeLocked();
             _mode = _settings.Get(session.Address).MicMode;
             _disableHandsFree = _settings.Get(session.Address).DisableHandsFree;
@@ -251,12 +234,26 @@ public sealed class MicPipeline
         }
         session.Changed += OnSessionChanged;
         session.PacketReceived += OnPacket;
+        session.CallAudioChanged += OnCallAudioChanged;
+        // The service may have reported call audio before this subscription.
+        OnCallAudioChanged(session.CallAudio);
+        // The AirPods report their own name right after attach; sending the Windows name first would rename the mic
+        // twice on every connect (and Windows gives a renamed mic a new endpoint).
+        if (session.State.Name is null)
+        {
+            _micNameFallback.Change(MicNameWaitMs, Timeout.Infinite);
+        }
+        else
+        {
+            SetMicDevice(allowPairName: false);
+        }
     }
 
     // Raised after the session's read loop ended, so the read-loop state is free.
     private void OnDetached(AapSession session)
     {
         session.PacketReceived -= OnPacket;
+        session.CallAudioChanged -= OnCallAudioChanged;
         session.Changed -= OnSessionChanged;
         lock (_lock)
         {
@@ -281,6 +278,10 @@ public sealed class MicPipeline
 
     private void OnSessionChanged(DeviceChange change)
     {
+        if ((change & DeviceChange.Identity) != 0)
+        {
+            SetMicDevice(allowPairName: false);
+        }
         if ((change & DeviceChange.Connection) == 0)
         {
             return;
@@ -295,6 +296,31 @@ public sealed class MicPipeline
                     TryStartLocked(session, "session ready");
                 }
             }
+        }
+    }
+
+    // AAP-reported name, else (allowPairName) the Windows name. _lock is never held while calling into VirtualMic.
+    private void SetMicDevice(bool allowPairName)
+    {
+        AapSession? session;
+        string pairName;
+        lock (_lock)
+        {
+            session = _session;
+            pairName = _pairName;
+        }
+        if (session is null)
+        {
+            return;
+        }
+        if (session.State.Name is { } name)
+        {
+            _micNameFallback.Change(Timeout.Infinite, Timeout.Infinite);
+            _mic.SetDevice(session.Address, name, reported: true);
+        }
+        else if (allowPairName)
+        {
+            _mic.SetDevice(session.Address, pairName, reported: false);
         }
     }
 
@@ -341,6 +367,9 @@ public sealed class MicPipeline
             if (capturing != _capturing)
             {
                 _capturing = capturing;
+                // Windows throttles a background tray app onto efficiency cores at low clocks, where the mode model
+                // can fall behind real time.
+                Native.SetSpeedThrottling(!capturing);
                 CaptureChanged?.Invoke(capturing);
             }
             if (!_capturing)
@@ -378,9 +407,8 @@ public sealed class MicPipeline
         }
     }
 
-    // The START held back by a Hands-Free hold, and the stall re-send of START. Silence never changes the status: the
-    // AirPods send nothing while it is quiet. Re-armed for the next deadline, so it fires about every 8 s while audio
-    // flows.
+    // Sends a START held back by a Hands-Free hold and re-sends START on a stall. Silence never changes the status:
+    // the AirPods send nothing while it is quiet.
     private void OnTimer()
     {
         lock (_lock)
@@ -396,14 +424,42 @@ public sealed class MicPipeline
                 TryStartLocked(session, "Hands-Free hold ended");
                 return;
             }
-            long silent = now - Volatile.Read(ref _lastAudio);
+            long lastAudio = Volatile.Read(ref _lastAudio);
+            long silent = now - lastAudio;
             long sinceStart = now - _lastStart;
-            if (silent >= StallAfterMs && sinceStart >= RestartEveryMs)
+            if (lastAudio > _lastStart)
             {
-                SendStartLocked(session, now, $"stalled {silent} ms");
-                sinceStart = 0;
+                // Audio flowed since the last START: re-send only when it stalled.
+                if (silent >= StallAfterMs && sinceStart >= RestartEveryMs)
+                {
+                    _startTries = 0;
+                    SendStartLocked(session, now, $"stalled {silent} ms");
+                    ArmLocked(FirstAudioMs);
+                    return;
+                }
+                ArmLocked(Math.Max(StallAfterMs - silent, RestartEveryMs - sinceStart));
+                return;
             }
-            ArmLocked(Math.Max(StallAfterMs - silent, RestartEveryMs - sinceStart));
+            // The AirPods often ignore a START, so it is resent every second, StartTries in all, to avoid seconds of
+            // initial silence. Nothing NoAudioGiveUpMs later is a mic problem until audio comes or capture restarts.
+            if (_startTries < StartTries)
+            {
+                if (sinceStart >= FirstAudioMs)
+                {
+                    SendStartLocked(session, now, $"no audio {sinceStart} ms after START");
+                    sinceStart = 0;
+                }
+                ArmLocked(FirstAudioMs - sinceStart);
+                return;
+            }
+            if (sinceStart < NoAudioGiveUpMs)
+            {
+                ArmLocked(NoAudioGiveUpMs - sinceStart);
+                return;
+            }
+            Log.Warn("mic", $"no audio from the AirPods after {StartTries} STARTs, giving up until audio comes or capture starts again");
+            _noAudio = true;
+            UpdateStatusLocked("no audio from the AirPods");
         }
     }
 
@@ -415,18 +471,18 @@ public sealed class MicPipeline
             bool callAudio = (packet[12] & 0x01) != 0;
             lock (_lock)
             {
-                if (callAudio != _handsFreeAudio && _session is not null)
+                if (callAudio != _reportedCallAudio && _session is not null)
                 {
-                    Log.Info("mic", $"Hands-Free call audio {(callAudio ? "started" : "ended")}");
-                    SetHandsFreeLocked(callAudio, _handsFreeMic, "Hands-Free call audio");
+                    _reportedCallAudio = callAudio;
+                    Log.Info("mic", $"Hands-Free call audio {(callAudio ? "started" : "ended")} (AirPods report)");
+                    SetHandsFreeLocked(_reportedCallAudio || _linkCallAudio, _handsFreeMic, "Hands-Free call audio");
                 }
             }
             return;
         }
         if (!_capturing
             || packet.Length < HeaderLength
-            || packet[0] != 0x04 || packet[2] != 0x04 || packet[4] != 0x58 || packet[6] != 0x01 || packet[7] != 0x00
-            || !_mic.IsOpen)
+            || packet[0] != 0x04 || packet[2] != 0x04 || packet[4] != 0x58 || packet[6] != 0x01 || packet[7] != 0x00)
         {
             return;
         }
@@ -468,13 +524,34 @@ public sealed class MicPipeline
         {
             lock (_lock)
             {
-                if (_capturing && (!_started || _startFailed))
+                if (_capturing && (!_started || _startFailed || _noAudio))
                 {
+                    if (_noAudio)
+                    {
+                        // The give-up stopped the timer: watch for stalls again.
+                        ArmLocked(StallAfterMs);
+                    }
                     _started = true;
                     _startFailed = false;
+                    _noAudio = false;
                     UpdateStatusLocked("decoded audio");
                 }
             }
+        }
+    }
+
+    // The service saw call audio being set up (or up) on the attached pair's link, or end there.
+    private void OnCallAudioChanged(bool on)
+    {
+        lock (_lock)
+        {
+            if (on == _linkCallAudio || _session is null)
+            {
+                return;
+            }
+            _linkCallAudio = on;
+            Log.Info("mic", $"Hands-Free call audio {(on ? "starting" : "ended")} (call audio link)");
+            SetHandsFreeLocked(_reportedCallAudio || _linkCallAudio, _handsFreeMic, "Hands-Free call audio link");
         }
     }
 
@@ -507,8 +584,7 @@ public sealed class MicPipeline
         }
     }
 
-    // An app records from the pair's Hands-Free mic (enumerates audio sessions, a few ms); false while Hands-Free is
-    // disabled for the pair.
+    // Enumerates audio sessions (a few ms); false while Hands-Free is disabled for the pair.
     private bool HandsFreeMicInUse(ulong address) =>
         !_settings.Get(address).DisableHandsFree && Native.wpn_bt_handsfree_mic_in_use(address) == 1;
 
@@ -523,8 +599,7 @@ public sealed class MicPipeline
         }
     }
 
-    // Hands-Free takes the AirPods mic: stop the stream while it is in use (a START then only fights it), start it
-    // again when it ends and an app still captures.
+    // Hands-Free takes the AirPods mic: the stream stops while it is in use and restarts when it ends.
     private void SetHandsFreeLocked(bool audio, bool mic, string reason)
     {
         bool wasInUse = _handsFreeAudio || _handsFreeMic;
@@ -576,6 +651,8 @@ public sealed class MicPipeline
     private void ResetHandsFreeLocked()
     {
         _handsFreeAudio = false;
+        _reportedCallAudio = false;
+        _linkCallAudio = false;
         _handsFreeMic = false;
         CompleteHandsFreeEndedLocked();
     }
@@ -729,14 +806,17 @@ public sealed class MicPipeline
 
     private void BeginWaitLocked(long now, string reason)
     {
+        _startTries = 0;
+        _noAudio = false;
         Volatile.Write(ref _lastAudio, now);
-        ArmLocked(StallAfterMs);
+        ArmLocked(FirstAudioMs);
         UpdateStatusLocked(reason);
     }
 
     private void SendStartLocked(AapSession session, long now, string reason)
     {
         Log.Info("mic", $"START sent to {Mac.Format(session.Address)} ({reason})");
+        _startTries++;
         _startSent = true;
         _lastStart = now;
         _ = SendStartAsync(session);
@@ -773,6 +853,7 @@ public sealed class MicPipeline
         _startSent = false;
         _started = false;
         _startFailed = false;
+        _noAudio = false;
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
         Log.Info("mic", $"STOP sent to {Mac.Format(session.Address)} ({reason})");
         return WriteStopAsync(session);
@@ -786,8 +867,6 @@ public sealed class MicPipeline
         }
     }
 
-    // While capturing: no session or Hands-Free has the mic -> NotActive; a fault (M1 wins over M2) -> Problem; START
-    // written or audio decoded -> Live; else Starting. While not capturing only OnCaptureChanged sets the status.
     private void UpdateStatusLocked(string reason)
     {
         if (!_capturing)
@@ -795,7 +874,7 @@ public sealed class MicPipeline
             return;
         }
         bool off = _session is null || _handsFreeAudio || _handsFreeMic;
-        string? fault = off ? null : _nativeFailed ? "M1" : _startFailed ? "M2" : null;
+        string? fault = off ? null : _nativeFailed ? "M1" : _startFailed ? "M2" : _noAudio ? "M5" : null;
         _faultCode = fault;
         SetStatusLocked(off ? MicStatus.NotActive : fault is not null ? MicStatus.Problem : _started ? MicStatus.Live : MicStatus.Starting, reason);
     }
@@ -816,11 +895,8 @@ public sealed class MicPipeline
     private static bool IsReady(AapSession session) => session.State.Status == SessionStatus.Ready;
 
     /// <summary>
-    /// One slot's stage. A request creates the new stage on the thread pool (model loads take up to
-    /// about a second) and leaves it as the pending swap; the read loop takes it at its next frame boundary and
-    /// disposes the replaced stage on the thread pool. A failed creation is logged and keeps the current stage. Every
-    /// request is reported (loading, then ready or failed; a stale creation reports nothing) under the pipeline lock.
-    /// The *Locked methods run under the pipeline lock; TakeSwap on the read loop (ResetLocked after it ended).
+    /// One slot's stage: created on the thread pool (model loads take up to a second) and swapped in by the read loop
+    /// at a frame boundary. *Locked methods run under the pipeline lock, TakeSwap on the read loop.
     /// </summary>
     private sealed class StageSlot(string kind, Lock gate, Action<string?, StageLoad, string?> report)
     {
@@ -836,10 +912,7 @@ public sealed class MicPipeline
         /// <summary>The option whose stage runs now (read loop).</summary>
         public MicOption? ActiveOption { get; private set; }
 
-        /// <summary>
-        /// Starts creating the stage for <paramref name="option"/> (null = none; "raw" has no stage) unless it is
-        /// already requested.
-        /// </summary>
+        /// <summary>Starts creating the stage unless already requested; null = none, and "raw" has no stage.</summary>
         public void RequestLocked(MicOption? option)
         {
             string? id = option?.Id;
@@ -931,7 +1004,6 @@ public sealed class MicPipeline
                     if (generation == _generation)
                     {
                         _requested = _published;
-                        // M4: the model file is missing, unreadable or damaged; M0: any other failure.
                         bool file = e is IOException or UnauthorizedAccessException or InvalidDataException;
                         report(option.Id, StageLoad.Failed, file ? "M4" : "M0");
                     }

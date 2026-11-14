@@ -5,7 +5,7 @@ using WPods.Audio;
 
 namespace WPods.Core;
 
-/// <summary>Apple's mic mode names, in Apple's order; each runs the model <see cref="MicConfig.Models"/> picks.</summary>
+/// <summary>Apple's mic modes, in Apple's order; <see cref="MicConfig.Models"/> picks the model each runs.</summary>
 public enum MicMode
 {
     Standard,
@@ -23,7 +23,7 @@ public sealed record HostSettings
     /// <summary>Saved mic mode; <see cref="MicConfig.EffectiveMode"/> gives the one that runs.</summary>
     [JsonConverter(typeof(MicModeJsonConverter))]
     public MicMode MicMode { get; init; }
-    /// <summary>Media volume during a conversation, percent of the previous volume; 10..90 (clamped on load).</summary>
+    /// <summary>Media volume during a conversation, in percent of the previous volume; clamped to 10..90 on load.</summary>
     public int DuckPercent { get; init; } = DefaultDuckPercent;
 
     internal const int DefaultDuckPercent = 40;
@@ -31,7 +31,7 @@ public sealed record HostSettings
     internal const int MaxDuckPercent = 90;
 }
 
-/// <summary>App UI preferences (settings.json "ui"; every field optional so older files load).</summary>
+/// <summary>App UI preferences (settings.json "ui"); every field is optional.</summary>
 public sealed record UiPrefs
 {
     public static readonly UiPrefs Default = new();
@@ -44,23 +44,23 @@ public sealed record UiPrefs
     /// <summary>Main window height in DIPs.</summary>
     public double WindowHeight { get; init; } = 640;
     public bool FirstRunDone { get; init; }
+    /// <summary>Version whose "update available" note the user dismissed.</summary>
+    public string? DismissedUpdate { get; init; }
 }
 
 /// <summary>
-/// App-wide mic settings (settings.json "mic"), editable any time: the enabled modes (at least one), the model id of
-/// each mode (Audio.MicCatalog) and the voice enhancement id (null = Off).
+/// App-wide mic settings (settings.json "mic"): enabled modes (at least one), MicCatalog model id per mode and
+/// voice enhancement id (null = Off).
 /// </summary>
 public sealed record MicConfig(IReadOnlySet<MicMode> Modes, IReadOnlyDictionary<MicMode, string> Models, string? Enhancement)
 {
-    /// <summary>Every mode, in Apple's order (= enum order).</summary>
     public static readonly MicMode[] AllModes = Enum.GetValues<MicMode>();
 
-    /// <summary>Every mode enabled, each with its default model, no enhancement.</summary>
     public static readonly MicConfig Default = new(new HashSet<MicMode>(AllModes), AllModes.ToDictionary(m => m, MicCatalog.DefaultModel), null);
 
     /// <summary>
-    /// The mode that runs for a pair whose saved mode is <paramref name="saved"/>: itself when enabled, else the next
-    /// enabled one in the cycle Voice Isolation -> Standard -> Wide Spectrum -> Voice Isolation.
+    /// The mode that runs: <paramref name="saved"/> when enabled, else the next enabled one in the cycle
+    /// Voice Isolation, Standard, Wide Spectrum.
     /// </summary>
     public MicMode EffectiveMode(MicMode saved)
     {
@@ -110,8 +110,8 @@ public sealed record MicConfig(IReadOnlySet<MicMode> Modes, IReadOnlyDictionary<
 public sealed record DeviceModel(string Number, string Name);
 
 /// <summary>
-/// %LOCALAPPDATA%\WPods\settings.json (host settings, model, reported capabilities, stem modes, ear detection, mic side, last seen pod-saved settings and Windows pairing date per MAC + last-used MAC) and keys.bin (proximity keys,
-/// DPAPI CurrentUser). Loaded once; every change is written atomically. Thread-safe.
+/// Per-pair and app settings in %LOCALAPPDATA%\WPods\settings.json, proximity keys DPAPI-protected in keys.bin.
+/// Loaded once; every change is written atomically. Thread-safe.
 /// </summary>
 public sealed class SettingsStore
 {
@@ -172,7 +172,7 @@ public sealed class SettingsStore
     /// <summary>Raised on the caller's thread of <see cref="SetMic"/>, outside the store's lock.</summary>
     public event Action<MicConfig>? MicConfigChanged;
 
-    /// <summary>settings.json existed but could not be loaded; every setting is the default. A missing file is not a failure.</summary>
+    /// <summary>settings.json exists but could not be loaded, so every setting is the default.</summary>
     public bool LoadFailed { get; private set; }
 
     /// <summary>Last successfully attached device; 0 = none.</summary>
@@ -235,10 +235,7 @@ public sealed class SettingsStore
         }
     }
 
-    /// <summary>
-    /// Stores a valid <paramref name="config"/> (checked by the caller) and raises <see cref="MicConfigChanged"/>, also
-    /// when settings.json could not be written (the write's exception is rethrown after).
-    /// </summary>
+    /// <summary>Stores a caller-validated config and raises <see cref="MicConfigChanged"/> even when saving throws.</summary>
     public void SetMic(MicConfig config)
     {
         try
@@ -255,10 +252,8 @@ public sealed class SettingsStore
         }
     }
 
-    /// <summary>Stored settings, or <see cref="HostSettings.Default"/> for a device never changed.</summary>
     public HostSettings Get(ulong address) => Read(_devices, address, HostSettings.Default);
 
-    /// <summary>Last model seen for this pair; null if it was never attached.</summary>
     public DeviceModel? GetModel(ulong address)
     {
         lock (_lock)
@@ -267,22 +262,19 @@ public sealed class SettingsStore
         }
     }
 
-    /// <summary>Stem press-and-hold cycle of the pair; <see cref="DefaultStemModes"/> when never set.</summary>
     internal StemModes GetStemModes(ulong address) => Read(_stemModes, address, DefaultStemModes);
 
-    /// <summary>Ear detection (0x0A) of the pair as last set by the user or reported by the device; true (Apple default) when never set.</summary>
+    /// <summary>As last set by the user or reported by the device; on by default, as on Apple devices.</summary>
     internal bool GetEarDetection(ulong address) => Read(_earDetection, address, true);
 
-    /// <summary>Allow Off (0x34) of the pair as last set by the user; false when never set.</summary>
     internal bool GetAllowOff(ulong address) => Read(_allowOff, address, false);
 
-    /// <summary>Microphone side (0x01) of the pair as last set by the user or reported by the device; Automatic when never set.</summary>
+    /// <summary>As last set by the user or reported by the device.</summary>
     internal MicSide GetMicSide(ulong address) => Read(_micSide, address, MicSide.Automatic);
 
-    /// <summary>Every capability the pair reported on any attach; None if it was never attached.</summary>
+    /// <summary>Every capability the pair reported on any attach.</summary>
     internal DeviceCapabilities GetCapabilities(ulong address) => Read(_capabilities, address, DeviceCapabilities.None);
 
-    /// <summary>Pod-saved settings of the pair as last seen; <see cref="PodSettings.None"/> if never seen.</summary>
     internal PodSettings GetPodSettings(ulong address) => Read(_podSettings, address, PodSettings.None);
 
     public bool HasKeys(ulong address)
@@ -301,10 +293,7 @@ public sealed class SettingsStore
         }
     }
 
-    /// <summary>
-    /// Stores <paramref name="settings"/> and raises <see cref="HostSettingsChanged"/> when they differ from the stored
-    /// ones, also when settings.json could not be written (the write's exception is rethrown after).
-    /// </summary>
+    /// <summary>Raises <see cref="HostSettingsChanged"/> when the settings differ from the stored ones, even when saving throws.</summary>
     internal void Set(ulong address, HostSettings settings)
     {
         bool changed = false;
@@ -335,11 +324,11 @@ public sealed class SettingsStore
     internal void SetCapabilities(ulong address, DeviceCapabilities capabilities) => Store(_capabilities, address, capabilities);
 
     /// <summary>
-    /// Records the install date of the pair's Windows device entry (<see cref="Native.GetDeviceInstallDate"/>). A date
-    /// other than the stored one means the pair was removed and paired again: its remembered capabilities and pod-saved
-    /// settings are cleared and true is returned. The first date is only stored.
+    /// Records the install date of the pair's Windows entry. A new date whose old entry is gone means the pair was
+    /// re-paired: remembered capabilities and pod settings are cleared and true is returned. A new date whose old
+    /// entry still exists belongs to another radio and is only stored.
     /// </summary>
-    internal bool SetPairingDate(ulong address, DateTime date)
+    internal bool SetPairingDate(ulong address, DateTime date, Func<DateTime, bool> entryExists)
     {
         lock (_lock)
         {
@@ -348,17 +337,19 @@ public sealed class SettingsStore
             {
                 return false;
             }
+            bool repaired = known && !entryExists(stored);
             _pairingDates[address] = date;
-            if (known)
+            if (repaired)
             {
                 _capabilities.Remove(address);
                 _podSettings.Remove(address);
             }
             SaveSettings();
-            Log.Info("settings", known
+            Log.Info("settings", repaired
                 ? $"{Mac.Format(address)}: paired again (Windows entry {stored:o} -> {date:o}); remembered capabilities and pod settings cleared"
+                : known ? $"{Mac.Format(address)}: entry on another radio, pairing date {stored:o} -> {date:o}"
                 : $"{Mac.Format(address)}: pairing date {date:o} stored");
-            return known;
+            return repaired;
         }
     }
 
@@ -510,7 +501,7 @@ public sealed class SettingsStore
         }
         catch (Exception e)
         {
-            // Unreadable or malformed file: start from defaults, never from a partial load; the next change rewrites it.
+            // Start from defaults, never from a partial load; the next change rewrites the file.
             Log.Error("settings", "settings.json unreadable, using defaults", e);
             LoadFailed = true;
             _lastUsed = 0;
@@ -528,8 +519,8 @@ public sealed class SettingsStore
         }
     }
 
-    // Fills values missing from an older file and clamps out-of-range ones from a hand-edited file. The source-generated
-    // reader sets a missing init property to 0 instead of keeping its default, and 0 is never a valid duck percent.
+    // Fills missing values and clamps out-of-range ones. The source-generated reader sets a missing init property
+    // to 0 instead of its default, and 0 is never a valid duck percent.
     private static HostSettings Normalize(ulong address, HostSettings settings)
     {
         if (settings.DuckPercent == 0)
@@ -545,8 +536,7 @@ public sealed class SettingsStore
         return settings;
     }
 
-    // Each field falls back on its own: missing, empty or invalid modes -> all; an unknown or missing model -> the
-    // mode's default; an unknown enhancement -> Off.
+    // Each field falls back on its own, so one bad value does not reset the others.
     private static MicConfig LoadMic(MicFile file)
     {
         if (!MicConfig.TryParseModes(file.Modes, out HashSet<MicMode> modes))
@@ -590,7 +580,6 @@ public sealed class SettingsStore
         return new MicFile { Modes = modes, Models = models, Enhancement = config.Enhancement };
     }
 
-    // Lower-camel, e.g. VoiceIsolation -> "voiceIsolation".
     private static string ModeName(MicMode mode) => JsonNamingPolicy.CamelCase.ConvertName(mode.ToString());
 
     // One-time import of %UserProfile%\.wpods\device_settings.jsonl (left in place).
@@ -624,7 +613,6 @@ public sealed class SettingsStore
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            // Nothing to migrate.
             Log.Warn("settings", $"legacy settings not migrated: {e.Message}");
         }
     }
@@ -712,7 +700,7 @@ public sealed class SettingsStore
     {
         Directory.CreateDirectory(_directory);
         string temp = path + ".tmp";
-        // Data on disk before the rename: after a power loss NTFS can keep the rename but lose unflushed data.
+        // Flushed before the rename: after a power loss NTFS can keep the rename but lose unflushed data.
         using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
         {
             stream.Write(data);
@@ -726,22 +714,21 @@ internal sealed class SettingsFile
 {
     public string? LastUsed { get; set; }
     public UiPrefs? Ui { get; set; }
-    /// <summary>App-wide mic settings (optional; older files have none, missing = <see cref="MicConfig.Default"/>).</summary>
+    /// <summary>Missing means <see cref="MicConfig.Default"/>.</summary>
     public MicFile? Mic { get; set; }
     public Dictionary<string, HostSettings> Devices { get; set; } = [];
     public Dictionary<string, DeviceModel> Models { get; set; } = [];
     public Dictionary<string, DeviceCapabilities> Capabilities { get; set; } = [];
-    /// <summary>Stem press-and-hold cycle per pair (optional; older files have none).</summary>
     public Dictionary<string, StemModes> StemModes { get; set; } = [];
-    /// <summary>Ear detection (0x0A) per pair (optional; older files have none, missing = on).</summary>
+    /// <summary>Ear detection (0x0A) per pair; missing means on.</summary>
     public Dictionary<string, bool> EarDetection { get; set; } = [];
-    /// <summary>Allow Off (0x34) per pair (optional; older files have none, missing = off).</summary>
+    /// <summary>Allow Off (0x34) per pair; missing means off.</summary>
     public Dictionary<string, bool> AllowOff { get; set; } = [];
-    /// <summary>Microphone side (0x01) per pair (optional; older files have none, missing = Automatic).</summary>
+    /// <summary>Microphone side (0x01) per pair; missing means Automatic.</summary>
     public Dictionary<string, MicSide> MicSide { get; set; } = [];
-    /// <summary>Last seen pod-saved settings per pair, for display only (optional; older files have none).</summary>
+    /// <summary>Last seen pod-saved settings per pair, for display only.</summary>
     public Dictionary<string, PodSettings> PodSettings { get; set; } = [];
-    /// <summary>Install date (UTC) of each pair's Windows device entry, for re-pair detection (optional; older files have none).</summary>
+    /// <summary>Install date (UTC) of each pair's Windows device entry, for re-pair detection.</summary>
     public Dictionary<string, DateTime> PairingDates { get; set; } = [];
 }
 

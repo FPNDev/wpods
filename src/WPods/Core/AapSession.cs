@@ -1,4 +1,5 @@
-using Microsoft.Win32.SafeHandles;
+using System.Buffers.Binary;
+using System.IO.Pipes;
 
 namespace WPods.Core;
 
@@ -9,21 +10,17 @@ internal enum SessionEnd
 {
     /// <summary>Closed by WPods.</summary>
     Closed,
-    /// <summary>Driver reported 1167: the ACL link is gone.</summary>
+    /// <summary>The service ended the channel with 1167: the ACL link is gone.</summary>
     LinkLost,
-    /// <summary>Any other read error or end of stream while the session was open.</summary>
+    /// <summary>Any other channel end (closed by the AirPods, other error), read error or end of stream.</summary>
     Failed,
-    /// <summary>
-    /// Closed by the session itself: no handshake reply, the feature flags or notification request not written, or no
-    /// 0x09 setting within InitialReportTimeout (the initial report never came).
-    /// </summary>
+    /// <summary>Closed by the session itself: no handshake reply, init writes failed, or the initial 0x09 report never came.</summary>
     NoInitialReport,
 }
 
 /// <summary>
-/// One open NTAPD channel. Threading: <see cref="PacketReceived"/> fires on the read loop (a thread-pool thread,
-/// one packet at a time). <see cref="Changed"/> fires on a thread-pool thread (read loop, command, heart-rate
-/// completion or settings save), serialized under the state lock. Handlers must not block (marshal to the UI with BeginInvoke).
+/// One open AAP channel through WPods.Service. PacketReceived fires on the read loop, Changed on thread-pool threads
+/// serialized under the state lock. Handlers must not block.
 /// </summary>
 public sealed class AapSession : IAsyncDisposable
 {
@@ -33,25 +30,20 @@ public sealed class AapSession : IAsyncDisposable
     private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan KeysTimeout = TimeSpan.FromSeconds(3);
-    // Live (AirPods Pro 2): the full 0x09 settings report (~17 settings in ~90 ms, no end marker) arrives within
-    // ~90 ms of the handshake reply on some attaches, but 4-31 s later on others (log 2026-10-22). The initial
-    // report ends 1 s after the first 0x09 (never before 1 s after the notification request); without one within the
-    // timeout the session closes itself (SessionEnd.NoInitialReport) and ConnectionManager reopens it.
+    // The 0x09 settings report has no end marker and may come right after the handshake or over 30 s later. It counts
+    // as done 1 s after the first 0x09; without one in time the session closes itself and is reopened.
     private static readonly TimeSpan InitialReportWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan InitialReportTimeout = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan HeartRateFirstReadingTimeout = TimeSpan.FromSeconds(12);
-    // After a listening-mode request, device reports of other modes (echoes of earlier requests) are ignored until
-    // the device reports the requested mode or this passes
-    private static readonly TimeSpan ListeningModeHold = TimeSpan.FromSeconds(1.5);
     private const int HeartRateAttempts = 3;
     private const uint HeartRatePeriodUs = 1_000_000;
 
-    // FileStream, not RandomAccess: RandomAccess rejects the NTAPD handle (not seekable) with NotSupportedException.
-    private readonly FileStream _stream;
+    // The open AAP pipe (message mode): one packet per message out; in, a kind byte, then a packet or the channel end.
+    private readonly NamedPipeClientStream _stream;
     private readonly SettingsStore _settings;
-    private readonly byte[] _readBuffer = new byte[ReadBufferSize];
+    private readonly byte[] _readBuffer = new byte[1 + ReadBufferSize];
     private readonly SemaphoreSlim _writeGate = new(1, 1);
-    // Serializes stem-cycle (0x1A) writes (attach write, SetStemModesAsync, the Allow Off fix) so they never interleave.
+    // Serializes stem-cycle (0x1A) writes from attach, SetStemModesAsync and Allow Off.
     private readonly SemaphoreSlim _stemGate = new(1, 1);
     // Serializes SetHeartRateAsync (user toggles and the restart after a re-attach).
     private readonly SemaphoreSlim _heartRateGate = new(1, 1);
@@ -71,15 +63,16 @@ public sealed class AapSession : IAsyncDisposable
     private DeviceCapabilities _savedReported;
     // Pod-saved settings last queued for settings; guarded by _stateLock.
     private PodSettings _savedPodSettings;
-    // Settings writes run on the save task (RunSaves), never on the read loop (which also delivers mic audio) or under
-    // _stateLock. One pending save per kind: a newer one replaces it, so a burst is one write and the last value wins.
-    // Guarded by _saveLock; _saveRunning is true from the first queued save until RunSaves finds nothing left.
+    // True while WatchListeningModesAsync runs; guarded by _stateLock.
+    private bool _watchingModes;
+    private bool _callAudio;
+    // Settings writes run on the save task, never on the read loop (which also carries mic audio) or under _stateLock.
+    // One pending save per kind, so a burst is one write and the last value wins. Guarded by _saveLock.
     private readonly Lock _saveLock = new();
     private Dictionary<string, Action> _pendingSaves = [];
     private bool _saveRunning;
     private Task _saves = Task.CompletedTask;
-    // Set before _life is cancelled when initialization failed or no initial report came; the read loop then ends with
-    // NoInitialReport.
+    // Set before _life is cancelled so the read loop ends with NoInitialReport.
     private bool _noInitialReport;
     // Heart rate ran in the session this one replaced (CarryOver): started again once Ready.
     private bool _resumeHeartRate;
@@ -87,18 +80,21 @@ public sealed class AapSession : IAsyncDisposable
     private int _audioCount;
     private long _audioWindowStart;
 
-    internal AapSession(ulong address, SafeFileHandle handle, SettingsStore settings)
+    /// <param name="productId">The pair's Bluetooth product ID (<see cref="LinkDevice.ProductId"/>), 0 when unknown.</param>
+    internal AapSession(ulong address, NamedPipeClientStream stream, SettingsStore settings, ushort productId)
     {
         Address = address;
-        _stream = new FileStream(handle, FileAccess.ReadWrite, bufferSize: 0, isAsync: true);
+        _stream = stream;
         _settings = settings;
-        DeviceCapabilities baseline = Models.FromModelNumber(settings.GetModel(address)?.Number)?.Capabilities ?? DeviceCapabilities.None;
+        // The AirPods send 0x1D (model) only once this PC is their active device, which can take half a minute; until
+        // then the stored or product-ID model is used but not saved.
+        string? modelNumber = settings.GetModel(address)?.Number ?? Models.ModelNumberOf(productId);
+        DeviceCapabilities baseline = Models.FromModelNumber(modelNumber)?.Capabilities ?? DeviceCapabilities.None;
         _savedPodSettings = settings.GetPodSettings(address);
-        State = new DeviceState(settings.GetCapabilities(address), baseline, _savedPodSettings);
+        State = new DeviceState(settings.GetCapabilities(address), baseline, _savedPodSettings) { ModelNumber = modelNumber };
         _savedReported = State.Reported;
-        // The AirPods never report 0x0A, 0x01 or 0x34, so the
-        // stored values are the state from the start and are written on attach; a device report of 0x0A or 0x01
-        // replaces them (OnPacket).
+        // The AirPods never report 0x0A, 0x01 or 0x34, so the stored values are the starting state and are written on
+        // attach; a device report of 0x0A or 0x01 still replaces them.
         State.SetSetting(Aap.EarDetectionId, Aap.Bool(settings.GetEarDetection(address)));
         State.SetSetting(Aap.MicSideId, (byte)settings.GetMicSide(address));
         State.SetSetting(Aap.AllowOffId, Aap.Bool(settings.GetAllowOff(address)));
@@ -114,12 +110,17 @@ public sealed class AapSession : IAsyncDisposable
     /// <summary>At most one per inbound packet or command; never raised when nothing changed.</summary>
     public event Action<DeviceChange>? Changed;
 
+    /// <summary>Call audio (Hands-Free) starts being set up on this link (true) or ends; raised on the read loop.</summary>
+    public event Action<bool>? CallAudioChanged;
+
+    /// <summary>Call audio is being set up or is up on this link.</summary>
+    public bool CallAudio => Volatile.Read(ref _callAudio);
+
     internal Task<SessionEnd> Completion => _readLoop;
 
     /// <summary>
-    /// Automatic re-attach after no initial report (ConnectionManager), before <see cref="Start"/>: the UI keeps showing
-    /// <paramref name="previous"/>'s battery and ear until this session reports its own, and heart rate is started
-    /// again once Ready if it was not Off there.
+    /// Automatic re-attach, before <see cref="Start"/>: shows the previous session's battery and ear state until this
+    /// one reports its own, and restarts heart rate once Ready if it was on.
     /// </summary>
     internal void CarryOver(AapSession previous)
     {
@@ -133,10 +134,7 @@ public sealed class AapSession : IAsyncDisposable
         _ = InitializeAsync();
     }
 
-    /// <summary>
-    /// Writes one packet through the serialized writer. False when the session is closed, the write failed or
-    /// timed out; throws <see cref="OperationCanceledException"/> when <paramref name="ct"/> is cancelled.
-    /// </summary>
+    /// <summary>False when the session is closed or the write failed or timed out; throws only when <paramref name="ct"/> is cancelled.</summary>
     public async ValueTask<bool> WriteAsync(ReadOnlyMemory<byte> packet, CancellationToken ct = default)
     {
         await _writeGate.WaitAsync(ct).ConfigureAwait(false);
@@ -169,24 +167,24 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Requests <paramref name="mode"/>. Until the device reports it (or 1.5 s pass, then the device's latest report
-    /// wins) device reports of other modes are ignored, so echoes of earlier requests cause no flicker. A newer
-    /// request replaces the pending one.
-    /// </summary>
+    /// <summary>The newest request stays shown until reported back, so echoes of earlier requests cause no flicker.</summary>
     public async ValueTask<bool> SetListeningModeAsync(ListeningMode mode, CancellationToken ct = default)
     {
         if (!Enum.IsDefined(mode))
         {
             throw new ArgumentOutOfRangeException(nameof(mode));
         }
-        int serial;
+        int id;
         lock (_stateLock)
         {
-            serial = State.HoldListeningMode((byte)mode, ListeningModeHold);
+            id = State.PushListeningMode((byte)mode);
+            if (!_watchingModes)
+            {
+                _watchingModes = true;
+                _ = WatchListeningModesAsync();
+            }
         }
-        Log.Info("aap", $"listening mode {mode} requested (hold {serial}); other reports ignored for up to {ListeningModeHold.TotalSeconds} s");
-        _ = ReleaseListeningModeAsync(serial);
+        Log.Info("aap", $"listening mode {mode} requested");
         byte[] packet = Aap.Setting(Aap.ListeningModeId, (byte)mode);
         bool written;
         try
@@ -195,18 +193,18 @@ public sealed class AapSession : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            ReleaseListeningMode(serial);
+            DropListeningMode(id);
             throw;
         }
         if (!written)
         {
-            ReleaseListeningMode(serial);
+            DropListeningMode(id);
             return false;
         }
         lock (_stateLock)
         {
-            // Optimistic update, unless a newer request already replaced this one.
-            if (State.IsCurrentHold(serial) && Aap.ApplySetting(packet, State) is var change && change != DeviceChange.None)
+            // Optimistic update, unless a newer request was made meanwhile.
+            if (State.IsNewestListeningMode(id) && Aap.ApplySetting(packet, State) is var change && change != DeviceChange.None)
             {
                 Changed?.Invoke(change);
                 SavePodSettings(change);
@@ -215,7 +213,7 @@ public sealed class AapSession : IAsyncDisposable
         return true;
     }
 
-    /// <summary>Writes 0x0A and, when written, stores it for the pair (written again on every attach).</summary>
+    /// <summary>Writes 0x0A; once written it is stored and written again on every attach.</summary>
     public async ValueTask<bool> SetEarDetectionAsync(bool on, CancellationToken ct = default)
     {
         if (!await SendSettingAsync(Aap.Setting(Aap.EarDetectionId, Aap.Bool(on)), ct).ConfigureAwait(false))
@@ -236,10 +234,8 @@ public sealed class AapSession : IAsyncDisposable
         SendSettingAsync(Aap.Setting(Aap.OneBudAncId, Aap.Bool(on)), ct);
 
     /// <summary>
-    /// Writes 0x34 (allow Off) and, when written, stores it for the pair (written again on every attach). Off also
-    /// drops <see cref="StemModes.Off"/> from the stored stem cycle (written and stored) and moves the Off listening
-    /// mode to Transparency; on leaves the cycle as is. Throws
-    /// <see cref="InvalidOperationException"/> when the pair lacks the Allow Off capability.
+    /// Writes 0x34; once written it is stored and written again on every attach. Off also drops Off from the stem cycle
+    /// and moves an Off listening mode to Transparency.
     /// </summary>
     public async ValueTask<bool> SetAllowOffAsync(bool on, CancellationToken ct = default)
     {
@@ -259,7 +255,7 @@ public sealed class AapSession : IAsyncDisposable
         return true;
     }
 
-    /// <summary>Writes 0x01 and, when written, stores it for the pair (written again on every attach).</summary>
+    /// <summary>Writes 0x01; once written it is stored and written again on every attach.</summary>
     public async ValueTask<bool> SetMicSideAsync(MicSide side, CancellationToken ct = default)
     {
         if (!Enum.IsDefined(side))
@@ -292,12 +288,7 @@ public sealed class AapSession : IAsyncDisposable
         return SendSettingAsync(Aap.Setting(Aap.HoldDurationId, (byte)duration), ct);
     }
 
-    /// <summary>
-    /// Sets the stem press-and-hold cycle: writes 0x1A = <paramref name="modes"/>; stores it for the pair (written again
-    /// on every attach) only when written. Throws <see cref="ArgumentOutOfRangeException"/> for fewer than
-    /// two modes or unknown bits, <see cref="InvalidOperationException"/> when the pair lacks the listening-mode
-    /// capability, or the Adaptive capability for a mask with Adaptive.
-    /// </summary>
+    /// <summary>Writes the stem press-and-hold cycle (0x1A); once written it is stored and written again on every attach.</summary>
     public async ValueTask<bool> SetStemModesAsync(StemModes modes, CancellationToken ct = default)
     {
         if (!Aap.IsValidStemModes(modes))
@@ -352,10 +343,8 @@ public sealed class AapSession : IAsyncDisposable
     public Task<bool> SetMediaAssistMediaAsync(bool on, CancellationToken ct = default) => SetHearingModesAsync(null, null, on, ct);
 
     /// <summary>
-    /// Sets Hearing Aid (0x2C) and Media Assist for calls / media (0x53 record flags); null keeps what is shown. They
-    /// share Hearing Assist (0x33), on while any of them is on. A raw byte is written only when it differs, so a flag
-    /// left on under 0x33 off (shown off) is written off before 0x33 turns on. 0x33 turning on: the others, 300 ms,
-    /// 0x33. Off: 0x33, 300 ms, the others. Requires enrollment; Media Assist also a reported 0x53 record.
+    /// Hearing Aid (0x2C) and Media Assist (0x53) share Hearing Assist (0x33), on while any is on; null keeps the shown
+    /// value. Turning 0x33 on writes the others first, turning it off writes 0x33 first, 300 ms apart.
     /// </summary>
     private async Task<bool> SetHearingModesAsync(bool? hearingAid, bool? calls, bool? media, CancellationToken ct)
     {
@@ -437,9 +426,8 @@ public sealed class AapSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Starts (up to 3 attempts, 12 s each for a first reading) or stops the heart-rate stream. Stopping cancels
-    /// and awaits any running start sequence first, so it can never re-enable the stream. Calls are serialized (user
-    /// toggles and the restart after a re-attach): the last one wins and two start sequences never run at once.
+    /// Starts (3 attempts of 12 s each for a first reading) or stops the heart-rate stream. Calls are serialized and a
+    /// stop awaits any running start, so the last call wins.
     /// </summary>
     public async Task<bool> SetHeartRateAsync(bool on)
     {
@@ -512,7 +500,7 @@ public sealed class AapSession : IAsyncDisposable
         }
         finally
         {
-            // Always: the NTAPD handle is exclusive, a leaked one fails every re-attach.
+            // Always: the service allows one client per channel (170), a leaked pipe fails every re-attach.
             _heartRateCts?.Dispose();
             await _stream.DisposeAsync().ConfigureAwait(false);
         }
@@ -531,9 +519,46 @@ public sealed class AapSession : IAsyncDisposable
                     Log.Warn("aap", "read: end of stream");
                     return SessionEnd.Failed;
                 }
+                if (_readBuffer[0] == ServicePipes.AapEnded)
+                {
+                    // The service closes the pipe after this message.
+                    if (count < 5)
+                    {
+                        Log.Warn("aap", "read: channel ended, no error code");
+                        return SessionEnd.Failed;
+                    }
+                    int error = BinaryPrimitives.ReadInt32LittleEndian(_readBuffer.AsSpan(1));
+                    if (error == Native.ErrorDeviceNotConnected)
+                    {
+                        Log.Warn("aap", "read: channel ended, 1167 (device not connected)");
+                        return SessionEnd.LinkLost;
+                    }
+                    Log.Warn("aap", $"read: channel ended, Win32 error {error}{(error == 0 ? " (closed by the AirPods)" : "")}");
+                    return SessionEnd.Failed;
+                }
+                if (_readBuffer[0] == ServicePipes.AapCallAudio && count >= 2)
+                {
+                    bool on = _readBuffer[1] != 0;
+                    Volatile.Write(ref _callAudio, on);
+                    Log.Info("aap", $"call audio {(on ? "starting" : "ended")} on the link");
+                    try
+                    {
+                        CallAudioChanged?.Invoke(on);
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Error("aap", "call audio handler failed", e);
+                    }
+                    continue;
+                }
+                if (_readBuffer[0] != ServicePipes.AapPacket)
+                {
+                    Log.Warn("aap", $"read: unknown message kind 0x{_readBuffer[0]:X2} ({count} bytes), ignored");
+                    continue;
+                }
                 try
                 {
-                    OnPacket(new ReadOnlySpan<byte>(_readBuffer, 0, count));
+                    OnPacket(new ReadOnlySpan<byte>(_readBuffer, 1, count - 1));
                 }
                 catch (Exception e)
                 {
@@ -545,11 +570,6 @@ public sealed class AapSession : IAsyncDisposable
         catch (Exception) when (ct.IsCancellationRequested)
         {
             return _noInitialReport ? SessionEnd.NoInitialReport : SessionEnd.Closed;
-        }
-        catch (IOException e) when ((e.HResult & 0xFFFF) == Native.ErrorDeviceNotConnected)
-        {
-            Log.Warn("aap", $"read failed: 0x{e.HResult:X8} (1167, device not connected)");
-            return SessionEnd.LinkLost;
         }
         catch (Exception e) when (e is IOException or OperationCanceledException or UnauthorizedAccessException)
         {
@@ -595,7 +615,7 @@ public sealed class AapSession : IAsyncDisposable
             Log.Info("aap", $"device reports ear detection {(packet[7] == 0x01 ? "on" : "off")}; stored");
             SaveEarDetection(packet[7] == 0x01);
         }
-        // Same for mic side (0x01): 00 Automatic, 01 Right, 02 Left.
+        // Mic side (0x01): 00 Automatic, 01 Right, 02 Left.
         if (isSetting && packet[6] == Aap.MicSideId && packet[7] <= 0x02)
         {
             Log.Info("aap", $"device reports mic side {(MicSide)packet[7]}; stored");
@@ -655,9 +675,8 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // Handshake -> (any reply) -> 100 ms -> feature flags -> notifications (filter carries the stored ear detection)
-    // -> 1 s -> stem modes -> ear detection -> mic side -> proximity keys (one retry). The initial report ends separately
-    // (FinishInitialReportAsync).
+    // Handshake -> any reply -> 100 ms -> feature flags -> notifications (filter carries the stored ear detection)
+    // -> 1 s -> allow off -> stem modes -> ear detection -> mic side -> proximity keys (one retry).
     private async Task InitializeAsync()
     {
         CancellationToken ct = _life.Token;
@@ -740,8 +759,8 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // Ends the initial report ("checking" off) InitialReportWindow after the device's first 0x09 setting, counted from
-    // Ready when it came earlier. Without one within InitialReportTimeout the session closes itself (NoInitialReport).
+    // Ends the initial report ("checking" off) InitialReportWindow after the first 0x09 setting, at the earliest that
+    // long after Ready. Without one within InitialReportTimeout the session closes itself.
     private async Task FinishInitialReportAsync(Task firstSetting, CancellationToken ct)
     {
         try
@@ -769,8 +788,7 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // The read loop then ends with NoInitialReport and ConnectionManager reopens the session. A session already closing
-    // (a write skipped because _life was cancelled) stays Closed.
+    // The read loop then ends with NoInitialReport and the session is reopened; a session already closing stays Closed.
     private async Task CloseWithoutInitialReportAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -827,27 +845,43 @@ public sealed class AapSession : IAsyncDisposable
         return true;
     }
 
-    // Ends listening-mode hold <paramref name="serial"/> after ListeningModeHold unless the device confirmed it or a
-    // newer request replaced it.
-    private async Task ReleaseListeningModeAsync(int serial)
+    // Drops sent listening modes after DeviceState.ListeningModeQuietMs without a request or report.
+    private async Task WatchListeningModesAsync()
     {
-        try
+        while (true)
         {
-            await Task.Delay(ListeningModeHold, _life.Token).ConfigureAwait(false);
+            long wait;
+            lock (_stateLock)
+            {
+                (bool changed, wait) = State.ExpireListeningModes();
+                if (changed)
+                {
+                    Changed?.Invoke(DeviceChange.ListeningMode);
+                    SavePodSettings(DeviceChange.ListeningMode);
+                }
+                if (wait <= 0)
+                {
+                    _watchingModes = false;
+                    return;
+                }
+            }
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(wait), _life.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Session closed.
+                return;
+            }
         }
-        catch (OperationCanceledException)
-        {
-            // Session closed.
-            return;
-        }
-        ReleaseListeningMode(serial);
     }
 
-    private void ReleaseListeningMode(int serial)
+    private void DropListeningMode(int id)
     {
         lock (_stateLock)
         {
-            if (State.ReleaseListeningMode(serial))
+            if (State.DropListeningMode(id))
             {
                 Changed?.Invoke(DeviceChange.ListeningMode);
                 SavePodSettings(DeviceChange.ListeningMode);
@@ -855,8 +889,7 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // iOS writes 0x1A on every reconnect and the AirPods never report it on attach (research-r17 section 2), so
-    // the stored mask is written 1 s after the notification request. Adaptive is dropped for a pair without Adaptive.
+    // iOS writes 0x1A on every reconnect and the AirPods never report it on attach, so the stored mask is written.
     private async Task WriteStemModesOnAttachAsync(CancellationToken ct)
     {
         DeviceCapabilities capabilities = State.Capabilities;
@@ -917,8 +950,6 @@ public sealed class AapSession : IAsyncDisposable
         return modes;
     }
 
-    // Allow Off turned off: drops Off from the stored cycle (written and stored), then moves the Off listening mode
-    // to Transparency.
     private async Task EnforceAllowOffAsync(CancellationToken ct)
     {
         await _stemGate.WaitAsync(ct).ConfigureAwait(false);
@@ -1012,9 +1043,8 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // Under _stateLock, after a change was raised. Once the initial report ended (values before it may be partial),
-    // remembers the pod-saved settings for display while the next attach waits for its report; a setting this session
-    // never reported keeps its remembered value. Queued only when changed.
+    // Under _stateLock. Remembers pod settings for display on the next attach, only once the initial report ended
+    // (earlier values may be partial).
     private void SavePodSettings(DeviceChange change)
     {
         if (!State.InitialReportDone || (change & (DeviceChange.ListeningMode | DeviceChange.Settings | DeviceChange.InitialReport)) == 0)
@@ -1038,7 +1068,6 @@ public sealed class AapSession : IAsyncDisposable
         QueueSave("capabilities", () => _settings.SetCapabilities(Address, reported));
     }
 
-    // Replaces the pending save of this kind and starts RunSaves unless it is running.
     private void QueueSave(string what, Action save)
     {
         lock (_saveLock)
@@ -1052,8 +1081,8 @@ public sealed class AapSession : IAsyncDisposable
         }
     }
 
-    // One run at a time, so saves of one kind are written in queue order; never throws (DisposeAsync awaits it). A
-    // failed write is logged; SettingsStore keeps the value in memory, so its next file write (any setting) includes it.
+    // One run at a time, so saves of one kind stay in order; never throws (DisposeAsync awaits it). A failed value
+    // stays in SettingsStore memory and goes out with its next file write.
     private void RunSaves()
     {
         while (true)

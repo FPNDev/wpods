@@ -30,7 +30,7 @@ public static class Mac
         return count == 12 && ulong.TryParse(digits, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out address);
     }
 
-    /// <summary>Address in an NTAPD interface path: "&amp;" + 12 hex digits + "_c".</summary>
+    /// <summary>Finds "&amp;" + 12 hex digits + "_c" in an AAP service devnode id (...&amp;0&amp;40DA5C668CB3_C00000000).</summary>
     internal static bool TryParseInterfacePath(ReadOnlySpan<char> path, out ulong address)
     {
         for (int i = 0; i + 15 <= path.Length; i++)

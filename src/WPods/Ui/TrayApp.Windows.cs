@@ -11,7 +11,7 @@ internal sealed partial class TrayApp
     private static readonly TimeSpan SuspendAfter = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DestroyAfter = TimeSpan.FromMinutes(10);
 
-    // tokens.css bg-window / surface-flyout, so the window never flashes another colour before the page paints.
+    // Match tokens.css bg-window / surface-flyout, so the window never flashes another colour before the page paints.
     private static readonly Color MainLight = Color.FromArgb(0xF2, 0xF2, 0xF4);
     private static readonly Color MainDark = Color.FromArgb(0x1C, 0x1C, 0x1F);
     private static readonly Color PopupLight = Color.FromArgb(0xFB, 0xFB, 0xFC);
@@ -33,7 +33,7 @@ internal sealed partial class TrayApp
     // No offers: the popup is hidden and kept for the next case open (see ParkPopup).
     private bool _popupParked;
     private bool _popupSuspendPending;
-    // Popups open on their own (case open): their WebView2 failure balloon shows once per run.
+    // The popup opens on its own, so its WebView2 failure balloon shows once per run.
     private bool _popupFailureShown;
 
     private bool Dark => _prefs.Theme == "dark" || (_prefs.Theme == "auto" && !_appsLight);
@@ -139,7 +139,7 @@ internal sealed partial class TrayApp
         _hideTimer.Start();
     }
 
-    // 30 s hidden: suspend the page; 10 min hidden: destroy the window and its WebView2.
+    // Suspends the hidden page after SuspendAfter and destroys the window after DestroyAfter.
     private async void OnHideTimer(object? sender, EventArgs e)
     {
         _hideTimer.Stop();
@@ -186,7 +186,7 @@ internal sealed partial class TrayApp
         }
     }
 
-    // A WebView2 process died (UI thread; the pane is no longer Ready): rebuild that window's page.
+    // A WebView2 process died and the pane is no longer Ready: rebuild that window's page.
     private void OnPaneFailed(WebPane pane, CoreWebView2ProcessFailedKind kind)
     {
         if (kind == CoreWebView2ProcessFailedKind.BrowserProcessExited)
@@ -215,7 +215,7 @@ internal sealed partial class TrayApp
         }, (this, pane));
     }
 
-    /// <summary>Last position (or centred on the primary work area), 400 x remembered height DIPs at that monitor's DPI.</summary>
+    /// <summary>Last position, else centred on the primary work area; scaled to that monitor's DPI.</summary>
     private Rectangle MainBounds()
     {
         (Rectangle area, uint dpi) = _mainPosition is { } position ? NativeUi.MonitorAt(position) : NativeUi.PrimaryMonitor();
@@ -254,6 +254,9 @@ internal sealed partial class TrayApp
         WritePrefs(w);
         w.WriteBoolean("startup", StartupRegistration.IsEnabled());
         w.WriteBoolean("firstRun", !_prefs.FirstRunDone);
+        w.WriteBoolean("adapterUnsupported", _adapterUnsupported);
+        w.WriteBoolean("restartPending", _restartPending);
+        WriteUpdate(w);
         WriteDevices(w);
         if (Selected() is { } selected)
         {
@@ -277,13 +280,16 @@ internal sealed partial class TrayApp
         }
     }
 
-    // Re-show of a page that has its init: what can change while it is hidden (sends to a hidden page are dropped).
+    // Re-show of an initialized page: resends what may have changed while hidden, since hidden sends are dropped.
     private void SendMainRefresh(WebPane pane)
     {
         Array.Clear(_lastSent);
         PostVisibility(pane, true);
         SendMainDeltas(Dirty.Devices | Dirty.Session | Dirty.Mic, _session?.State);
         SendStartupPref();
+        SendUpdate();
+        SendAdapter();
+        SendRestart();
         Utf8JsonWriter w = _writer.Begin("accent");
         MessageWriter.WriteAccent(w, _accent);
         PostMain(_writer.End());
@@ -299,7 +305,6 @@ internal sealed partial class TrayApp
         }
     }
 
-    // attached ?? last used ?? first device.
     private ulong? Selected()
     {
         if (_session is { } session)
@@ -314,7 +319,6 @@ internal sealed partial class TrayApp
         return _devices.Count > 0 ? _devices[0].Address : null;
     }
 
-    /// <summary>theme, useAccent, accent.</summary>
     private void WritePrefs(Utf8JsonWriter w)
     {
         w.WriteString("theme", _prefs.Theme);
@@ -378,8 +382,8 @@ internal sealed partial class TrayApp
         }
     }
 
-    // No offers: hide the popup and keep its page, so the next case open skips the WebView2 cold start.
-    // The empty offers make the page hide its card and report height 0. 30 s parked: suspend; 10 min: destroy.
+    // Hides the popup but keeps its page, so the next case open skips the WebView2 cold start.
+    // The empty offers make the page hide its card and report height 0.
     private void ParkPopup()
     {
         if (_popup is not { } window || _popupParked)
@@ -481,7 +485,7 @@ internal sealed partial class TrayApp
         }
     }
 
-    // 320 DIPs wide, 12 DIPs from the bottom-right corner of the primary work area (which excludes the taskbar).
+    // Bottom-right corner of the primary work area, which excludes the taskbar.
     private void PlacePopup()
     {
         if (_popup is not { } window || _popupHeight <= 0)
@@ -550,7 +554,7 @@ internal sealed partial class TrayApp
         w.WriteEndArray();
     }
 
-    // Win+Shift+A while the popup shows: activate it (allowed: the hotkey gave this process the foreground) and focus its main action.
+    // Win+Shift+A: the hotkey grants this process the foreground, so the popup may take it.
     private void OnHotKey()
     {
         if (_popup is not { } window || !_popupShown)
@@ -572,7 +576,7 @@ internal sealed partial class TrayApp
         _popup?.SetTheme(PopupBackground, Dark);
     }
 
-    /// <summary>prefs to the popup page (the main page changed them itself).</summary>
+    /// <summary>Only the popup needs this; the main page applied the change itself.</summary>
     private void SendPrefsToPopup()
     {
         if (_popup is null)

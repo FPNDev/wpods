@@ -9,9 +9,8 @@ using WPods.Nearby;
 namespace WPods.Ui;
 
 /// <summary>
-/// Owns the UI: tray icon, main window, nearby popup, notifications and the page protocol (ui-protocol.md).
-/// Core events arrive on thread-pool threads and only set dirty flags; one posted <see cref="Flush"/> per burst then
-/// reads the current state on the UI thread, updates the tray and sends each changed message once.
+/// Owns the UI: tray icon, main window, nearby popup, notifications and the page protocol.
+/// Core events only set dirty flags; one posted <see cref="Flush"/> per burst sends the changes from the UI thread.
 /// </summary>
 internal sealed partial class TrayApp : ApplicationContext
 {
@@ -53,6 +52,8 @@ internal sealed partial class TrayApp : ApplicationContext
     private sealed record ToastRequest(string Id, ulong Device, string? Code);
 
     private const int LowBatteryPercent = 10;
+    // How long the service must be down without a break before the B1 toast.
+    private const int ServiceDownToastMs = 10_000;
     private const char MiddleDot = (char)0xB7;
     private static readonly string[] PartLabels = ["battery.left", "battery.right", "battery.case", "battery.max"];
 
@@ -73,6 +74,13 @@ internal sealed partial class TrayApp : ApplicationContext
     private readonly Dictionary<ulong, NearbyOffer> _offerByAddress = [];
     // Toasts raised together (e.g. on attach) are all shown, in order.
     private readonly ConcurrentQueue<ToastRequest> _toasts = new();
+    private readonly ServiceStatus _service = new();
+    private readonly System.Windows.Forms.Timer _serviceDownTimer = new() { Interval = ServiceDownToastMs };
+    private string _updateError = "";
+    // No Bluetooth adapter is connected over USB (B3): the window shows only that.
+    private bool _adapterUnsupported;
+    // The service starts only after the Windows restart usbip-win2 needs: the window asks for it.
+    private bool _restartPending;
 
     private UiPrefs _prefs;
     private ResolvedLocale _locale;
@@ -85,7 +93,7 @@ internal sealed partial class TrayApp : ApplicationContext
     private MicStatus _micSeen;
     private int _lowLatencyFailures;
     private ulong _lastAttached;
-    // settings.json could not be loaded: the S1 toast waits for the first page init (UI thread).
+    // settings.json could not be loaded: the S1 toast waits for the first page init.
     private bool _settingsResetPending;
 
     // UI-thread state, refreshed by Flush.
@@ -142,7 +150,11 @@ internal sealed partial class TrayApp : ApplicationContext
         nearby.OffersChanged += () => MarkDirty(Dirty.Offers);
         nearby.NearbyChanged += () => MarkDirty(Dirty.Devices);
         Program.ActivationRequested += () => _ui.Post(static s => ((TrayApp)s!).ShowMain(), this);
+        _service.Changed += state => _ui.Post(_ => OnServiceState(state), null);
+        _serviceDownTimer.Tick += OnServiceDownTimer;
         _settingsResetPending = settings.LoadFailed;
+        // Updates run in the service; the app only shows them and forwards the user's choices.
+        _service.UpdateChanged += info => _ui.Post(_ => OnUpdate(info), null);
 
         _devices = connections.GetDevices();
         UpdateTray();
@@ -151,6 +163,7 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             ShowMain();
         }
+        _service.Start();
     }
 
     private bool MainLive => _main is { Pane.Ready: true } && _mainShown;
@@ -197,7 +210,7 @@ internal sealed partial class TrayApp : ApplicationContext
     private void OnSessionChanged(DeviceChange change)
     {
         Dirty dirty = Dirty.None;
-        // Shown pod-saved values follow "checking" (remembered ones while it is on), so they are resent when it may end.
+        // Shown pod-saved values depend on "checking", so they are resent whenever it may end.
         if ((change & DeviceChange.Connection) != 0)
         {
             dirty |= Dirty.Status | Dirty.ListeningMode | Dirty.Settings;
@@ -244,7 +257,7 @@ internal sealed partial class TrayApp : ApplicationContext
         }
     }
 
-    // CM notification thread. A link that comes up ends a user connect's wait; a link drop is only a status change.
+    // CM notification thread. A link coming up ends a user connect's wait; a drop is only a status change.
     private void OnLinkChanged(ulong address, bool up)
     {
         if (up)
@@ -270,7 +283,7 @@ internal sealed partial class TrayApp : ApplicationContext
         MarkDirty(Dirty.HostSettings);
     }
 
-    // Under MicPipeline's lock (serialized). Any move into Problem while an app captures toasts, with the fault code.
+    // Under MicPipeline's lock. Entering Problem while an app captures shows a toast with the fault code.
     private void OnMicStatus(MicStatus status)
     {
         if (status == MicStatus.Problem && _micSeen != MicStatus.Problem && _mic.Capturing)
@@ -281,7 +294,7 @@ internal sealed partial class TrayApp : ApplicationContext
         MarkDirty(Dirty.Mic);
     }
 
-    // Raised on the thread that applied the setting: on attach, or inside SetHostSettingsAsync (see setHostSetting).
+    // Raised on the thread that applied the setting: on attach or inside SetHostSettingsAsync.
     private void OnLowLatencyFailed()
     {
         Interlocked.Increment(ref _lowLatencyFailures);
@@ -289,6 +302,82 @@ internal sealed partial class TrayApp : ApplicationContext
     }
 
     // ---- UI thread ----
+
+    // Service state changes in order; NotRunning toasts only once it has lasted ServiceDownToastMs.
+    private void OnServiceState(ServiceState state)
+    {
+        if (_exiting)
+        {
+            return;
+        }
+        _serviceDownTimer.Stop();
+        bool unsupported = state == ServiceState.Unsupported && _service.Detail == "not-usb";
+        if (unsupported != _adapterUnsupported)
+        {
+            _adapterUnsupported = unsupported;
+            SendAdapter();
+            MarkDirty(Dirty.Offers);
+        }
+        // The service clears the flag when it starts, before its pipe opens.
+        bool restartPending = ServiceStatus.WaitsForRestart();
+        if (restartPending != _restartPending)
+        {
+            _restartPending = restartPending;
+            SendRestart();
+        }
+        switch (state)
+        {
+            case ServiceState.Native:
+                QueueToast("bluetoothNative", 0, "B2");
+                break;
+            case ServiceState.Unsupported when _service.Detail == "usbip-missing":
+                // A broken install: reinstalling brings usbip-win2 back.
+                QueueToast("serviceDown", 0, "B1");
+                break;
+            case ServiceState.NotRunning:
+                _serviceDownTimer.Start();
+                break;
+            case ServiceState.Updating:
+                Log.Info("ui", "an update is being installed: closing (the service reopens WPods)");
+                Exit();
+                break;
+        }
+    }
+
+    private void OnUpdate(UpdateInfo info)
+    {
+        if (_exiting)
+        {
+            return;
+        }
+        if (info.Error != _updateError)
+        {
+            _updateError = info.Error;
+            if (info.Error.Length > 0)
+            {
+                QueueToast("updateFailed", 0, info.Error);
+            }
+        }
+        if (info.Status == UpdateStatus.Installing)
+        {
+            Log.Info("ui", "an update is being installed: closing (the service reopens WPods)");
+            Exit();
+            return;
+        }
+        SendUpdate();
+    }
+
+    private void OnServiceDownTimer(object? sender, EventArgs e)
+    {
+        _serviceDownTimer.Stop();
+        // After a first install the service waits for the restart usbip-win2 needs: not an error.
+        if (ServiceStatus.WaitsForRestart())
+        {
+            QueueToast("restartToFinish", 0);
+            return;
+        }
+        QueueToast("serviceDown", 0, "B1");
+    }
 
     private void Flush()
     {
@@ -313,7 +402,8 @@ internal sealed partial class TrayApp : ApplicationContext
         }
         if ((dirty & Dirty.Offers) != 0)
         {
-            _offers = _nearby.Offers;
+            // No nearby offers while the adapter cannot be used.
+            _offers = _adapterUnsupported ? [] : _nearby.Offers;
             _offerByAddress.Clear();
             foreach (NearbyOffer offer in _offers)
             {
@@ -368,7 +458,6 @@ internal sealed partial class TrayApp : ApplicationContext
         }
     }
 
-    /// <summary>Logs each device's conn (as the page shows it) when the summary changed.</summary>
     private void LogConn()
     {
         var text = new StringBuilder();
@@ -433,14 +522,13 @@ internal sealed partial class TrayApp : ApplicationContext
         SendMain(Sent.Devices, _writer.End(), force);
     }
 
-    /// <summary>Fresh devices and state, sent even if unchanged: the page drops an optimistic view it is still showing.</summary>
+    /// <summary>Resends devices and state even if unchanged, so the page drops an optimistic view.</summary>
     private void SendRealState()
     {
         _lastSent[(int)Sent.Devices] = null;
         MarkDirty(Dirty.Session | Dirty.Devices);
     }
 
-    /// <summary>Battery, ear, listening mode, settings, heart-rate, caps and checking messages for the flags set in <paramref name="dirty"/>.</summary>
     private void SendStateDeltas(Dirty dirty, DeviceState state, bool force)
     {
         if ((dirty & Dirty.Battery) != 0)
@@ -516,7 +604,6 @@ internal sealed partial class TrayApp : ApplicationContext
         PostMain(_writer.End());
     }
 
-    /// <summary>In-page toast; only while the main window shows (protocol 6).</summary>
     private void SendToast(string id, ulong device, string? code = null)
     {
         string codeTag = code is null ? "" : $" code={code}";
@@ -543,7 +630,6 @@ internal sealed partial class TrayApp : ApplicationContext
         PostMain(_writer.End());
     }
 
-    /// <summary>"devices": Device[] and "attached".</summary>
     private void WriteDevices(Utf8JsonWriter w)
     {
         w.WriteStartArray("devices");
@@ -586,9 +672,10 @@ internal sealed partial class TrayApp : ApplicationContext
         }
         if (device.LinkUp)
         {
-            return "reconnecting";
+            // "Reconnecting" only while WPods retries; otherwise a link just brought up is being joined.
+            return _connections.IsRetrying(device.Address) ? "reconnecting" : "connecting";
         }
-        // Its own proximity adverts are seen while its link to Windows is down: connected to another device.
+        // Advertising nearby while its link to Windows is down: connected to another device.
         return _nearby.IsNearby(device.Address) ? "elsewhere" : "notConnected";
     }
 
@@ -631,7 +718,7 @@ internal sealed partial class TrayApp : ApplicationContext
         }
         else
         {
-            // After an automatic re-attach, the replaced session's battery and ear until this one reports (as the page).
+            // After an automatic re-attach, the replaced session's values until this one reports, as on the page.
             DeviceState battery = state.BatterySource;
             DeviceState ear = state.EarSource;
             Battery shown;
@@ -683,7 +770,7 @@ internal sealed partial class TrayApp : ApplicationContext
         }
     }
 
-    // Two lines: name, then "Left 84% / Right 82% / Case 61%" joined by a middle dot (absent parts left out, "charging" after a charging part).
+    // Two lines: the name, then the reported parts joined by middle dots.
     private string Tooltip(DeviceState state)
     {
         string name = state.Name ?? DeviceName(_session!.Address);
@@ -738,7 +825,7 @@ internal sealed partial class TrayApp : ApplicationContext
 
     private string DeviceName(ulong address) => _devices.Find(d => d.Address == address)?.Name ?? Text("app.name");
 
-    // Once per discharge per part: below 10% and not charging; re-armed at 10% or more, or while charging.
+    // Notifies once per discharge per part; re-armed at LowBatteryPercent or above, or while charging.
     private void CheckLowBattery(DeviceState state)
     {
         int lowest = -1;
@@ -782,7 +869,7 @@ internal sealed partial class TrayApp : ApplicationContext
         _tray.ShowBalloonTip(10_000, "", text, ToolTipIcon.None);
     }
 
-    // WebView2 could not start, so no page can show a toast: tell the user from the tray (U1).
+    // WebView2 could not start, so no page can show a toast: the tray tells the user (U1).
     private void ShowWebViewFailed()
     {
         string text = Text("toast.webviewFailed").Replace("{code}", "U1", StringComparison.Ordinal);
@@ -805,6 +892,8 @@ internal sealed partial class TrayApp : ApplicationContext
         await _connections.DisposeAsync();
         _ducker.Dispose();
         _nearby.Dispose();
+        _service.Dispose();
+        _serviceDownTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _trayIcon?.Dispose();

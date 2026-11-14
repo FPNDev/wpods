@@ -3,13 +3,12 @@ using System.Runtime.InteropServices;
 
 namespace WPods.Core;
 
-/// <summary>A paired device with an NTAPD interface, as Windows reports it.</summary>
-internal readonly record struct LinkDevice(ulong Address, string Name, bool Up);
+/// <summary>A paired AirPods device; ProductId comes from its Device ID record (0 when absent), known before connecting.</summary>
+internal readonly record struct LinkDevice(ulong Address, string Name, bool Up, ushort ProductId);
 
 /// <summary>
-/// Paired AirPods (devices exposing the NTAPD interface) and their ACL link state, event-driven:
-/// GUID_BLUETOOTH_HCI_EVENT per radio (CM_Register_Notification), radio and NTAPD interface arrival/removal.
-/// Initial state from BluetoothGetDeviceInfo. No polling. Events fire on CM notification or thread-pool threads.
+/// Paired AirPods (devices with a present AAP service devnode) and their ACL link state, driven by HCI events, radio
+/// arrival/removal and devnode notifications without polling. Events fire on CM notification or thread-pool threads.
 /// </summary>
 internal sealed unsafe class BluetoothLink : IDisposable
 {
@@ -19,13 +18,13 @@ internal sealed unsafe class BluetoothLink : IDisposable
     private readonly Dictionary<nint, string> _radioByNotify = [];
     private GCHandle _self;
     private nint _radioClassNotify;
-    private nint _ntapdClassNotify;
+    private nint _deviceInstanceNotify;
     private bool _disposed;
 
     /// <summary>ACL link of a known device went up (true) or down (false).</summary>
     public event Action<ulong, bool>? LinkChanged;
 
-    /// <summary>A device was paired/unpaired (NTAPD interface arrived or was removed).</summary>
+    /// <summary>A device was paired/unpaired (its first AAP service devnode appeared or its last one was removed).</summary>
     public event Action? DevicesChanged;
 
     /// <summary>Registers notifications first, then reads the initial state (no events for it).</summary>
@@ -34,16 +33,16 @@ internal sealed unsafe class BluetoothLink : IDisposable
         _self = GCHandle.Alloc(this);
         nint context = GCHandle.ToIntPtr(_self);
         _radioClassNotify = Native.RegisterInterfaceNotification(Native.RadioInterface, context, &OnNotify);
-        _ntapdClassNotify = Native.RegisterInterfaceNotification(Native.NtapdInterface, context, &OnNotify);
+        _deviceInstanceNotify = Native.RegisterDeviceInstanceNotification(context, &OnNotify);
         foreach (string path in Native.GetInterfaces(Native.RadioInterface))
         {
             AddRadio(path);
         }
-        foreach (string path in Native.GetInterfaces(Native.NtapdInterface))
+        foreach (string instanceId in Native.GetPresentDeviceIds(Native.AapServicePrefix))
         {
-            AddDevice(path, raiseEvents: false);
+            AddDevice(instanceId, raiseEvents: false);
         }
-        Log.Info("link", $"start: radio notify={_radioClassNotify != 0}, NTAPD notify={_ntapdClassNotify != 0}");
+        Log.Info("link", $"start: radio notify={_radioClassNotify != 0}, AAP service device notify={_deviceInstanceNotify != 0}");
     }
 
     public bool IsUp(ulong address)
@@ -54,11 +53,12 @@ internal sealed unsafe class BluetoothLink : IDisposable
         }
     }
 
-    public string? GetPath(ulong address)
+    /// <summary>The device has a present AAP service devnode.</summary>
+    public bool IsListed(ulong address)
     {
         lock (_lock)
         {
-            return _devices.TryGetValue(address, out Entry? entry) ? entry.Path : null;
+            return _devices.ContainsKey(address);
         }
     }
 
@@ -78,10 +78,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
         }
     }
 
-    /// <summary>
-    /// Re-reads the connected flag of one device (NTAPD refused with 1167, so the cached state may be stale, e.g. an
-    /// HCI disconnect lost over sleep) and raises <see cref="LinkChanged"/> when it differs.
-    /// </summary>
+    /// <summary>Re-reads the connected flag, e.g. after AAP open fails with 1167 (an HCI disconnect can be lost over sleep).</summary>
     public void Recheck(ulong address)
     {
         bool up;
@@ -97,6 +94,15 @@ internal sealed unsafe class BluetoothLink : IDisposable
         LinkChanged?.Invoke(address, up);
     }
 
+    /// <summary>The device's <see cref="LinkDevice.ProductId"/>; 0 when not listed or absent.</summary>
+    public ushort ProductId(ulong address)
+    {
+        lock (_lock)
+        {
+            return _devices.TryGetValue(address, out Entry? entry) ? entry.ProductId : (ushort)0;
+        }
+    }
+
     public List<LinkDevice> Snapshot()
     {
         lock (_lock)
@@ -104,7 +110,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
             var list = new List<LinkDevice>(_devices.Count);
             foreach ((ulong address, Entry entry) in _devices)
             {
-                list.Add(new LinkDevice(address, entry.Name, entry.Up));
+                list.Add(new LinkDevice(address, entry.Name, entry.Up, entry.ProductId));
             }
             return list;
         }
@@ -122,7 +128,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
         }
         // Unregistering waits for running callbacks; never called from a callback.
         Unregister(_radioClassNotify);
-        Unregister(_ntapdClassNotify);
+        Unregister(_deviceInstanceNotify);
         foreach (nint notify in _radioByNotify.Keys)
         {
             Unregister(notify);
@@ -153,22 +159,28 @@ internal sealed unsafe class BluetoothLink : IDisposable
                         }
                     }
                     break;
-                case Native.CmNotifyActionInterfaceArrival or Native.CmNotifyActionInterfaceRemoval:
-                    bool radio = Unsafe.ReadUnaligned<Guid>(data + Native.EventGuidOffset) == Native.RadioInterface;
+                case Native.CmNotifyActionInterfaceArrival
+                    when Unsafe.ReadUnaligned<Guid>(data + Native.EventGuidOffset) == Native.RadioInterface:
                     string path = new((char*)(data + Native.SymbolicLinkOffset));
-                    bool arrival = action == Native.CmNotifyActionInterfaceArrival;
                     // Device queries and registrations are blocking: keep them off the notification thread.
-                    if (radio && arrival)
+                    QueueWork(() => self.AddRadio(path));
+                    break;
+                case Native.CmNotifyActionDeviceInstanceEnumerated or Native.CmNotifyActionDeviceInstanceStarted
+                    or Native.CmNotifyActionDeviceInstanceRemoved:
+                    // Raised for every device in the system: only AAP service devnodes are of interest.
+                    ReadOnlySpan<char> id = MemoryMarshal.CreateReadOnlySpanFromNullTerminated((char*)(data + Native.InstanceIdOffset));
+                    if (!id.StartsWith(Native.AapServicePrefix, StringComparison.OrdinalIgnoreCase))
                     {
-                        QueueWork(() => self.AddRadio(path));
+                        break;
                     }
-                    else if (!radio && arrival)
+                    string instanceId = new(id);
+                    if (action == Native.CmNotifyActionDeviceInstanceRemoved)
                     {
-                        QueueWork(() => self.AddDevice(path, raiseEvents: true));
+                        QueueWork(() => self.RemoveDevice(instanceId));
                     }
-                    else if (!radio)
+                    else
                     {
-                        QueueWork(() => self.RemoveDevice(path));
+                        QueueWork(() => self.AddDevice(instanceId, raiseEvents: true));
                     }
                     break;
                 case Native.CmNotifyActionDeviceRemoveComplete:
@@ -203,7 +215,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
         {
             if (!_devices.TryGetValue(address, out Entry? entry) || entry.Up == connected)
             {
-                Log.Info("link", $"HCI ACL {Mac.Format(address)} {(connected ? "up" : "down")} ({(entry is null ? "not an NTAPD device" : "no change")})");
+                Log.Info("link", $"HCI ACL {Mac.Format(address)} {(connected ? "up" : "down")} ({(entry is null ? "not an AAP service device" : "no change")})");
                 return;
             }
             entry.Up = connected;
@@ -212,8 +224,7 @@ internal sealed unsafe class BluetoothLink : IDisposable
         LinkChanged?.Invoke(address, connected);
     }
 
-    // A radio arrived (start, radio switched on, resume from sleep, adapter plugged in). Links Windows brought up
-    // before the HCI registration existed raised no event: re-check them once it is registered.
+    // Links that came up before the radio's HCI registration raised no event, so they are re-checked here.
     private void AddRadio(string path)
     {
         List<ulong> up = [];
@@ -245,7 +256,6 @@ internal sealed unsafe class BluetoothLink : IDisposable
         }
     }
 
-    // A radio went away: drop its registration and re-check which links are still up.
     private void RemoveRadio(nint notify)
     {
         List<ulong> down = [];
@@ -273,24 +283,30 @@ internal sealed unsafe class BluetoothLink : IDisposable
         }
     }
 
-    private void AddDevice(string path, bool raiseEvents)
+    private void AddDevice(string instanceId, bool raiseEvents)
     {
-        if (!Mac.TryParseInterfacePath(path, out ulong address))
+        if (!Mac.TryParseInterfacePath(instanceId, out ulong address))
         {
-            Log.Warn("link", $"NTAPD interface without an address: {path}");
+            Log.Warn("link", $"AAP service device without an address: {instanceId}");
             return;
         }
         bool up;
         // Queried under the lock: an HCI event racing with startup waits and is applied after the insert.
         lock (_lock)
         {
-            if (_disposed || _devices.ContainsKey(address))
+            if (_disposed)
             {
                 return;
             }
+            if (_devices.TryGetValue(address, out Entry? known))
+            {
+                // Another radio's devnode of a listed device, or the start after the enumeration: nothing changes.
+                known.InstanceIds.Add(instanceId);
+                return;
+            }
             up = Query(address, out string name);
-            _devices[address] = new Entry(path, name) { Up = up };
-            Log.Info("link", $"NTAPD {(raiseEvents ? "added" : "present")} {Mac.Format(address)} \"{name}\", link {(up ? "up" : "down")}");
+            _devices[address] = new Entry(instanceId, name) { Up = up };
+            Log.Info("link", $"AAP service device {(raiseEvents ? "added" : "present")} {Mac.Format(address)} \"{name}\", link {(up ? "up" : "down")}");
         }
         if (raiseEvents)
         {
@@ -302,22 +318,23 @@ internal sealed unsafe class BluetoothLink : IDisposable
         }
     }
 
-    private void RemoveDevice(string path)
+    // The device is dropped only when its last devnode (one per radio) is gone.
+    private void RemoveDevice(string instanceId)
     {
-        if (!Mac.TryParseInterfacePath(path, out ulong address))
+        if (!Mac.TryParseInterfacePath(instanceId, out ulong address))
         {
             return;
         }
         Entry? entry;
         lock (_lock)
         {
-            if (!_devices.TryGetValue(address, out entry) || !string.Equals(entry.Path, path, StringComparison.OrdinalIgnoreCase))
+            if (!_devices.TryGetValue(address, out entry) || !entry.InstanceIds.Remove(instanceId) || entry.InstanceIds.Count > 0)
             {
                 return;
             }
             _devices.Remove(address);
         }
-        Log.Info("link", $"NTAPD removed {Mac.Format(address)}, link was {(entry.Up ? "up" : "down")}");
+        Log.Info("link", $"AAP service device removed {Mac.Format(address)}, link was {(entry.Up ? "up" : "down")}");
         DevicesChanged?.Invoke();
         if (entry.Up)
         {
@@ -345,10 +362,22 @@ internal sealed unsafe class BluetoothLink : IDisposable
         }
     }
 
-    private sealed class Entry(string path, string name)
+    // Windows names the service devnode after the Device ID record: "...}_VID&0001004c_PID&2024\..." (VID source 0001 =
+    // Bluetooth SIG assigned, 004C = Apple). 0 for another vendor or no record ("_LOCALMFG&...").
+    private static ushort AppleProductId(string instanceId)
     {
-        public string Path { get; } = path;
+        const string marker = "_VID&0001004C_PID&";
+        int at = instanceId.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        return at >= 0 && ushort.TryParse(instanceId.AsSpan(at + marker.Length, Math.Min(4, instanceId.Length - at - marker.Length)),
+            System.Globalization.NumberStyles.HexNumber, null, out ushort id) ? id : (ushort)0;
+    }
+
+    private sealed class Entry(string instanceId, string name)
+    {
+        // Present AAP service devnodes of the device (one per radio it is paired on).
+        public HashSet<string> InstanceIds { get; } = new(StringComparer.OrdinalIgnoreCase) { instanceId };
         public string Name { get; } = name;
+        public ushort ProductId { get; } = AppleProductId(instanceId);
         public bool Up { get; set; }
     }
 }

@@ -10,14 +10,14 @@ using WPods.Nearby;
 
 namespace WPods.Ui;
 
-// Page -> host commands (ui-protocol.md 3 and 4).
+// Commands from the main page and the nearby popup.
 internal sealed partial class TrayApp
 {
     private static readonly TimeSpan LinkWait = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan HandsFreeDropTimeout = TimeSpan.FromSeconds(5);
 
-    // User-initiated connects in progress (conn "connecting"), their cancel sources (own link waits) and cancel requests.
+    // User-initiated connects in progress, their cancel sources and cancel requests.
     private readonly HashSet<ulong> _connecting = [];
     private readonly Dictionary<ulong, CancellationTokenSource> _connectCancels = [];
     private readonly HashSet<ulong> _cancelled = [];
@@ -26,8 +26,10 @@ internal sealed partial class TrayApp
     private readonly Lock _linkLock = new();
     private readonly Dictionary<ulong, TaskCompletionSource> _linkWaits = [];
     private readonly Dictionary<ulong, TaskCompletionSource> _attachWaits = [];
-    // Last micStage message per MicSlot, replayed when the hidden main page shows again (it missed the ones since).
+    // Last micStage message per slot, replayed when the hidden main page shows again.
     private readonly string?[] _micStages = new string?[2];
+
+    private const string ReleasesUrl = "https://github.com/FPNDev/wpods/releases/";
 
     private void OnMainMessage(WebPane pane, PageMessage m)
     {
@@ -93,7 +95,7 @@ internal sealed partial class TrayApp
                 break;
             case "setToneVolume" when m.Value.ValueKind == JsonValueKind.Number:
             {
-                // The AirPods reject tone volumes below 15 % (confirmed live), so the range is 15..100.
+                // The AirPods reject tone volumes below 15%.
                 byte volume = (byte)Math.Clamp(Math.Round(m.Value.GetDouble()), 15, 100);
                 RunCommand((s, ct) => s.SetToneVolumeAsync(volume, ct), Dirty.Settings);
                 break;
@@ -138,8 +140,28 @@ internal sealed partial class TrayApp
             case "openBluetoothSettings":
                 Launch("ms-settings:bluetooth");
                 break;
+            case "retryBluetooth":
+                _service.Retry();
+                break;
+            case "setAutoUpdate" when m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                _service.SetAutoUpdate(m.Value.GetBoolean());
+                break;
+            case "checkUpdate":
+                _service.CheckUpdate();
+                break;
+            case "updateNow":
+                _service.UpdateNow();
+                break;
+            case "dismissUpdate" when _service.Update.Available is { Length: > 0 } available:
+                // Hidden for this version only; a newer version shows the note again.
+                SavePrefs(_prefs with { DismissedUpdate = available });
+                SendUpdate();
+                break;
+            case "openReleaseNotes" when _service.Update.NotesUrl.StartsWith(ReleasesUrl, StringComparison.OrdinalIgnoreCase):
+                Launch(_service.Update.NotesUrl);
+                break;
             case "openAddDevice":
-                // Opens Windows 11's "Add a device" dialog directly (the Bluetooth / Wireless display / Everything else picker).
+                // Windows 11 "Add a device" dialog.
                 Launch("ms-settings-connectabledevices:devicediscovery");
                 break;
             case "openLegal" when m.Name is "license" or "notices":
@@ -147,6 +169,9 @@ internal sealed partial class TrayApp
                 break;
             case "getStarted":
                 SavePrefs(_prefs with { FirstRunDone = true });
+                break;
+            case "restartWindows":
+                RestartWindows();
                 break;
             case "minimize":
                 main.WindowState = FormWindowState.Minimized;
@@ -193,7 +218,7 @@ internal sealed partial class TrayApp
         }
     }
 
-    // Command type plus its fields that are set (none of them secret).
+    // Command type plus its set fields, for the log (none are secret).
     private static string Describe(PageMessage m)
     {
         var text = new StringBuilder(m.Type);
@@ -241,6 +266,21 @@ internal sealed partial class TrayApp
         string? failure = null;
         try
         {
+            // Right after a Disconnect, Windows may still be dropping the link; joining that link would end
+            // disconnected, so wait for the disconnect to finish first.
+            Task pending = _connections.DisconnectFinished(address);
+            if (!pending.IsCompleted)
+            {
+                Log.Info("ui", $"connect {Mac.Format(address)}: waiting for the disconnect still under way");
+                try
+                {
+                    await pending.WaitAsync(TimeSpan.FromSeconds(8));
+                }
+                catch (TimeoutException)
+                {
+                    Log.Info("ui", $"connect {Mac.Format(address)}: the disconnect did not end within 8 s; connecting anyway");
+                }
+            }
             if (_offerByAddress.TryGetValue(address, out NearbyOffer? offer) && offer.State is OfferState.Offer or OfferState.Failed)
             {
                 Log.Info("ui", $"connect {Mac.Format(address)}: through the nearby offer ({offer.State})");
@@ -272,9 +312,8 @@ internal sealed partial class TrayApp
     }
 
     /// <summary>
-    /// Link up (asking Windows to connect audio only when it is down), then attached, within 10 s. The waits are
-    /// registered before anything can complete them, and an already-up link or an attach by the connection manager
-    /// itself counts as success. False on timeout, attach failure or Cancel.
+    /// Brings the link up if needed, then attaches, within <see cref="LinkWait"/>. An attach by the connection
+    /// manager itself also counts; false on timeout, attach failure or Cancel.
     /// </summary>
     private async Task<bool> ConnectAudioAsync(ulong address)
     {
@@ -301,12 +340,13 @@ internal sealed partial class TrayApp
             {
                 Log.Info("ui", $"connect {Mac.Format(address)}: link already up");
             }
-            if (_connections.Session?.Address == address || await _connections.ConnectAsync(address))
+            // Off the UI thread: the attach waits up to 10 s for the service's answer.
+            if (_connections.Session?.Address == address || await Task.Run(() => _connections.ConnectAsync(address)))
             {
                 Log.Info("ui", $"connect {Mac.Format(address)}: attached");
                 return true;
             }
-            // The connection manager may still be attaching this pair on its own (link-up event): wait for it.
+            // The connection manager may still be attaching this pair on its own after the link-up event.
             Log.Info("ui", $"connect {Mac.Format(address)}: ConnectAsync false, waiting for an attach until the 10 s deadline");
             await attached.Task.WaitAsync(cancel.Token);
             Log.Info("ui", $"connect {Mac.Format(address)}: attached by the connection manager");
@@ -347,8 +387,8 @@ internal sealed partial class TrayApp
         }
     }
 
-    // The core marks the pair and detaches at once (DevicesChanged, so "notConnected" goes out immediately); false
-    // means Windows refused both requests and the pair is attached again: toast plus its real devices and state.
+    // The core detaches at once, so "notConnected" shows immediately. A failed disconnect means the pair is attached
+    // again: toast and resend the real devices and state.
     private async void Disconnect(ulong address, bool reconnect)
     {
         if (_connections.Session?.Address == address)
@@ -372,8 +412,8 @@ internal sealed partial class TrayApp
 
     // ---- Device commands: success shows through the core's Changed event; failure sends the current value back ----
 
-    // Stem press-and-hold cycle of the attached pair (the core stores it and writes it on every attach). Always answers
-    // with devices carrying the stored value; a failed write also gets noResponse.
+    // The core stores the cycle and writes it on every attach. Always answers with the stored value; a failed write
+    // also toasts noResponse.
     private async void SetStemModes(ulong address, string[] names)
     {
         if (_connections.Session is { } session && session.Address == address && MessageWriter.TryParseStemModes(names, out StemModes modes))
@@ -386,7 +426,7 @@ internal sealed partial class TrayApp
             }
             catch (OperationCanceledException)
             {
-                // No reply in 3 s.
+                // No reply in time.
             }
             catch (Exception e) when (e is ArgumentException or InvalidOperationException)
             {
@@ -432,7 +472,7 @@ internal sealed partial class TrayApp
             }
             catch (Exception e) when (e is OperationCanceledException or InvalidOperationException)
             {
-                // No reply in 3 s, or the device doesn't support it (not enrolled, no heart-rate sensor).
+                // No reply in time, or unsupported by the device (not enrolled, no heart-rate sensor).
                 Log.Warn("ui", $"device command failed: {e.GetType().Name} {e.Message}");
             }
         }
@@ -464,8 +504,7 @@ internal sealed partial class TrayApp
             _ => null,
         };
         bool handsFree = next is not null && next.DisableHandsFree != current.DisableHandsFree;
-        // Host settings are editable only for the attached pair, and Hands-Free one change at a time; anything else
-        // just gets the saved value back.
+        // Only the attached pair is editable, and Hands-Free one change at a time; otherwise the saved value goes back.
         if (next is not null && attached && !(handsFree && _handsFreeApplying.ContainsKey(address)))
         {
             if (handsFree)
@@ -475,14 +514,13 @@ internal sealed partial class TrayApp
             int lowLatencyFailures = Volatile.Read(ref _lowLatencyFailures);
             try
             {
-                // Disabling the Hands-Free service while it is in use leaves Windows' A2DP stream paused for good: drop
-                // the Hands-Free connection first.
+                // Disabling Hands-Free while it is in use leaves the A2DP stream paused for good: drop it first.
                 if (next.DisableHandsFree && !current.DisableHandsFree && _mic.HandsFreeInUse)
                 {
                     await DropHandsFreeAsync(address);
                 }
                 await _connections.SetHostSettingsAsync(address, next);
-                // The keep-alive raises Failed synchronously inside the call when Windows refuses the sound: switch back.
+                // The keep-alive raises Failed synchronously inside the call when Windows refuses the stream.
                 if (next.LowLatency && !current.LowLatency && Volatile.Read(ref _lowLatencyFailures) != lowLatencyFailures)
                 {
                     await _connections.SetHostSettingsAsync(address, current);
@@ -505,7 +543,7 @@ internal sealed partial class TrayApp
         SendHostSettings(address);
     }
 
-    // Counts one Hands-Free change in or out; the loader shows while any runs (sent when that changes).
+    // Counts Hands-Free changes in flight; the page shows a loader while any runs.
     private void SetHandsFreeApplying(ulong address, bool applying)
     {
         int count = _handsFreeApplying.GetValueOrDefault(address) + (applying ? 1 : -1);
@@ -523,8 +561,7 @@ internal sealed partial class TrayApp
         }
     }
 
-    // Asks Windows to disconnect the pair's Hands-Free connection (A2DP stays) and waits until Hands-Free is no
-    // longer in use, at most HandsFreeDropTimeout.
+    // Disconnects only Hands-Free (A2DP stays) and waits until it is no longer in use.
     private async Task DropHandsFreeAsync(ulong address)
     {
         int hr = await Task.Run(() => Native.wpn_bt_disconnect_handsfree(address));
@@ -544,12 +581,11 @@ internal sealed partial class TrayApp
         }
     }
 
-    // Under MicPipeline's lock (serialized); applied on the UI thread in the same order.
+    // Under MicPipeline's lock; applied on the UI thread in the same order.
     private void OnMicStage(ulong address, MicSlot slot, string? id, StageLoad load, string? code) =>
         _ui.Post(_ => ApplyMicStage(address, slot, id, load, code), null);
 
-    // Load state only (the config is saved when picked). A failed load keeps the previous stage running: toast with
-    // its code, except for a load dropped by a detach (address 0).
+    // A failed load keeps the previous stage running and toasts its code, except when dropped by a detach (address 0).
     private void ApplyMicStage(ulong address, MicSlot slot, string? id, StageLoad load, string? code)
     {
         Utf8JsonWriter w = _writer.Begin("micStage");
@@ -565,7 +601,7 @@ internal sealed partial class TrayApp
         }
     }
 
-    // Saved at once, editable any time; the pipeline follows through MicConfigChanged.
+    // The pipeline follows through MicConfigChanged.
     private void SaveMicConfig(MicConfig config)
     {
         try
@@ -582,7 +618,6 @@ internal sealed partial class TrayApp
         PostMain(_writer.End());
     }
 
-    // Opens a file next to the exe with its default viewer.
     private static void OpenLegal(string file)
     {
         string path = Path.Combine(AppContext.BaseDirectory, file);
@@ -602,7 +637,7 @@ internal sealed partial class TrayApp
         }
         catch (Exception e) when (e is Win32Exception or InvalidOperationException)
         {
-            // Windows keeps whatever state it has; the saved setting is back to the previous value.
+            // Windows keeps its current state; the saved setting is already reverted.
             Log.Warn("ui", $"hands-free revert failed: {e.Message}");
         }
     }
@@ -622,6 +657,53 @@ internal sealed partial class TrayApp
         }
     }
 
+    private void WriteUpdate(Utf8JsonWriter w)
+    {
+        UpdateInfo u = _service.Update;
+        Version app = typeof(TrayApp).Assembly.GetName().Version ?? new Version(0, 0, 0);
+        w.WriteStartObject("update");
+        w.WriteString("version", u.Installed.Length > 0 ? u.Installed : app.ToString(3));
+        w.WriteString("available", u.Available.Length > 0 ? u.Available : null);
+        w.WriteString("status", MessageWriter.Camel(u.Status));
+        w.WriteBoolean("checked", u.Checked);
+        w.WriteBoolean("auto", u.Auto);
+        w.WriteString("dismissed", _prefs.DismissedUpdate);
+        w.WriteEndObject();
+    }
+
+    private void SendAdapter()
+    {
+        if (_exiting)
+        {
+            return;
+        }
+        Utf8JsonWriter w = _writer.Begin("adapter");
+        w.WriteBoolean("unsupported", _adapterUnsupported);
+        PostMain(_writer.End());
+    }
+
+    private void SendRestart()
+    {
+        if (_exiting)
+        {
+            return;
+        }
+        Utf8JsonWriter w = _writer.Begin("restart");
+        w.WriteBoolean("pending", _restartPending);
+        PostMain(_writer.End());
+    }
+
+    private void SendUpdate()
+    {
+        if (_exiting)
+        {
+            return;
+        }
+        Utf8JsonWriter w = _writer.Begin("update");
+        WriteUpdate(w);
+        PostMain(_writer.End());
+    }
+
     private void SendStartupPref()
     {
         Utf8JsonWriter w = _writer.Begin("prefs");
@@ -629,14 +711,14 @@ internal sealed partial class TrayApp
         PostMain(_writer.End());
     }
 
-    // Tray "Start with Windows": the window's switch didn't change it, so it gets the new value.
+    // Tray "Start with Windows": the window's switch gets the new value.
     private void ToggleStartupFromTray()
     {
         SetStartup(!StartupRegistration.IsEnabled());
         SendStartupPref();
     }
 
-    // "" = Same as Windows. Applied live: both pages relabel in place; the tray and notifications read the labels on use.
+    // "" = Same as Windows. Both pages relabel in place; the tray and notifications read labels on use.
     private void SetLanguage(string code)
     {
         string choice = code.Length == 0 ? "system" : code;
@@ -663,8 +745,22 @@ internal sealed partial class TrayApp
         }
         catch (Win32Exception e)
         {
-            // Nothing registered for it; nothing else to do.
+            // No handler registered for the target.
             Log.Warn("ui", $"launch {target} failed: {e.Message}");
+        }
+    }
+
+    // Confirmed on the restart page; a standard user may restart Windows without elevation.
+    private static void RestartWindows()
+    {
+        Log.Info("ui", "restarting Windows: shutdown.exe /r /t 0");
+        try
+        {
+            Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "shutdown.exe"), "/r /t 0") { CreateNoWindow = true })?.Dispose();
+        }
+        catch (Win32Exception e)
+        {
+            Log.Warn("ui", $"restart failed: {e.Message}");
         }
     }
 }

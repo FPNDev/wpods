@@ -14,19 +14,18 @@ internal static unsafe partial class Native
     public const int ErrorNotFound = 1168;
     public const uint EInvalidArg = 0x80070057;
 
-    private const uint GenericRead = 0x80000000;
-    private const uint GenericWrite = 0x40000000;
     private const uint FileReadAttributes = 0x80;
     private const uint FileShareReadWrite = 0x3;
     private const uint OpenExisting = 3;
-    private const uint FileFlagOverlapped = 0x40000000;
 
     private const uint CrSuccess = 0;
     private const uint CrBufferSmall = 0x1A;
 
-    public static readonly Guid NtapdInterface = new("904e6502-b92f-464d-8817-108623e33703");
     public static readonly Guid RadioInterface = new("0850302A-B344-4FDA-9BE9-90576B8D46F0");
     public static readonly Guid HciEvent = new("FC240062-1541-49BE-B463-84C4DCD7BF7F");
+    // AAP service devnodes: Windows creates one per paired AirPods and radio, driver or not.
+    // The instance id ends in "&" + address + "_C...".
+    public const string AapServicePrefix = @"BTHENUM\{74EC2172-0BAD-4D01-8F77-997B2BE0722A}";
 
     [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     private static partial SafeFileHandle CreateFile(string path, uint access, uint share, nint security, uint disposition, uint flags, nint template);
@@ -38,38 +37,65 @@ internal static unsafe partial class Native
     [LibraryImport("kernel32.dll")]
     private static partial nint LocalFree(nint memory);
 
-    /// <summary>Opens an NTAPD interface for overlapped I/O (exclusive; never pages per the driver contract).</summary>
-    public static SafeFileHandle OpenNtapd(string path, out int error)
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PowerThrottlingState
     {
-        SafeFileHandle handle = CreateFile(path, GenericRead | GenericWrite, 0, 0, OpenExisting, FileFlagOverlapped, 0);
-        error = handle.IsInvalid ? Marshal.GetLastPInvokeError() : ErrorSuccess;
-        return handle;
+        public uint Version;
+        public uint ControlMask;
+        public uint StateMask;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetProcessInformation(nint process, int infoClass, ref PowerThrottlingState info, uint size);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial nint GetCurrentProcess();
+
+    /// <summary>False opts the process out of EcoQoS throttling; true lets Windows decide again.</summary>
+    public static void SetSpeedThrottling(bool allowed)
+    {
+        // ProcessPowerThrottling = 4. ControlMask 1 with StateMask 0 disables throttling; ControlMask 0 restores the default.
+        var state = new PowerThrottlingState { Version = 1, ControlMask = allowed ? 0u : 1u, StateMask = 0 };
+        if (!SetProcessInformation(GetCurrentProcess(), 4, ref state, (uint)sizeof(PowerThrottlingState)))
+        {
+            Log.Warn("native", $"power throttling {(allowed ? "default" : "off")} not set: Win32 error {Marshal.GetLastPInvokeError()}");
+        }
     }
 
     // ---- Configuration manager ----
 
     public const int CmNotifyFilterTypeDeviceInterface = 0;
     public const int CmNotifyFilterTypeDeviceHandle = 1;
+    public const int CmNotifyFilterTypeDeviceInstance = 2;
+    public const uint CmNotifyFilterFlagAllDeviceInstances = 0x2;
     public const int CmNotifyActionInterfaceArrival = 0;
     public const int CmNotifyActionInterfaceRemoval = 1;
     public const int CmNotifyActionDeviceRemoveComplete = 5;
     public const int CmNotifyActionDeviceCustomEvent = 6;
+    public const int CmNotifyActionDeviceInstanceEnumerated = 7;
+    public const int CmNotifyActionDeviceInstanceStarted = 8;
+    public const int CmNotifyActionDeviceInstanceRemoved = 9;
 
+    // CM_NOTIFY_FILTER (x64): cbSize @0, Flags @4, FilterType @8, Reserved @12, union @16 (ClassGuid, hTarget or
+    // InstanceId[MAX_DEVICE_ID_LEN = 200 WCHAR]), 416 bytes.
     [StructLayout(LayoutKind.Explicit, Size = 416)]
     public struct CmNotifyFilter
     {
         [FieldOffset(0)] public uint Size;
+        [FieldOffset(4)] public uint Flags;
         [FieldOffset(8)] public int FilterType;
         [FieldOffset(16)] public Guid ClassGuid;
         [FieldOffset(16)] public nint Handle;
     }
 
     // CM_NOTIFY_EVENT_DATA (x64): FilterType @0, ClassGuid/EventGuid @8, SymbolicLink @24 (interface),
-    // NameOffset @24, DataSize @28, Data @32 (handle).
+    // NameOffset @24, DataSize @28, Data @32 (handle), InstanceId @8 (instance).
     public const int EventGuidOffset = 8;
     public const int SymbolicLinkOffset = 24;
     public const int EventDataSizeOffset = 28;
     public const int EventDataOffset = 32;
+    public const int InstanceIdOffset = 8;
 
     [LibraryImport("cfgmgr32.dll")]
     public static partial uint CM_Register_Notification(
@@ -87,7 +113,6 @@ internal static unsafe partial class Native
     [LibraryImport("cfgmgr32.dll", EntryPoint = "CM_Get_Device_Interface_ListW")]
     private static partial uint CM_Get_Device_Interface_List(in Guid interfaceClass, char* deviceId, char* buffer, uint length, uint flags);
 
-    /// <summary>Symbolic links of the present interfaces of a class.</summary>
     public static List<string> GetInterfaces(in Guid interfaceClass)
     {
         var paths = new List<string>();
@@ -125,7 +150,7 @@ internal static unsafe partial class Native
         }
     }
 
-    /// <summary>Registers for custom events (HCI link changes) of the device behind <paramref name="path"/>.</summary>
+    /// <summary>Registers for custom events (HCI link changes) of the device at <paramref name="path"/>.</summary>
     public static nint RegisterHandleNotification(string path, nint context, delegate* unmanaged[Stdcall]<nint, nint, int, byte*, uint, uint> callback)
     {
         using SafeFileHandle handle = CreateFile(path, FileReadAttributes, FileShareReadWrite, 0, OpenExisting, 0, 0);
@@ -139,13 +164,14 @@ internal static unsafe partial class Native
             FilterType = CmNotifyFilterTypeDeviceHandle,
             Handle = handle.DangerousGetHandle(),
         };
-        // The handle may be closed once registration returns (CM_NOTIFY_FILTER docs).
+        // The handle may be closed once registration returns.
         return CM_Register_Notification(&filter, context, callback, out nint notify) == CrSuccess ? notify : 0;
     }
 
     private const uint CmGetIdListFilterEnumerator = 0x1;
     private const uint CmGetIdListFilterPresent = 0x100;
     private const uint CmLocateDevNodeNormal = 0;
+    private const uint CmLocateDevNodePhantom = 1;
     private const uint DevPropTypeFileTime = 0x10;
     private const uint DevPropTypeString = 0x12;
     private const int MaxDeviceIdLength = 200;
@@ -179,10 +205,8 @@ internal static unsafe partial class Native
     private static partial uint CM_Get_DevNode_Property(uint devInst, in DevPropKey key, out uint type, byte* buffer, ref uint size, uint flags);
 
     /// <summary>
-    /// FirstInstallDate (else InstallDate) of the present Windows entry of a paired Bluetooth device
-    /// (BTHENUM\DEV_&lt;MAC&gt;\..., one per radio): a new entry, so a new date, is created when the device is paired
-    /// again. With entries on several radios, the one under the radio the device is connected through. Null when there
-    /// is no such entry (radio off or removed, not paired, not connected with several entries) or it has no date.
+    /// Install date of the device's present BTHENUM\DEV_&lt;MAC&gt; entry; re-pairing creates a new entry and date.
+    /// With entries on several radios, uses the one of the connected radio; null when none applies or it has no date.
     /// </summary>
     public static DateTime? GetDeviceInstallDate(ulong address)
     {
@@ -203,16 +227,31 @@ internal static unsafe partial class Native
         return ReadFileTime(entry, FirstInstallDate) ?? ReadFileTime(entry, InstallDate);
     }
 
-    // Present devnodes of enumerator BTHENUM whose instance id starts with prefix (ignoring case).
-    private static List<uint> GetPresentDevNodes(string prefix)
+    /// <summary>Whether any of the device's entries, present or not (one per radio used), has install date <paramref name="date"/>.</summary>
+    public static bool HasDeviceEntryDated(ulong address, DateTime date)
     {
-        const uint flags = CmGetIdListFilterEnumerator | CmGetIdListFilterPresent;
-        var devNodes = new List<uint>();
+        foreach (string id in GetDeviceIds($"BTHENUM\\DEV_{address:X12}\\", CmGetIdListFilterEnumerator))
+        {
+            if (CM_Locate_DevNode(out uint devInst, id, CmLocateDevNodePhantom) == CrSuccess
+                && (ReadFileTime(devInst, FirstInstallDate) ?? ReadFileTime(devInst, InstallDate)) == date)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Present BTHENUM instance ids starting with <paramref name="prefix"/>, ignoring case.</summary>
+    public static List<string> GetPresentDeviceIds(string prefix) => GetDeviceIds(prefix, CmGetIdListFilterEnumerator | CmGetIdListFilterPresent);
+
+    private static List<string> GetDeviceIds(string prefix, uint flags)
+    {
+        var ids = new List<string>();
         while (true)
         {
             if (CM_Get_Device_ID_List_Size(out uint length, "BTHENUM", flags) != CrSuccess || length <= 1)
             {
-                return devNodes;
+                return ids;
             }
             char[] buffer = new char[length];
             uint result;
@@ -226,25 +265,36 @@ internal static unsafe partial class Native
             }
             if (result != CrSuccess)
             {
-                return devNodes;
+                return ids;
             }
             ReadOnlySpan<char> rest = buffer;
             int end;
             while ((end = rest.IndexOf('\0')) > 0)
             {
-                if (rest[..end].StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                    && CM_Locate_DevNode(out uint devInst, new string(rest[..end]), CmLocateDevNodeNormal) == CrSuccess)
+                if (rest[..end].StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 {
-                    devNodes.Add(devInst);
+                    ids.Add(new string(rest[..end]));
                 }
                 rest = rest[(end + 1)..];
             }
-            return devNodes;
+            return ids;
         }
     }
 
-    // Of a device's entries on several radios, the one whose radio (entry -> BTHBRB bus -> radio) the device is
-    // connected through; null when it is connected through none of them.
+    private static List<uint> GetPresentDevNodes(string prefix)
+    {
+        var devNodes = new List<uint>();
+        foreach (string id in GetPresentDeviceIds(prefix))
+        {
+            if (CM_Locate_DevNode(out uint devInst, id, CmLocateDevNodeNormal) == CrSuccess)
+            {
+                devNodes.Add(devInst);
+            }
+        }
+        return devNodes;
+    }
+
+    // The entry whose grandparent (entry, BTHBRB bus, radio) is the radio the device is connected through.
     private static uint? GetConnectedEntry(ulong address, List<uint> entries)
     {
         foreach (string path in GetInterfaces(RadioInterface))
@@ -308,7 +358,22 @@ internal static unsafe partial class Native
         return CM_Register_Notification(&filter, context, callback, out nint notify) == CrSuccess ? notify : 0;
     }
 
-    // ---- Bluetooth (BluetoothApis.dll, the implementation behind bthprops.cpl) ----
+    /// <summary>
+    /// Registers for events of every device instance (ALL_DEVICE_INSTANCES requires an empty instance id).
+    /// Callers filter by the id at <see cref="InstanceIdOffset"/>.
+    /// </summary>
+    public static nint RegisterDeviceInstanceNotification(nint context, delegate* unmanaged[Stdcall]<nint, nint, int, byte*, uint, uint> callback)
+    {
+        var filter = new CmNotifyFilter
+        {
+            Size = (uint)sizeof(CmNotifyFilter),
+            Flags = CmNotifyFilterFlagAllDeviceInstances,
+            FilterType = CmNotifyFilterTypeDeviceInstance,
+        };
+        return CM_Register_Notification(&filter, context, callback, out nint notify) == CrSuccess ? notify : 0;
+    }
+
+    // ---- Bluetooth (BluetoothApis.dll) ----
 
     [StructLayout(LayoutKind.Sequential)]
     public struct BluetoothDeviceInfo
@@ -343,10 +408,7 @@ internal static unsafe partial class Native
     [LibraryImport("BluetoothApis.dll")]
     public static partial uint BluetoothSetServiceState(nint radio, in BluetoothDeviceInfo info, in Guid service, uint flags);
 
-    /// <summary>
-    /// Finds a paired device on any local radio (no inquiry, no paging). On success the caller owns
-    /// <paramref name="radio"/> and must close it.
-    /// </summary>
+    /// <summary>Finds a paired device on any radio without paging; on success the caller must close <paramref name="radio"/>.</summary>
     public static bool TryFindPairedDevice(ulong address, out nint radio, out BluetoothDeviceInfo info)
     {
         info = default;

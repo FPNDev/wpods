@@ -10,7 +10,7 @@ public enum DeviceChange
     /// <summary>Name / model (AAP 0x1D).</summary>
     Identity = 1 << 1,
     Battery = 1 << 2,
-    /// <summary>Primary/secondary ear status or the left/right mapping (<see cref="DeviceState.LeftEar"/>, <see cref="DeviceState.RightEar"/>).</summary>
+    /// <summary>Primary/secondary ear status or the left/right bud mapping.</summary>
     Ear = 1 << 3,
     ListeningMode = 1 << 4,
     /// <summary>Any device-side setting other than the listening mode.</summary>
@@ -21,16 +21,13 @@ public enum DeviceChange
     Keys = 1 << 8,
     /// <summary><see cref="DeviceState.Capabilities"/> changed.</summary>
     Capabilities = 1 << 9,
-    /// <summary>The initial report window after attach ended (<see cref="DeviceState.InitialReportDone"/> is now true).</summary>
+    /// <summary>The initial report window after attach ended.</summary>
     InitialReport = 1 << 10,
     /// <summary>The stored stem press-and-hold cycle of the pair changed (written by the session itself).</summary>
     StemModes = 1 << 11,
 }
 
-/// <summary>
-/// Features of an AirPods pair: reported over AAP (setting ids in 0x09 packets, heart-rate readings) or in the
-/// baseline of its model (<see cref="AirPodsModel.Capabilities"/>). Features in neither are not shown.
-/// </summary>
+/// <summary>Features reported over AAP or in the model baseline; features in neither are hidden.</summary>
 [Flags]
 public enum DeviceCapabilities
 {
@@ -127,8 +124,8 @@ public enum BatteryStatus : byte
 public readonly record struct Battery(byte? Percent, BatteryStatus Status);
 
 /// <summary>
-/// Shown settings stored on the AirPods themselves (not the per-host ear detection, mic side, allow off and stem modes);
-/// null = never seen. Remembered per pair for display only, see <see cref="DeviceState.RememberedSettings"/>.
+/// Settings stored on the AirPods themselves (ear detection, mic side, allow off and stem modes are per host);
+/// null = never seen. Remembered per pair for display only.
 /// </summary>
 internal sealed record PodSettings
 {
@@ -174,17 +171,17 @@ public sealed class DeviceState
     private readonly byte[] _settings = CreateSettings();
     private readonly Battery[] _batteries = new Battery[4];
     private byte _hearingAidEnabled = NotReported;
-    // Latest valid 0x53 record (Aap.MediaAssistLength bytes), replaced whole, never changed in place; null until reported.
+    // Latest valid 0x53 record, replaced whole and never changed in place.
     private byte[]? _mediaAssist;
     private DeviceCapabilities _baseline;
     // AAP battery component of the primary bud (Aap.LeftComponent / RightComponent / HeadphoneComponent); 0 = unknown.
     private byte _primaryPod;
     private bool _budRoleSeen;
-    // Listening-mode hold (anti-flicker): the mode WPods last requested, until the device reports it or the hold
-    // expires; device reports of other modes are not applied meanwhile. 0 = no hold.
-    private byte _heldMode;
-    private long _heldUntil;
-    private int _holdSerial;
+    // Sent listening modes not yet reported back, oldest first. The newest is shown to avoid flicker until
+    // ListeningModeQuietMs after the last request or report, then the device's latest report wins.
+    private readonly List<(int Id, byte Mode)> _sentModes = [];
+    private int _sentModeId;
+    private long _sentModesUntil;
     // Latest listening mode the device reported (applied or not); 0 = none yet.
     private byte _deviceMode;
     // A battery packet arrived in this session.
@@ -208,19 +205,13 @@ public sealed class DeviceState
     /// <summary><see cref="Reported"/> plus the baseline of the model.</summary>
     public DeviceCapabilities Capabilities { get; private set; }
 
-    /// <summary>
-    /// The set remembered from earlier attaches plus what this attach reported: only grows, never drops a capability
-    /// the device did not report this time. This part is persisted.
-    /// </summary>
+    /// <summary>Persisted: capabilities reported on any attach. Only grows.</summary>
     internal DeviceCapabilities Reported { get; private set; }
 
     /// <summary>The initial report has ended: 1 s after the device's first 0x09 setting.</summary>
     public bool InitialReportDone { get; private set; }
 
-    /// <summary>
-    /// Pod-saved settings last seen on an earlier attach. UI display only, while the initial report is pending; never
-    /// part of the setting properties below, which hold only what this session reported or wrote.
-    /// </summary>
+    /// <summary>Pod settings seen on an earlier attach, shown only until the initial report; never merged into this state.</summary>
     internal PodSettings RememberedSettings { get; }
 
     public string? Name { get; internal set; }
@@ -236,7 +227,7 @@ public sealed class DeviceState
     public EarStatus? PrimaryEar { get; internal set; }
     public EarStatus? SecondaryEar { get; internal set; }
 
-    /// <summary>Ear status of the left bud: primary or secondary, by which bud is primary; null while unknown or for over-ear models.</summary>
+    /// <summary>Null while the primary bud is unknown, and for over-ear models.</summary>
     public EarStatus? LeftEar => _primaryPod switch
     {
         Aap.LeftComponent => PrimaryEar,
@@ -276,7 +267,6 @@ public sealed class DeviceState
     internal byte HearingAidEnabledByte => _hearingAidEnabled;
     /// <summary>Raw Hearing Assist 0x33, shared by Hearing Aid and Media Assist.</summary>
     internal bool? HearingAssist => Flag(Aap.HearingAssistId);
-    /// <summary>The latest 0x53 record; null until reported.</summary>
     internal byte[]? MediaAssistRecord => _mediaAssist;
 
     /// <summary>Conversation-awareness level (0x4B byte 9).</summary>
@@ -305,13 +295,13 @@ public sealed class DeviceState
     /// <summary>This session replaced one of the same pair in an automatic re-attach (<see cref="CarryOver"/>).</summary>
     internal bool IsCarryOver => _previous is not null;
 
-    /// <summary>UI display only: the state whose batteries to show (this one, or the replaced session's until the first battery report).</summary>
+    /// <summary>UI display only: this state, or the replaced session's until the first battery report.</summary>
     internal DeviceState BatterySource => _batteryReported || _previous is null ? this : _previous.BatterySource;
 
-    /// <summary>UI display only: the state whose ear status to show (this one, or the replaced session's until a bud's status is known).</summary>
+    /// <summary>UI display only: this state, or the replaced session's until a bud's ear status is known.</summary>
     internal DeviceState EarSource => LeftEar is not null || RightEar is not null || _previous is null ? this : _previous.EarSource;
 
-    /// <summary>The pod-saved settings this session reported or wrote; <paramref name="fallback"/>'s value for each other one.</summary>
+    /// <summary>Pod settings this session reported or wrote, the rest from <paramref name="fallback"/>.</summary>
     internal PodSettings GetPodSettings(PodSettings fallback) => new()
     {
         ListeningMode = ListeningMode ?? fallback.ListeningMode,
@@ -364,10 +354,7 @@ public sealed class DeviceState
         return true;
     }
 
-    /// <summary>
-    /// Sets the primary bud (AAP battery component). The 0x08 bud role, once seen, wins over the 0x04 battery order.
-    /// Returns Ear when <see cref="LeftEar"/> or <see cref="RightEar"/> changed.
-    /// </summary>
+    /// <summary>Sets the primary bud; once seen, the 0x08 bud role wins over the 0x04 battery order.</summary>
     internal DeviceChange SetPrimaryPod(byte component, bool fromBudRole)
     {
         if (!fromBudRole && _budRoleSeen)
@@ -390,58 +377,76 @@ public sealed class DeviceState
         return left == LeftEar && right == RightEar ? DeviceChange.None : DeviceChange.Ear;
     }
 
-    /// <summary>Starts (or replaces) the listening-mode hold for <paramref name="mode"/>; returns its serial.</summary>
-    internal int HoldListeningMode(byte mode, TimeSpan duration)
+    /// <summary>How long sent listening modes wait for their reports, counted from the last request or report.</summary>
+    internal const int ListeningModeQuietMs = 3000;
+
+    /// <summary>Records a listening mode being sent; returns its id.</summary>
+    internal int PushListeningMode(byte mode)
     {
-        _heldMode = mode;
-        _heldUntil = Environment.TickCount64 + (long)duration.TotalMilliseconds;
-        return ++_holdSerial;
+        int id = ++_sentModeId;
+        _sentModes.Add((id, mode));
+        _sentModesUntil = Environment.TickCount64 + ListeningModeQuietMs;
+        return id;
+    }
+
+    internal bool IsNewestListeningMode(int id) => _sentModes.Count > 0 && _sentModes[^1].Id == id;
+
+    /// <summary>Removes a sent mode that was not written; shows the newest one left or the device's latest report.</summary>
+    internal bool DropListeningMode(int id)
+    {
+        int index = _sentModes.FindIndex(e => e.Id == id);
+        if (index < 0)
+        {
+            return false;
+        }
+        _sentModes.RemoveAt(index);
+        byte shown = _sentModes.Count > 0 ? _sentModes[^1].Mode : _deviceMode;
+        return shown != 0 && SetSetting(Aap.ListeningModeId, shown);
     }
 
     /// <summary>
-    /// A listening-mode report from the device. Not applied while a hold for another mode is active; the held mode
-    /// itself ends the hold. Returns true when <see cref="ListeningMode"/> changed.
+    /// Clears the matching sent mode and all older ones. The report is shown only once no sent mode is left,
+    /// otherwise it is remembered until the list times out.
     /// </summary>
     internal bool ReportListeningMode(byte value)
     {
         _deviceMode = value;
-        if (_heldMode != 0)
+        if (_sentModes.Count > 0)
         {
-            if (value != _heldMode && Environment.TickCount64 < _heldUntil)
+            int index = _sentModes.FindIndex(e => e.Mode == value);
+            if (index >= 0)
             {
-                Log.Info("aap", $"listening mode report {value} ignored: waiting for requested {_heldMode}");
+                _sentModes.RemoveRange(0, index + 1);
+            }
+            if (_sentModes.Count > 0)
+            {
+                _sentModesUntil = Environment.TickCount64 + ListeningModeQuietMs;
+                Log.Info("aap", $"listening mode report {value} {(index >= 0 ? "matched" : "not requested")}, {_sentModes.Count} sent modes still waiting");
                 return false;
             }
-            Log.Info("aap", value == _heldMode
-                ? $"listening mode {value} confirmed by the device, hold ended"
-                : $"listening mode hold for {_heldMode} expired, device reports {value}");
-            _heldMode = 0;
+            Log.Info("aap", $"listening mode {value} reported, all sent modes confirmed");
         }
         return SetSetting(Aap.ListeningModeId, value);
     }
 
-    /// <summary>
-    /// Ends hold <paramref name="serial"/> if it is still the active one (timeout or failed write) and applies the
-    /// device's latest reported mode. Returns true when <see cref="ListeningMode"/> changed.
-    /// </summary>
-    internal bool ReleaseListeningMode(int serial)
+    /// <summary>Drops timed-out sent modes for the device's latest report; WaitMs is the time to the next check, 0 if none.</summary>
+    internal (bool Changed, long WaitMs) ExpireListeningModes()
     {
-        if (serial != _holdSerial || _heldMode == 0)
+        if (_sentModes.Count == 0)
         {
-            return false;
+            return (false, 0);
         }
-        Log.Info("aap", $"listening mode hold for {_heldMode} released, device last reported {(_deviceMode == 0 ? "nothing" : _deviceMode.ToString())}");
-        _heldMode = 0;
-        return _deviceMode != 0 && SetSetting(Aap.ListeningModeId, _deviceMode);
+        long left = _sentModesUntil - Environment.TickCount64;
+        if (left > 0)
+        {
+            return (false, left);
+        }
+        Log.Info("aap", $"{_sentModes.Count} sent listening modes not reported back, showing the device's {(_deviceMode == 0 ? "nothing" : _deviceMode.ToString())}");
+        _sentModes.Clear();
+        return (_deviceMode != 0 && SetSetting(Aap.ListeningModeId, _deviceMode), 0);
     }
 
-    /// <summary>True when hold <paramref name="serial"/> is still the latest request.</summary>
-    internal bool IsCurrentHold(int serial) => serial == _holdSerial;
-
-    /// <summary>
-    /// Stores a battery entry for AAP component 01/02/04/08; false if unknown, or unchanged and not the session's first
-    /// battery entry (the first one always counts, it ends <see cref="BatterySource"/>'s carry-over).
-    /// </summary>
+    /// <summary>The session's first battery entry always counts as a change: it ends the <see cref="BatterySource"/> carry-over.</summary>
     internal bool SetBattery(byte component, Battery battery)
     {
         int slot = component switch

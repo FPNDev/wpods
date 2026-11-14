@@ -2,17 +2,12 @@ using System.Collections.Frozen;
 
 namespace WPods.Core;
 
-/// <summary>
-/// A model: display name, illustration key (pro, airpods4, airpods, max), baseline capabilities (features Apple documents
-/// for it) and whether it has one battery (AirPods Max) instead of left, right and case.
-/// </summary>
+/// <summary>Art is the illustration key; SingleBattery means one battery (AirPods Max) instead of left, right and case.</summary>
 public sealed record AirPodsModel(string Name, string Art, DeviceCapabilities Capabilities, bool SingleBattery);
 
 /// <summary>
-/// The single model table: display name + illustration by AAP 0x1D model number (A-number, names and numbers per
-/// Apple support 109525 "Identify your AirPods") and by proximity-advert model ID (advert bytes 3-4 read
-/// little-endian = Apple's Bluetooth product ID, e.g. 0x2024). Which features to
-/// show is <see cref="DeviceState.Capabilities"/>: what the device reported plus the baseline of its model here.
+/// Model table keyed by AAP 0x1D model number (per Apple support 109525) and by Bluetooth product ID
+/// (proximity advert bytes 3-4, little-endian). Capabilities here are baselines merged into <see cref="DeviceState.Capabilities"/>.
 /// </summary>
 public static class Models
 {
@@ -20,12 +15,12 @@ public static class Models
     public static readonly AirPodsModel Unknown = new("AirPods", "airpods", DeviceCapabilities.None, SingleBattery: false);
 
     private static readonly FrozenDictionary<ushort, AirPodsModel> ByProximityId;
+    private static readonly FrozenDictionary<ushort, string> NumberByProductId;
     private static readonly FrozenDictionary<string, AirPodsModel> ByModelNumber;
 
     static Models()
     {
-        // Baselines per Apple's AirPods User Guide (support.apple.com/guide/airpods, iOS 27) and Apple support 104979.
-        // Ear detection = Automatic Ear Detection (AirPods Max: Automatic Head Detection).
+        // Baselines per Apple's AirPods User Guide and Apple support 104979; EarDetection covers Max head detection.
         const DeviceCapabilities airPods12 = DeviceCapabilities.EarDetection | DeviceCapabilities.MicSide;
         const DeviceCapabilities controls = DeviceCapabilities.PressSpeed | DeviceCapabilities.HoldDuration | DeviceCapabilities.ToneVolume;
         const DeviceCapabilities airPods3 = airPods12 | controls;
@@ -54,12 +49,14 @@ public static class Models
             (new("AirPods Max 2", "max", max2, true), [], ["A3454"]),
         ];
         var byId = new Dictionary<ushort, AirPodsModel>();
+        var numberById = new Dictionary<ushort, string>();
         var byNumber = new Dictionary<string, AirPodsModel>(StringComparer.OrdinalIgnoreCase);
         foreach ((AirPodsModel model, ushort[] ids, string[] numbers) in table)
         {
             foreach (ushort id in ids)
             {
                 byId.Add(id, model);
+                numberById.Add(id, numbers[0]);
             }
             foreach (string number in numbers)
             {
@@ -67,10 +64,14 @@ public static class Models
             }
         }
         ByProximityId = byId.ToFrozenDictionary();
+        NumberByProductId = numberById.ToFrozenDictionary();
         ByModelNumber = byNumber.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
     public static AirPodsModel? FromProximityId(ushort id) => ByProximityId.GetValueOrDefault(id);
+
+    /// <summary>A model number for this product ID, standing in for 0x1D until the AirPods send it.</summary>
+    public static string? ModelNumberOf(ushort productId) => NumberByProductId.GetValueOrDefault(productId);
 
     public static AirPodsModel? FromModelNumber(string? number) => number is null ? null : ByModelNumber.GetValueOrDefault(number);
 }

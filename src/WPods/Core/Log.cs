@@ -5,11 +5,8 @@ using System.Text;
 namespace WPods.Core;
 
 /// <summary>
-/// Always-on diagnostic log: %LOCALAPPDATA%\WPods\logs\wpods.log, one line per entry
-/// ("yyyy-MM-dd HH:mm:ss.fff [tid] LEVEL category: message", local time, UTF-8). Callers only enqueue and signal;
-/// a background thread wakes on the signal, waits 500 ms to batch, then writes (idle: no wakeups). Above 2 MB the file
-/// is renamed to wpods.1.log (one old file kept).
-/// Logging never throws: an unwritable file drops the entries.
+/// Always-on diagnostic log in %LOCALAPPDATA%\WPods\logs, batched by a background thread and capped at 100 MB.
+/// Never throws: entries that cannot be written are dropped.
 /// </summary>
 internal static class Log
 {
@@ -24,7 +21,7 @@ internal static class Log
 
     private readonly record struct Entry(long UtcTicks, int Thread, Level Level, string Category, string Message);
 
-    private const long MaxBytes = 2 * 1024 * 1024;
+    private const long MaxBytes = 100L * 1024 * 1024;
     private const int WriteIntervalMs = 500;
 
     private static readonly ConcurrentQueue<Entry> Queue = new();
@@ -33,7 +30,6 @@ internal static class Log
     private static readonly Lock WriteLock = new();
     private static readonly string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WPods", "logs");
     private static readonly string FilePath = Path.Combine(Folder, "wpods.log");
-    private static readonly string OldPath = Path.Combine(Folder, "wpods.1.log");
 
     // Under WriteLock.
     private static StreamWriter? _writer;
@@ -51,11 +47,10 @@ internal static class Log
     public static void Error(string category, string message, Exception? ex = null) =>
         Add(Level.Error, category, ex is null ? message : message + " | " + ex);
 
-    /// <summary>One AAP packet as hex (RX = inbound, TX = outbound), category "aap".</summary>
     public static void Packet(bool outbound, ReadOnlySpan<byte> packet) =>
         Add(outbound ? Level.Tx : Level.Rx, "aap", Convert.ToHexString(packet));
 
-    /// <summary>Writes everything queued so far (exit, fatal exceptions). Any thread.</summary>
+    /// <summary>Writes all queued entries now; for exit and fatal exceptions.</summary>
     public static void Flush()
     {
         lock (WriteLock)
@@ -120,7 +115,8 @@ internal static class Log
             writer.Flush();
             if (writer.BaseStream.Length > MaxBytes)
             {
-                Rotate(writer);
+                Close();
+                CutOldest();
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException)
@@ -150,11 +146,21 @@ internal static class Log
         return _writer;
     }
 
-    private static void Rotate(StreamWriter writer)
+    // Under WriteLock, file closed: keeps the newest 90 % of MaxBytes, starting at a line.
+    private static void CutOldest()
     {
-        writer.Dispose();
-        _writer = null;
-        File.Move(FilePath, OldPath, overwrite: true);
+        string temp = FilePath + ".tmp";
+        using (var source = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        {
+            source.Position = Math.Max(0, source.Length - (MaxBytes / 10 * 9));
+            int b;
+            while ((b = source.ReadByte()) >= 0 && b != '\n')
+            {
+            }
+            using var target = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None);
+            source.CopyTo(target);
+        }
+        File.Move(temp, FilePath, overwrite: true);
     }
 
     private static void Close()

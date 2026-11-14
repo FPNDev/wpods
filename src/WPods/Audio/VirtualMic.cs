@@ -1,5 +1,7 @@
+using System.Buffers.Binary;
+using System.IO.Pipes;
 using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
+using System.Text;
 using WPods.Core;
 using Timer = System.Threading.Timer;
 
@@ -9,148 +11,173 @@ internal enum CaptureState
 {
     Idle,
     Capturing,
-    /// <summary>The device cannot be opened or its capture state cannot be read.</summary>
+    /// <summary>The virtual mic pipe cannot be opened or its capture state cannot be read.</summary>
     Unavailable,
 }
 
 /// <summary>
-/// \\.\NTA2DPVM: PCM writes plus one pending capture-state IOCTL. Any failure closes the device and reopens it
-/// with a capped backoff, independent of the AAP session. The state callback runs only on change, under the
-/// internal lock (callers must not call back into this class from it).
+/// Client of the WPods.Service virtual mic pipe: sends the target pair and PCM, receives the capture state.
+/// Failures reopen with capped backoff. The state callback runs under the internal lock and must not call back in.
 /// </summary>
-internal sealed unsafe partial class VirtualMic
+internal sealed class VirtualMic
 {
-    private const string DevicePath = @"\\.\NTA2DPVM";
-    private const uint IoctlWaitCaptureState = 0x00226404;
-    private const uint GenericRead = 0x80000000;
-    private const uint GenericWrite = 0x40000000;
-    private const uint FileShareReadWrite = 0x3;
-    private const uint OpenExisting = 3;
-    private const uint FileFlagOverlapped = 0x40000000;
-    private const int ErrorIoPending = 997;
+    private const int MaxPcmBytes = 65536;
     private const int MaxBackoffShift = 6; // 1 s -> 64 s
 
     private readonly Action<CaptureState> _stateChanged;
     private readonly Lock _lock = new();
     private readonly Timer _reopen;
-    private readonly ManualResetEvent _writeDone = new(false);
-    private readonly NativeOverlapped* _writeOverlapped;
-    private Device? _device;
+    private readonly byte[] _pcmMessage = new byte[1 + MaxPcmBytes];
+    private NamedPipeClientStream? _pipe;
+    // The 0x10 message of the pair the mic is for, sent on every (re)connect.
+    private byte[]? _device;
     private CaptureState? _state;
     private int _failures;
 
     public VirtualMic(Action<CaptureState> stateChanged)
     {
         _stateChanged = stateChanged;
-        _reopen = new Timer(static s => ((VirtualMic)s!).Open(), this, Timeout.Infinite, Timeout.Infinite);
-        _writeOverlapped = (NativeOverlapped*)NativeMemory.AllocZeroed((nuint)sizeof(NativeOverlapped));
-        _writeOverlapped->EventHandle = _writeDone.SafeWaitHandle.DangerousGetHandle();
+        _reopen = new Timer(static s => ((VirtualMic)s!).Connect(), this, Timeout.Infinite, Timeout.Infinite);
+        _pcmMessage[0] = ServicePipes.MicPcm;
     }
 
-    public bool IsOpen => Volatile.Read(ref _device) is not null;
+    /// <summary>Opens the pipe on the thread pool; returns at once.</summary>
+    public void Open() => ThreadPool.QueueUserWorkItem(static s => ((VirtualMic)s!).Connect(), this);
 
-    public void Open()
+    /// <summary>
+    /// Sets the pair shown as "Headset (A2DP, name)". <paramref name="reported"/>: the name came from the AirPods; a
+    /// Windows name is only used for a pair the service has no name for yet. Resent on every reopen.
+    /// </summary>
+    public void SetDevice(ulong address, string name, bool reported)
     {
-        SafeFileHandle handle = CreateFile(DevicePath, GenericRead | GenericWrite, FileShareReadWrite, 0, OpenExisting, FileFlagOverlapped, 0);
-        if (handle.IsInvalid)
-        {
-            Log.Warn("vmic", $"open failed, Win32 error {Marshal.GetLastPInvokeError()}");
-            handle.Dispose();
-            lock (_lock)
-            {
-                ScheduleReopenLocked();
-                SetStateLocked(CaptureState.Unavailable);
-            }
-            return;
-        }
-        Log.Info("vmic", "opened");
-        var device = new Device(handle);
-        device.Wait = ThreadPool.RegisterWaitForSingleObject(device.Completed, (s, _) => OnWaitCompleted((Device)s!), device, Timeout.Infinite, executeOnlyOnce: false);
+        byte[] message = new byte[10 + Encoding.UTF8.GetByteCount(name)];
+        message[0] = ServicePipes.MicDevice;
+        BinaryPrimitives.WriteUInt64LittleEndian(message.AsSpan(1), address);
+        message[9] = reported ? (byte)1 : (byte)0;
+        Encoding.UTF8.GetBytes(name, message.AsSpan(10));
         lock (_lock)
         {
-            _device = device;
+            if (_device is not null && message.AsSpan().SequenceEqual(_device))
+            {
+                return;
+            }
+            Log.Info("vmic", $"device {Mac.Format(address)} \"{name}\"");
+            _device = message;
+            if (_pipe is { } pipe)
+            {
+                SendLocked(pipe, message, "device");
+            }
         }
-        WaitForCapture(device);
     }
 
-    /// <summary>Writes mono 48 kHz s16 PCM (at most 32768 samples). Never blocks; dropped while the device is closed.</summary>
+    /// <summary>Writes mono 48 kHz s16 PCM (at most 32768 samples) as one message. Dropped while the pipe is closed.</summary>
     public void Write(ReadOnlySpan<short> pcm)
     {
         lock (_lock)
         {
-            if (_device is not { } device)
+            if (_pipe is not { } pipe)
             {
                 return;
             }
-            fixed (short* data = pcm)
-            {
-                if (WriteFile(device.Handle, data, (uint)(pcm.Length * sizeof(short)), null, _writeOverlapped)
-                    || (Marshal.GetLastPInvokeError() == ErrorIoPending && GetOverlappedResult(device.Handle, _writeOverlapped, out _, true)))
-                {
-                    return;
-                }
-            }
-            // The pending capture IOCTL completes with 995; its callback closes the device.
-            Log.Warn("vmic", $"write failed, Win32 error {Marshal.GetLastPInvokeError()}; closing");
-            _device = null;
-            CancelIoEx(device.Handle, device.Overlapped);
-            ScheduleReopenLocked();
-            SetStateLocked(CaptureState.Unavailable);
+            ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(pcm);
+            bytes.CopyTo(_pcmMessage.AsSpan(1));
+            SendLocked(pipe, _pcmMessage.AsSpan(0, 1 + bytes.Length), "PCM");
         }
     }
 
-    // Issued under the lock so a concurrent write failure either cancels it or is seen here.
-    private void WaitForCapture(Device device)
+    // Thread pool or reopen timer, one at a time: a reopen is scheduled only while the pipe is closed.
+    private void Connect()
     {
+        NamedPipeClientStream? pipe = ServicePipes.Connect(ServicePipes.MicPipe, out int error);
         lock (_lock)
         {
-            if (_device == device)
+            if (pipe is null)
             {
-                bool capturing = _state == CaptureState.Capturing;
-                *device.Input = capturing ? 1u : 0u;
-                if (DeviceIoControl(device.Handle, IoctlWaitCaptureState, device.Input, sizeof(uint), device.Output, sizeof(uint), null, device.Overlapped))
-                {
-                    return;
-                }
-                int error = Marshal.GetLastPInvokeError();
-                if (error == ErrorIoPending)
-                {
-                    // Pending means the state equals the input (this makes an unknown state known after an open).
-                    SetStateLocked(capturing ? CaptureState.Capturing : CaptureState.Idle);
-                    return;
-                }
-                Log.Warn("vmic", $"capture-state IOCTL failed, Win32 error {error}; closing");
-                _device = null;
+                Log.Warn("vmic", $"open failed, Win32 error {error}");
                 ScheduleReopenLocked();
                 SetStateLocked(CaptureState.Unavailable);
+                return;
             }
-            // Nothing pending: no completion will signal the event.
-            Close(device);
+            Log.Info("vmic", "opened");
+            _pipe = pipe;
+            if (_device is { } device)
+            {
+                SendLocked(pipe, device, "device");
+            }
+            if (_pipe != pipe)
+            {
+                // The device write failed and closed it.
+                return;
+            }
+        }
+        _ = ReadLoopAsync(pipe);
+    }
+
+    // Capture-state messages until the pipe fails or the service closes it; then closes it unless that already happened.
+    private async Task ReadLoopAsync(NamedPipeClientStream pipe)
+    {
+        byte[] buffer = new byte[16];
+        string reason;
+        try
+        {
+            while (true)
+            {
+                int count = await pipe.ReadAsync(buffer).ConfigureAwait(false);
+                if (count == 0)
+                {
+                    reason = "pipe closed by the service";
+                    break;
+                }
+                if (buffer[0] != ServicePipes.MicCapture || count < 2)
+                {
+                    Log.Warn("vmic", $"unknown message kind 0x{buffer[0]:X2} ({count} bytes), ignored");
+                    continue;
+                }
+                lock (_lock)
+                {
+                    if (_pipe != pipe)
+                    {
+                        return;
+                    }
+                    _failures = 0;
+                    SetStateLocked(buffer[1] != 0 ? CaptureState.Capturing : CaptureState.Idle);
+                }
+            }
+        }
+        catch (Exception e) when (e is IOException or ObjectDisposedException or OperationCanceledException or InvalidOperationException)
+        {
+            reason = $"read failed: 0x{e.HResult:X8} {e.Message}";
+        }
+        lock (_lock)
+        {
+            if (_pipe == pipe)
+            {
+                Log.Warn("vmic", $"capture state {reason}; closing");
+                CloseLocked();
+            }
         }
     }
 
-    // Wait-thread callback; runs once per completed IOCTL (synchronous completions signal the event too).
-    private void OnWaitCompleted(Device device)
+    private void SendLocked(NamedPipeClientStream pipe, ReadOnlySpan<byte> message, string what)
     {
-        bool ok = GetOverlappedResult(device.Handle, device.Overlapped, out _, false);
-        lock (_lock)
+        try
         {
-            if (!ok || _device != device)
-            {
-                if (_device == device)
-                {
-                    Log.Warn("vmic", "capture-state IOCTL completed with an error; closing");
-                    _device = null;
-                    ScheduleReopenLocked();
-                    SetStateLocked(CaptureState.Unavailable);
-                }
-                Close(device);
-                return;
-            }
-            _failures = 0;
-            SetStateLocked(*device.Output != 0 ? CaptureState.Capturing : CaptureState.Idle);
+            pipe.Write(message);
         }
-        WaitForCapture(device);
+        catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            Log.Warn("vmic", $"{what} write failed: 0x{e.HResult:X8} {e.Message}; closing");
+            CloseLocked();
+        }
+    }
+
+    // A pending capture-state read completes with an error; its loop then sees the pipe is no longer current.
+    private void CloseLocked()
+    {
+        _pipe!.Dispose();
+        _pipe = null;
+        ScheduleReopenLocked();
+        SetStateLocked(CaptureState.Unavailable);
     }
 
     private void SetStateLocked(CaptureState state)
@@ -170,50 +197,4 @@ internal sealed unsafe partial class VirtualMic
         _reopen.Change(1000 << _failures, Timeout.Infinite);
         _failures = Math.Min(_failures + 1, MaxBackoffShift);
     }
-
-    // Called with no I/O pending on the device.
-    private static void Close(Device device)
-    {
-        device.Wait!.Unregister(null);
-        device.Completed.Dispose();
-        device.Handle.Dispose();
-        NativeMemory.Free(device.Overlapped);
-    }
-
-    // One open handle with its IOCTL OVERLAPPED (+ in/out ULONGs in the same block) and completion event.
-    private sealed class Device
-    {
-        public Device(SafeFileHandle handle)
-        {
-            Handle = handle;
-            Overlapped = (NativeOverlapped*)NativeMemory.AllocZeroed((nuint)(sizeof(NativeOverlapped) + 2 * sizeof(uint)));
-            Overlapped->EventHandle = Completed.SafeWaitHandle.DangerousGetHandle();
-        }
-
-        public SafeFileHandle Handle { get; }
-        public AutoResetEvent Completed { get; } = new(false);
-        public NativeOverlapped* Overlapped { get; }
-        public uint* Input => (uint*)(Overlapped + 1);
-        public uint* Output => Input + 1;
-        public RegisteredWaitHandle? Wait { get; set; }
-    }
-
-    [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    private static partial SafeFileHandle CreateFile(string path, uint access, uint share, nint security, uint disposition, uint flags, nint template);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool WriteFile(SafeFileHandle file, void* buffer, uint length, uint* written, NativeOverlapped* overlapped);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool DeviceIoControl(SafeFileHandle device, uint code, void* input, uint inputLength, void* output, uint outputLength, uint* returned, NativeOverlapped* overlapped);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GetOverlappedResult(SafeFileHandle file, NativeOverlapped* overlapped, out uint transferred, [MarshalAs(UnmanagedType.Bool)] bool wait);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool CancelIoEx(SafeFileHandle file, NativeOverlapped* overlapped);
 }
