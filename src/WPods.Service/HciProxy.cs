@@ -990,7 +990,7 @@ internal sealed class HciProxy
         {
             int n = Math.Min(_aclMaxLength, l2.Length - off);
             var acl = new byte[4 + n];
-            int pb = off == 0 ? 0b10 : 0b01;
+            int pb = off == 0 ? 0b00 : 0b01;
             BinaryPrimitives.WriteUInt16LittleEndian(acl, (ushort)(link.Handle | (pb << 12)));
             BinaryPrimitives.WriteUInt16LittleEndian(acl.AsSpan(2), (ushort)n);
             Array.Copy(l2, off, acl, 4, n);
