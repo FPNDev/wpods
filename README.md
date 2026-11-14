@@ -12,11 +12,11 @@
 
 </div>
 
+> [!TIP]
+> **No Test Mode. No Secure Boot changes.** Most AirPods apps for Windows ask you to switch Windows into Test Mode to get all their features, which lowers your PC's security. WPods doesn't: you install it like any other app, and Secure Boot stays on. To our knowledge, WPods is the only AirPods app for Windows that gives you every feature this way.
+
 > [!NOTE]
 > WPods is an independent project. It is not made, affiliated with, sponsored, endorsed or supported by Apple Inc. Apple product and feature names are used only to describe compatibility.
-
-> [!WARNING]
-> WPods needs Windows **Test Mode** turned on and **Secure Boot** turned off. This weakens Windows security while Test Mode is on. Please read [Before you install](#before-you-install) first.
 
 <p align="center">
   <a href="https://github.com/FPNDev/wpods/releases/latest"><b>Download</b></a> |
@@ -41,14 +41,14 @@
 
 ## Why WPods
 
-- **Free and open source.** GPL-3.0, drivers included. No trial, no subscription.
-- **Stereo sound while the mic is on.** Your AirPods mic shows up in Windows as "Headset (A2DP)". Music and game audio stay stereo instead of dropping to the low-quality hands-free mode.
+- **Free and open source.** GPL-3.0, no drivers of its own. No trial, no subscription.
+- **Stereo sound while the mic is on.** Your AirPods mic shows up in Windows as `Headset (A2DP, <AirPods name>)`, for example "Headset (A2DP, AirPods Pro)". Music and game audio stay stereo instead of dropping to the low-quality hands-free mode.
 - **Mic modes you can tune.** Standard, Voice Isolation and Wide Spectrum, each with a choice of noise-suppression models that run locally on your PC. Over a dozen models, plus Raw (no processing). Every model shows how heavy it is.
 - **Voice enhancement.** Make your voice clearer and more even for calls.
 - **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid and Media Assist, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
 - **Nearby popup, like on iPhone.** When your AirPods are near and connected to another device, WPods shows them with their battery. One click to connect. Works with several pairs.
 - **Low audio latency mode** for games and calls.
-- **One installer does it all.** It installs .NET and WebView2 if missing, sets up Test Mode and installs the drivers. Uninstall can turn Test Mode back off.
+- **One installer does it all.** It installs .NET and WebView2 if missing, plus WPods' background service and usbip-win2. Works with Secure Boot on.
 - **Looks at home on Windows.** Light, Dark or Auto theme and your Windows accent color. 45 languages.
 
 ## Features
@@ -116,7 +116,7 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 
 For each pair (while connected):
 
-- **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. If you leave Hands-Free mode on, an app that uses the Hands-Free mic takes over the AirPods mic, and "Headset (A2DP)" goes quiet until that app stops using it.
+- **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. If you leave Hands-Free mode on, an app that uses the Hands-Free mic takes over the AirPods mic, and `Headset (A2DP, <AirPods name>)` goes quiet until that app stops using it.
 - **Low audio latency** gives less delay for games and calls. It keeps your AirPods awake and may use more battery.
 
 For the app:
@@ -159,7 +159,7 @@ There are other projects for AirPods on Windows and beyond. Here is how they lin
 | Platforms                                  | Windows 11   | Windows 10/11                                         | Windows 11                                                     | Android, Linux                                        | Windows (+ Linux via Steam)          |
 | Price                                      | Free         | Free                                                  | Free                                                           | Free                                                  | Paid (trial)                         |
 | Open source                                | Yes, GPL-3.0 | Yes, GPL-3.0                                          | Yes, GPL-3.0                                                   | Yes, GPL-3.0                                          | No                                   |
-| Needs Test Mode                            | Yes          | Yes                                                   | Only for optional drivers                                      | No (Android: root on most devices)                    | Only for MagicAAP driver             |
+| Needs Test Mode                            | **No**       | Yes                                                   | Only for optional drivers                                      | No (Android: root on most devices)                    | Only for MagicAAP driver             |
 | Battery incl. case                         | Yes          | Yes                                                   | Yes                                                            | Yes                                                   | Yes                                  |
 | Ear detection                              | Yes          | Yes                                                   | Partial                                                        | Yes                                                   | Yes                                  |
 | Noise control incl. Adaptive               | Yes          | Yes                                                   | Yes                                                            | Yes                                                   | Yes (with MagicAAP)                  |
@@ -186,60 +186,47 @@ Based on each project's README, website and source code as of 2026-10-26. If som
 
 - Windows 11, x64.
 - Administrator rights to install.
-- Bluetooth.
-- Secure Boot turned off.
-- A restart during install.
 - Internet during setup, if .NET 10 Desktop Runtime or Microsoft Edge WebView2 Runtime are missing. Setup downloads them and runs them only if they are signed by Microsoft.
 
-### Test Mode
+### Tested on
 
-> [!CAUTION]
-> **WPods needs Windows Test Mode. Please read this before you install.**
->
-> - WPods installs its own kernel drivers. They are test-signed by the WPods project, not signed by Microsoft.
-> - To load them, Setup turns on Windows test signing (Test Mode). A restart is needed.
-> - Test Mode requires Secure Boot to be off. If it is on, Setup stops and explains how to turn it off: restart into UEFI/BIOS, set Secure Boot to Disabled, save, then run Setup again. Have your BitLocker recovery key ready before changing Secure Boot.
-> - **Security:** while Test Mode is on, Windows loads any test-signed kernel driver, not only WPods' drivers. This weakens Windows security for as long as Test Mode is on.
-> - **BitLocker:** Setup suspends BitLocker for one restart, so turning on test signing does not trigger a recovery prompt.
-> - Windows shows a "Test Mode" watermark on the desktop while Test Mode is on. See [The Test Mode watermark](#the-test-mode-watermark).
-> - You do this at your own risk. WPods comes with no warranty.
+- **AirPods:** AirPods Pro 2 and AirPods Pro 3.
+- **Bluetooth adapter:** Intel Wi-Fi 6E AX211 Bluetooth (USB ID 8087:0033).
 
-> [!IMPORTANT]
-> This is reversible. Uninstalling WPods can turn Test Mode off for you, or you can turn it off yourself. See [Uninstall](#uninstall). Once Test Mode is off, you can turn Secure Boot back on.
+Other AirPods models and other Bluetooth adapters (Realtek, MediaTek, Qualcomm, Broadcom and others) are supported but haven't been tested yet. On some PCs the Bluetooth adapter is one part of a combined USB device. WPods supports these too, but they haven't been tested yet either.
 
-### The Test Mode watermark
+**Your adapter helps everyone.** Every Bluetooth adapter is a little different, so please tell us how WPods works with yours, even if everything just works: [send an adapter report](https://github.com/FPNDev/wpods/issues/new?template=adapter_report.yml). It takes two minutes and shows the next person that their adapter is safe to use.
 
-With Test Mode on, Windows shows a "Test Mode" watermark in the corner of your desktop. WPods leaves it alone. If it bothers you, you can hide it with [no-test-mode-wm](https://github.com/FPNDev/no-test-mode-wm). It is a separate, unofficial tool that hooks into Windows Explorer, so it may stop working after Windows updates. Read its README before you use it.
+### What Setup changes
+
+- **Your Bluetooth adapter:** WPods' background service takes it over with WinUSB (built into Windows) and hands it back to Windows as a virtual adapter. Your Bluetooth devices keep working.
+- **usbip-win2:** Setup silently installs these Microsoft-signed USB/IP drivers by Vadym Hrynchyshyn (BSD 2-Clause). They provide the virtual Bluetooth adapter and the WPods mic.
+- **Reversible:** the adapter goes back to Windows' own driver when you uninstall WPods, and on its own if the takeover fails 3 times in 10 minutes.
+- You do this at your own risk. WPods comes with no warranty.
+
+### Upgrading from an older version that used Test Mode
+
+Older versions of WPods needed Windows Test Mode and Secure Boot off. This version needs neither. Setup offers to turn Test Mode off and suggests turning Secure Boot back on. Have your BitLocker recovery key ready: Windows may ask for it after these changes.
 
 ## Install
 
-1. **Turn off Secure Boot first.** Setup checks and tells you how. Have your BitLocker recovery key ready.
-2. **Download** `WPods-Setup.exe` from the [latest release](https://github.com/FPNDev/wpods/releases/latest).
-3. **Run it.** Read and accept the terms. They explain Test Mode.
-4. **Choose your options:**
+1. **Download** `WPods-Setup.exe` from the [latest release](https://github.com/FPNDev/wpods/releases/latest).
+2. **Run it.** Read and accept the terms. They explain the Bluetooth adapter takeover.
+3. **Choose your options:**
    - Create a desktop shortcut (off by default).
    - Start WPods when I sign in (on by default).
-5. Setup installs .NET and WebView2 if missing, turns on Test Mode, and installs WPods and its drivers.
-6. **Restart Windows.** WPods can't connect until you restart, because the drivers load at startup.
-7. **Open WPods** and accept the terms on the welcome screen. Open your AirPods case near your PC (AirPods Max: take them out of the Smart Case) and click **Connect**. Not paired yet? Use "Pair new AirPods" or "Open Bluetooth settings".
+   - Keep WPods up to date automatically (on by default).
+4. Setup installs .NET and WebView2 if missing, then WPods, its background service and usbip-win2. Restart if Setup asks you to.
+5. **Open WPods** and accept the terms on the welcome screen. Open your AirPods case near your PC (AirPods Max: take them out of the Smart Case) and click **Connect**. Not paired yet? Use "Pair new AirPods" or "Open Bluetooth settings".
 
-If the driver install fails, run Setup again.
+If the install fails, run Setup again.
 
-**Updating:** run the new Setup. It closes WPods and keeps your startup choice. Restart when convenient.
+**Updating:** WPods keeps itself up to date. It checks for new versions, downloads them in the background and installs them the next time WPods starts. To update right away, click **Update now** when WPods shows a new version. You can turn automatic updates off in WPods' Windows settings page. Running a newer Setup by hand works too and keeps your choices.
 
 ## Uninstall
 
 1. Open Windows **Settings > Apps > Installed apps**, find **WPods** and choose **Uninstall**.
-2. Choose whether to also remove your WPods settings (No by default). It then removes the drivers and the startup entry.
-3. If WPods Setup turned Test Mode on, it asks "Turn Windows test mode off as well?" (default No). Say **Yes** to undo the security change.
-
-To turn Test Mode off yourself, open a Command Prompt as administrator, run this, then restart:
-
-```
-bcdedit /set testsigning off
-```
-
-Once Test Mode is off, you can turn Secure Boot back on.
+2. Choose whether to also remove your WPods settings (No by default). It then gives your Bluetooth adapter back to Windows' own driver and removes WPods and the startup entry.
 
 ## Languages
 
@@ -253,12 +240,54 @@ Choose "Same as Windows" or pick a language in WPods' Windows settings page. It 
 
 ## Help and feedback
 
-Found a bug, have an idea, or something doesn't work with your AirPods? Please [open an issue](https://github.com/FPNDev/wpods/issues).
+Found a bug, have an idea, or something doesn't work with your AirPods? Please [open an issue](https://github.com/FPNDev/wpods/issues/new/choose).
+
+### Reporting a problem
+
+The issue form asks for a few details. They help us find the cause much faster, especially your Bluetooth adapter and the WPods logs.
+
+<details>
+<summary>How do I find my Bluetooth adapter?</summary>
+
+1. Right-click the Start button and choose **Device Manager**.
+2. Expand **Bluetooth**. Your adapter is the entry with a name like "Intel(R) Wireless Bluetooth(R)", "Realtek Bluetooth Adapter" or "MediaTek Bluetooth Adapter" (not your headphones or other devices).
+3. Right-click it > **Properties** > **Details** tab > choose **Hardware Ids**. Copy the first line, for example `USB\VID_8087&PID_0033&REV_0000`.
+
+Put the name and that line in your report.
+
+</details>
+
+<details>
+<summary>How do I get the WPods logs?</summary>
+
+WPods keeps two logs:
+
+- The background service: `C:\ProgramData\WPods\logs`
+- The app: `%LOCALAPPDATA%\WPods\logs` (paste this into the File Explorer address bar)
+
+Right-click each `logs` folder > **Compress to ZIP file**, then drag both zips into the issue. If they are bigger than 25 MB, upload them to OneDrive, Google Drive or similar and paste the link.
+
+The logs contain the names and Bluetooth addresses of your devices. They never contain pairing keys, audio, or anything you type.
+
+</details>
+
+<details>
+<summary>Which Windows version do I have?</summary>
+
+Press **Win+R**, type `winver` and press Enter. Copy the version and build, for example "Version 24H2 (OS Build 26100.2605)".
+
+</details>
+
+<details>
+<summary>Which WPods version do I have?</summary>
+
+Open WPods' Windows settings page. The version is shown under **Updates**.
+
+</details>
 
 ## License and legal
 
 WPods is free software under the GPL-3.0 license. See [LICENSE](LICENSE). Third-party components and their licenses are listed in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
-
 WPods is not made, affiliated with, sponsored, endorsed or supported by Apple Inc.
 
 Apple, AirPods, AirPods Pro, AirPods Max, iPhone, iPad and Mac are trademarks of Apple Inc., registered in the U.S. and other countries. Feature names (Noise Cancellation, Transparency, Adaptive, Conversation Awareness, Personalized Volume, Hearing Assistance, Hearing Aid, Media Assist, Standard, Voice Isolation, Wide Spectrum) are Apple's names, used only to describe compatibility.

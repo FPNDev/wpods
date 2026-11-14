@@ -15,7 +15,8 @@ FFmpeg 7.1.5
   License:   GNU Lesser General Public License, version 2.1 or later (text below)
   Source:    https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz, built unmodified by native\build-ffmpeg.ps1 in the
              WPods source repository (LGPL build: no --enable-gpl, no --enable-nonfree)
-
+  Relinking: WPods loads these DLLs dynamically. You may replace them with your own build of FFmpeg, and you may
+             modify and reverse-engineer WPods as far as needed to do so and to debug such changes.
 RNNoise 0.2 (with its built-in model)
   Files:     rnnoise.dll
   Copyright: Copyright (c) 2007-2017, 2024 Jean-Marc Valin
@@ -26,7 +27,7 @@ RNNoise 0.2 (with its built-in model)
   License:   BSD-3-Clause (text below)
 
 DeepFilterNet, libDF v0.5.6 (commit 978576aa8400552a4ce9730838c635aa30db5e61), unmodified
-  Files:     deepfilter.dll, models\DeepFilterNet3_onnx.tar.gz (pretrained DeepFilterNet3 model)
+  Files:     deepfilter.dll, DeepFilterNet3_onnx.tar.gz (pretrained DeepFilterNet3 model)
   Copyright: Copyright (c) 2021 Hendrik Schröter
   License:   MIT OR Apache-2.0; WPods uses it under the MIT License (text [9] under "DeepFilterNet Rust crates")
   deepfilter.dll statically links the Rust crates listed under "DeepFilterNet Rust crates" below.
@@ -34,10 +35,22 @@ DeepFilterNet, libDF v0.5.6 (commit 978576aa8400552a4ce9730838c635aa30db5e61), u
 webrtc-audio-processing 2.1 and abseil-cpp 20240722.0
   Files:     webrtc_apm.dll (both libraries statically linked, unmodified, together with WPods' own C wrapper)
   Copyright: webrtc-audio-processing: Copyright (c) 2011, The WebRTC project authors. All rights reserved.
+                                      Copyright (c) 2011, Google Inc. All rights reserved.
              abseil-cpp: Copyright 2017-2024 The Abseil Authors (AUTHORS file: Google Inc.)
                          Copyright 2016-2017 Google Inc. All Rights Reserved.
-  License:   webrtc-audio-processing: BSD-3-Clause (text below)
+  License:   webrtc-audio-processing: BSD-3-Clause, with Google's additional patent grant (texts below)
              abseil-cpp: Apache License 2.0 (text below)
+  Third-party code in the webrtc-audio-processing source tree, each under its own license (texts below):
+             pffft (Julien Pommier; FFTPACK, UCAR), RNNoise (copy in webrtc\third_party\rnnoise),
+             Ooura FFT (Takuya Ooura), fft (Mark Olesen), spl_sqrt_floor (Wilco Dijkstra, public domain)
+
+.NET libraries System.ServiceProcess.ServiceController 10.0.0 and System.Diagnostics.EventLog 10.0.0
+  Files:     System.ServiceProcess.ServiceController.dll, System.Diagnostics.EventLog.dll,
+             System.Diagnostics.EventLog.Messages.dll (NuGet packages, unmodified)
+  Copyright: Copyright (c) .NET Foundation and Contributors
+             (c) Microsoft Corporation. All rights reserved.
+  License:   MIT License (text below)
+  Notices:   THIRD-PARTY-NOTICES.TXT of these packages, shipped as dotnet-THIRD-PARTY-NOTICES.txt
 
 ONNX Runtime 1.31.0 (commit 402979ac1bef89dcd55add41eaa7277c407599eb)
   Files:     onnxruntime.dll
@@ -78,6 +91,128 @@ NSNet2 (Microsoft DNS-Challenge), commit 5582dcf5ba43155621de72a035eb54a7d233af1
              Code: MIT License (same Microsoft MIT text as [38] under "DeepFilterNet Rust crates")
   Modified:  Yes. WPods changed the model graph so the GRU states are graph inputs and outputs
              (native\export\export_nsnet2.py in the WPods source repository). The weights are unchanged.
+
+usbip-win2 (Vadym Hrynchyshyn)
+  Files:     usbip-win2 USB/IP client drivers (Microsoft-signed), installed silently by Setup
+  Copyright: Copyright (c) 2021-2026, Vadym Hrynchyshyn <vadimgrn@gmail.com>
+  License:   BSD 2-Clause License (text below)
+  Source:    https://github.com/vadimgrn/usbip-win2
+
+hyphen 1.14.1 (Yevhen Tiurin)
+  Files:     web\chunks\*.js (the library code, hyphen.js and export-contract.js, bundled and minified into the
+             WPods web UI scripts)
+  Copyright: Copyright (c) 2026, Yevhen Tiurin <yevhentiurin@gmail.com>
+  License:   ISC License (text below)
+  Source:    https://github.com/ytiurin/hyphen (tag v1.14.1), npm package https://www.npmjs.com/package/hyphen
+
+Hyphenation patterns from hyphen 1.14.1 (TeX hyphenation patterns of the hyph-utf8 package)
+  Files:     web\chunks\<id>-*.js for the pattern ids listed below (hyphen's patterns\<id>.js, minified)
+  Source:    https://github.com/ytiurin/hyphen/tree/v1.14.1/tex (file hyph-<id>.tex; hyph-nb.tex loads
+             hyph-no.tex), originally from https://github.com/hyphenation/tex-hyphen (hyph-utf8)
+  Modified:  Yes. The hyphen project converted each hyph-<id>.tex file to JavaScript (patterns\<id>.js), and the
+             WPods build minified these files.
+  License:   Each pattern set belongs to its authors and is used under its own license, listed below with the
+             copyright lines from the header of its hyph-<id>.tex file. Where a set offers a choice of licenses,
+             WPods uses it under the license named after "WPods uses". The license texts follow below.
+
+  bg (Bulgarian)
+    Copyright: Copyright (C) 2000, 2004, 2017 Anton Zinoviev
+    License:   Anton Zinoviev's permissive license (BSD-like) (text below)
+  bn (Bengali)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  cs (Czech)
+    Copyright: Copyright (C) 1995 Pavel Ševeček
+    License:   GNU GPL 2 or later; WPods uses GNU GPL 3 (text in LICENSE.txt)
+  da (Danish)
+    Copyright: Copyright (C) 1994 Frank Jensen
+    License:   LPPL 1.3 or later, or MIT; WPods uses MIT (text below)
+  de-1996 (German, reformed spelling)
+    Copyright: Copyright (c) 2013-2024 Stephan Hennig, Werner Lemberg, Günter Milde, Sander van Geloven,
+               Georg Pfeiffer, Gisbert W. Selke, Tobias Wendorf, Keno Wehr
+    License:   MIT (text below)
+  el-monoton (Modern Greek, monotonic spelling)
+    Copyright: Copyright (C) 2008-2011 Dimitrios Filippou
+    License:   LPPL or MIT; WPods uses MIT (text below)
+  en-gb (English, British spelling)
+    Copyright: Copyright (C) 1992, 1996, 2005, 2016 Dominik Wujastyk, Graham Toal
+    License:   MIT (text below)
+  en-us (English, American spelling)
+    Copyright: Copyright (C) 1990, 2004, 2005 Gerard D.C. Kuiken
+    License:   Permissive notice of the file (text below)
+  es (Spanish)
+    Copyright: Copyright (C) 1993, 1997 Javier Bezos, 2001-2019 Javier Bezos, CervanTeX
+    License:   MIT (text below)
+  fi (Finnish)
+    Copyright: Copyright (C) 1986, 1988, 1989 Kauko Saarinen
+    License:   Permissive notice of the file (text below)
+  fr (French)
+    Copyright: Copyright (C) 1994-2002 Daniel Flipo, Bernard Gaulle, 2016 Arthur Reutenauer
+    License:   MIT (text below)
+  gu (Gujarati)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  hi (Hindi)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  hr (Croatian)
+    Copyright: Copyright (C) 1994, 1996, 2011, 2015 Igor Marinović
+    License:   LPPL 1.0 or later, or the permissive license of the file; WPods uses the permissive license
+               (text below)
+  hu (Hungarian)
+    Copyright: Copyright (C) 2003 Bence Nagy
+    License:   MPL 1.1, GNU GPL 2.0 or GNU LGPL 2.1, at your option; WPods uses GNU LGPL 2.1 (text below)
+  it (Italian)
+    Copyright: Copyright (C) 2008-2011 Claudio Beccari
+    License:   LPPL 1.3 or later, or MIT; WPods uses MIT (text below)
+  kn (Kannada)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  lt (Lithuanian)
+    Copyright: Copyright (C) 1992 Sigitas Tolušis, Yannis Haralambous
+    License:   MIT (text below)
+  ml (Malayalam)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  mr (Marathi)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  nb (Norwegian Bokmål)
+    Copyright: hyph-nb.tex: Copyright (C) 2004-2005 Rune Kleveland, Ole Michael Selberg, 2007 Karl Ove Hufthammer
+               hyph-no.tex (loaded by hyph-nb.tex): Copyright (C) 2004, 2005 Rune Kleveland, Ole Michael Selberg
+    License:   Permissive notices of the two files (text below)
+  nl (Dutch)
+    Copyright: Copyright (C) 1996 Piet Tutelaers
+    License:   MIT (text below)
+  or (Odia)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  pa (Panjabi)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  pl (Polish)
+    Copyright: Copyright (C) 1987-1995 Hanna Kołodziejska, Bogusław Jackowski, Marek Ryćko
+    License:   MIT, or public domain under the conditions specified by the author of TeX; WPods uses MIT
+               (text below)
+  pt (Portuguese)
+    Copyright: Copyright (C) 1987, 1994, 1996, 2015 Pedro J. de Rezende, 1996, 2015 J. Joao Dias Almeida,
+               2024 Leonardo Araujo and Aline Benevides
+    License:   BSD-3-Clause (text below)
+  sk (Slovak)
+    Copyright: Copyright (C) 1992 Jana Chlebíková
+    License:   GNU GPL 2 or later; WPods uses GNU GPL 3 (text in LICENSE.txt)
+  sl (Slovenian)
+    Copyright: Copyright (C) 1990 Matjaž Vrečko
+    License:   LPPL 1.0 or later, or MIT; WPods uses MIT (text below)
+  ta (Tamil)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  te (Telugu)
+    Copyright: Copyright (C) 2016 Santhosh Thottingal
+    License:   MIT, GNU LGPL 3 or later, or GNU GPL 3 or later; WPods uses MIT (text below)
+  uk (Ukrainian)
+    Copyright: Copyright (C) 1998-2001 Maksym Polyakov
+    License:   MIT or LPPL; WPods uses MIT (text below)
 
 
 ===============================================================================
@@ -1209,12 +1344,48 @@ License texts
 
 
 -------------------------------------------------------------------------------
-BSD-3-Clause: RNNoise
+BSD 2-Clause License: usbip-win2
 -------------------------------------------------------------------------------
 
+BSD 2-Clause License
+
+Copyright (c) 2021-2026, Vadym Hrynchyshyn <vadimgrn@gmail.com>
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+-------------------------------------------------------------------------------
+BSD-3-Clause: RNNoise (rnnoise.dll, and the RNNoise copy in webrtc-audio-processing)
+-------------------------------------------------------------------------------
+
+RNNoise 0.2 (rnnoise.dll):
 Copyright (c) 2007-2017, 2024 Jean-Marc Valin
 Copyright (c) 2023 Amazon
 Copyright (c) 2017, Mozilla
+Copyright (c) 2005-2017, Xiph.Org Foundation
+Copyright (c) 2003-2004, Mark Borgerding
+
+RNNoise copy in webrtc-audio-processing 2.1 (webrtc\third_party\rnnoise, in webrtc_apm.dll):
+Copyright (c) 2017, Mozilla
+Copyright (c) 2007-2017, Jean-Marc Valin
 Copyright (c) 2005-2017, Xiph.Org Foundation
 Copyright (c) 2003-2004, Mark Borgerding
 
@@ -1249,7 +1420,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 BSD-3-Clause: webrtc-audio-processing
 -------------------------------------------------------------------------------
 
+webrtc\LICENSE:
 Copyright (c) 2011, The WebRTC project authors. All rights reserved.
+
+COPYING:
+Copyright (c) 2011, Google Inc. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are
@@ -1278,6 +1453,182 @@ DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+-------------------------------------------------------------------------------
+Additional IP Rights Grant (Patents): webrtc-audio-processing (webrtc\PATENTS)
+-------------------------------------------------------------------------------
+
+Additional IP Rights Grant (Patents)
+
+"This implementation" means the copyrightable works distributed by
+Google as part of the WebRTC code package.
+
+Google hereby grants to you a perpetual, worldwide, non-exclusive,
+no-charge, irrevocable (except as stated in this section) patent
+license to make, have made, use, offer to sell, sell, import,
+transfer, and otherwise run, modify and propagate the contents of this
+implementation of the WebRTC code package, where such license applies
+only to those patent claims, both currently owned by Google and
+acquired in the future, licensable by Google that are necessarily
+infringed by this implementation of the WebRTC code package. This
+grant does not include claims that would be infringed only as a
+consequence of further modification of this implementation. If you or
+your agent or exclusive licensee institute or order or agree to the
+institution of patent litigation against any entity (including a
+cross-claim or counterclaim in a lawsuit) alleging that this
+implementation of the WebRTC code package or any code incorporated
+within this implementation of the WebRTC code package constitutes
+direct or contributory patent infringement, or inducement of patent
+infringement, then any patent rights granted to you under this License
+for this implementation of the WebRTC code package shall terminate as
+of the date such litigation is filed.
+
+-------------------------------------------------------------------------------
+pffft and FFTPACK license: webrtc-audio-processing (webrtc\third_party\pffft)
+-------------------------------------------------------------------------------
+
+Copyright (c) 2013  Julien Pommier ( pommier@modartt.com )
+
+Based on original fortran 77 code from FFTPACKv4 from NETLIB,
+authored by Dr Paul Swarztrauber of NCAR, in 1985.
+
+As confirmed by the NCAR fftpack software curators, the following
+FFTPACKv5 license applies to FFTPACKv4 sources. My changes are
+released under the same terms.
+
+FFTPACK license:
+
+http://www.cisl.ucar.edu/css/software/fftpack5/ftpk.html
+
+Copyright (c) 2004 the University Corporation for Atmospheric
+Research ("UCAR"). All rights reserved. Developed by NCAR's
+Computational and Information Systems Laboratory, UCAR,
+www.cisl.ucar.edu.
+
+Redistribution and use of the Software in source and binary forms,
+with or without modification, is permitted provided that the
+following conditions are met:
+
+- Neither the names of NCAR's Computational and Information Systems
+Laboratory, the University Corporation for Atmospheric Research,
+nor the names of its sponsors or contributors may be used to
+endorse or promote products derived from this Software without
+specific prior written permission.
+
+- Redistributions of source code must retain the above copyright
+notices, this list of conditions, and the disclaimer below.
+
+- Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions, and the disclaimer below in the
+documentation and/or other materials provided with the
+distribution.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE CONTRIBUTORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+Ooura FFT license: webrtc-audio-processing (webrtc\common_audio\third_party\ooura)
+-------------------------------------------------------------------------------
+
+http://www.kurims.kyoto-u.ac.jp/~ooura/fft.html
+Copyright Takuya OOURA, 1996-2001
+
+You may use, copy, modify and distribute this code for any purpose (include
+commercial use) and without fee. Please refer to this package when you modify
+this code.
+
+-------------------------------------------------------------------------------
+fft license: webrtc-audio-processing (webrtc\modules\third_party\fft)
+-------------------------------------------------------------------------------
+
+Copyright(c)1995,97 Mark Olesen <olesen@me.QueensU.CA>
+   Queen's Univ at Kingston (Canada)
+
+Permission to use, copy, modify, and distribute this software for
+any purpose without fee is hereby granted, provided that this
+entire notice is included in all copies of any software which is
+or includes a copy or modification of this software and in all
+copies of the supporting documentation for such software.
+
+THIS SOFTWARE IS BEING PROVIDED "AS IS", WITHOUT ANY EXPRESS OR
+IMPLIED WARRANTY.  IN PARTICULAR, NEITHER THE AUTHOR NOR QUEEN'S
+UNIVERSITY AT KINGSTON MAKES ANY REPRESENTATION OR WARRANTY OF ANY
+KIND CONCERNING THE MERCHANTABILITY OF THIS SOFTWARE OR ITS
+FITNESS FOR ANY PARTICULAR PURPOSE.
+
+All of which is to say that you can do what you like with this
+source code provided you don't try to sell it as your own and you
+include an unaltered copy of this message (including the
+copyright).
+
+It is also implicitly understood that bug fixes and improvements
+should make their way back to the general Internet community so
+that everyone benefits.
+
+-------------------------------------------------------------------------------
+spl_sqrt_floor: webrtc-audio-processing (webrtc\common_audio\third_party\spl_sqrt_floor)
+-------------------------------------------------------------------------------
+
+Written by Wilco Dijkstra, 1996. The following email exchange establishes the
+license.
+
+From: Wilco Dijkstra <Wilco.Dijkstra@ntlworld.com>
+Date: Fri, Jun 24, 2011 at 3:20 AM
+Subject: Re: sqrt routine
+To: Kevin Ma <kma@google.com>
+Hi Kevin,
+Thanks for asking. Those routines are public domain (originally posted to
+comp.sys.arm a long time ago), so you can use them freely for any purpose.
+Cheers,
+Wilco
+
+----- Original Message -----
+From: "Kevin Ma" <kma@google.com>
+To: <Wilco.Dijkstra@ntlworld.com>
+Sent: Thursday, June 23, 2011 11:44 PM
+Subject: Fwd: sqrt routine
+Hi Wilco,
+I saw your sqrt routine from several web sites, including
+http://www.finesse.demon.co.uk/steven/sqrt.html.
+Just wonder if there's any copyright information with your Successive
+approximation routines, or if I can freely use it for any purpose.
+Thanks.
+Kevin
+
+-------------------------------------------------------------------------------
+MIT License: System.ServiceProcess.ServiceController, System.Diagnostics.EventLog (.NET)
+-------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) .NET Foundation and Contributors
+
+All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 -------------------------------------------------------------------------------
 Microsoft.Web.WebView2 license
@@ -1737,8 +2088,544 @@ Apache License 2.0: abseil-cpp, DPDFNet, prost (Rust crate)
    limitations under the License.
 
 -------------------------------------------------------------------------------
-GNU Lesser General Public License, version 2.1: FFmpeg
+ISC License: hyphen
 -------------------------------------------------------------------------------
+
+ISC License (ISC)
+
+Copyright (c) 2026, Yevhen Tiurin <yevhentiurin@gmail.com>
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+-------------------------------------------------------------------------------
+Bulgarian patterns license (BSD-like): hyphenation patterns bg (Bulgarian)
+-------------------------------------------------------------------------------
+
+Copyright (C) 2000,2004,2017 by Anton Zinoviev <anton@lml.bas.bg>
+
+This software may be used, modified, copied, distributed, and sold,
+both in source and binary form provided that the above copyright
+notice and these terms are retained. The name of the author may not
+be used to endorse or promote products derived from this software
+without prior permission.  THIS SOFTWARE IS PROVIDES "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED.  IN NO EVENT
+SHALL THE AUTHOR BE LIABLE FOR ANY DAMAGES ARISING IN ANY WAY OUT
+OF THE USE OF THIS SOFTWARE.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns bn, gu, hi, kn, ml, mr, or, pa, ta, te
+-------------------------------------------------------------------------------
+
+Bengali, Gujarati, Hindi, Kannada, Malayalam, Marathi, Odia, Panjabi, Tamil and Telugu. The ten files carry
+the same copyright line and the same MIT text, so they share one copy.
+
+Copyright (C) 2016 Santhosh Thottingal
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+GNU General Public License, version 2 or later: hyphenation patterns cs (Czech), sk (Slovak)
+-------------------------------------------------------------------------------
+
+cs: Copyright (C) 1995 Pavel Ševeček
+sk: Copyright (C) 1992 Jana Chlebíková
+
+The headers of hyph-cs.tex and hyph-sk.tex license these files under the GNU General Public License,
+version 2 or (at your option) any later version (http://www.gnu.org/licenses/gpl.html). WPods uses them under
+the GNU General Public License, version 3, as the "or later" option allows. The full text of the GNU General
+Public License, version 3 is in LICENSE.txt.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns da (Danish)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1994 Frank Jensen
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns de-1996 (German, reformed spelling)
+-------------------------------------------------------------------------------
+
+Copyright (c) 2013-2024
+Stephan Hennig, Werner Lemberg, Günter Milde,
+Sander van Geloven, Georg Pfeiffer, Gisbert W. Selke,
+Tobias Wendorf, Keno Wehr
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns el-monoton (Modern Greek, monotonic spelling)
+-------------------------------------------------------------------------------
+
+The header of hyph-el-monoton.tex names the MIT License (https://opensource.org/licenses/MIT) without its
+text. The standard MIT License text follows.
+
+Copyright (C) 2008-2011 Dimitrios Filippou
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns en-gb (English, British spelling)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1992, 1996, 2005, 2016 Dominik Wujastyk, Graham Toal
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+Further notice from the header of hyph-en-gb.tex:
+
+These patterns are based on a file of 114925 British-hyphenated words
+generously made available to Dominik Wujastyk by Oxford University Press.
+This list of words is copyright to the OUP and may not be redistributed.
+The hyphenation break points in the words in the abovementioned file is
+also copyright to the OUP.
+
+We are very grateful to Oxford University Press for allowing us to use
+their list of hyphenated words to produce the following TeX hyphenation
+patterns.  This file of hyphenation patterns may be freely distributed.
+
+-------------------------------------------------------------------------------
+Permissive notice: hyphenation patterns en-us (English, American spelling)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1990, 2004, 2005 Gerard D.C. Kuiken
+
+Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty provided the copyright
+notice and this notice are preserved.
+
+The file also contains the original patterns and hyphenations from Knuth's hyphen.tex (the Plain TeX
+hyphenation tables).
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns es (Spanish)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1993, 1997 Javier Bezos, 2001-2019 Javier Bezos, CervanTeX
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Further notice from the header of hyph-es.tex:
+
+I would like to thanks Francesc Carmona for his permission
+to steal parts of his work without restrictions. For his
+patterns, (c) by Francesc Carmona
+
+-------------------------------------------------------------------------------
+Permissive notice: hyphenation patterns fi (Finnish)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1986, 1988, 1989 Kauko Saarinen
+
+Patterns may be freely distributed
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns fr (French)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1994-2002 Daniel Flipo, Bernard Gaulle, 2016 Arthur Reutenauer
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+Permissive license: hyphenation patterns hr (Croatian)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1994, 1996, 2011, 2015 Igor Marinović
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this file and any associated documentation
+(the "Data Files") to deal in the Data Files
+without restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, and/or sell copies of
+the Data Files, and to permit persons to whom the Data Files
+are furnished to do so, provided that
+(a) this copyright and permission notice appear with all copies
+of the Data Files,
+(b) this copyright and permission notice appear in associated
+documentation, and
+(c) there is clear notice in each modified Data File
+as well as in the documentation associated with the Data File(s)
+that the data has been modified.
+
+THE DATA FILES ARE PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT OF THIRD PARTY RIGHTS.
+IN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS
+NOTICE BE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL
+DAMAGES, OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE,
+DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THE DATA FILES.
+
+Except as contained in this notice, the name of a copyright holder
+shall not be used in advertising or otherwise to promote the sale,
+use or other dealings in these Data Files without prior
+written authorization of the copyright holder.
+
+Notice of modification: the data has been modified. The hyphen project converted hyph-hr.tex to JavaScript
+(patterns\hr.js), and the WPods build minified that file into web\chunks\hr-*.js.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns it (Italian)
+-------------------------------------------------------------------------------
+
+Copyright (C) 2008-2011 Claudio Beccari
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns lt (Lithuanian)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1992 Sigitas Tolušis, Yannis Haralambous
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+Permissive notices: hyphenation patterns nb (Norwegian Bokmål)
+-------------------------------------------------------------------------------
+
+hyph-nb.tex:
+
+Copyright (C) 2004-2005 Rune Kleveland, Ole Michael Selberg, 2007 Karl Ove Hufthammer
+
+Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty, provided the copyright
+notice and this notice are preserved.
+
+hyph-no.tex (loaded by hyph-nb.tex; it contains the Norwegian patterns that nb uses):
+
+Copyright (C) 2004, 2005 Rune Kleveland, Ole Michael Selberg
+
+Copying and distribution of this file, with or without modification,
+is permitted in any medium without royalty provided the copyright
+notice and this notice are preserved.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns nl (Dutch)
+-------------------------------------------------------------------------------
+
+The header of hyph-nl.tex names the MIT License (https://opensource.org/licenses/MIT) without its text. The
+standard MIT License text follows.
+
+Copyright (C) 1996 Piet Tutelaers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns pl (Polish)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1987-1995 Hanna Kołodziejska, Bogusław Jackowski, Marek Ryćko
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+BSD-3-Clause: hyphenation patterns pt (Portuguese)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1987, 1994, 1996, 2015 Pedro J. de Rezende, 1996, 2015 J. Joao Dias Almeida, 2024 Leonardo Araujo
+and Aline Benevides
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+* Redistributions of source code must retain the above copyright
+  notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the
+  distribution.
+* Neither the name of the University of Campinas, of the University
+  of Minho nor the names of its contributors may be used to endorse
+  or promote products derived from this software without specific
+  prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL PEDRO J. DE
+REZENDE OR J.JOAO DIAS ALMEIDA BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY
+WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns sl (Slovenian)
+-------------------------------------------------------------------------------
+
+Copyright (C) 1990 Matjaž Vrečko
+
+Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without
+restriction, including without limitation the rights to use,
+copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+-------------------------------------------------------------------------------
+MIT License: hyphenation patterns uk (Ukrainian)
+-------------------------------------------------------------------------------
+
+The header of hyph-uk.tex names the MIT License (https://opensource.org/licenses/MIT) without its text. The
+standard MIT License text follows.
+
+Copyright (C) 1998-2001 Maksym Polyakov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+GNU Lesser General Public License, version 2.1: FFmpeg, hyphenation patterns hu (Hungarian)
+-------------------------------------------------------------------------------
+
+hu: Copyright (C) 2003 Bence Nagy. hyph-hu.tex is available under MPL 1.1, GNU GPL 2.0 or GNU LGPL 2.1, at
+your option; WPods uses it under the GNU Lesser General Public License, version 2.1 (text below).
 
                   GNU LESSER GENERAL PUBLIC LICENSE
                        Version 2.1, February 1999
