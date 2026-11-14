@@ -6,7 +6,7 @@ import { post } from '../host';
 import { t } from '../i18n';
 import { Icon, Spinner } from '../icons';
 import type { Theme } from '../protocol';
-import { current, live, store } from '../state';
+import { current, live, store, updateText } from '../state';
 import { getTheme, getUseAccent, setThemePrefs } from '../theme';
 import type { Ctx, Page } from './page';
 
@@ -31,7 +31,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     desc: 'windows.handsFreeDesc',
     onChange: hostToggle('disableHandsFree'),
   });
-  // While the host applies a change (Windows takes a few seconds) a spinner takes the switch's place.
+  // Windows takes a few seconds to apply a change, so a spinner takes the switch's place meanwhile.
   const handsFreeSwitch = handsFree.row.lastElementChild as HTMLElement;
   const handsFreeSpin = (
     <span
@@ -72,6 +72,18 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
       post({ type: 'setAccent', value });
     },
   });
+  const autoUpdate = createSwitchRow({
+    id: 'autoUpdateTitle',
+    title: 'update.auto',
+    desc: 'update.autoDesc',
+    onChange: (value) => {
+      store.update.auto = value;
+      post({ type: 'setAutoUpdate', value });
+    },
+  });
+  let versionText!: HTMLSpanElement;
+  let updateStatus!: HTMLSpanElement;
+  let updateBtn!: HTMLButtonElement;
   const theme = createSegmented<Theme>({
     name: 'theme',
     legend: 'windows.theme',
@@ -102,7 +114,9 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
             type="button"
             class="wp-row wp-row--nav"
             ref={toMicModes}
-            onclick={() => ctx.go('micModes')}
+            onclick={() => {
+              ctx.go('micModes');
+            }}
           >
             <span class="wp-row__text">
               <span class="wp-row__title" l:text="mic.modes" />
@@ -126,7 +140,9 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
             type="button"
             class="wp-row wp-row--nav"
             ref={toLanguage}
-            onclick={() => ctx.go('language')}
+            onclick={() => {
+              ctx.go('language');
+            }}
           >
             <span class="wp-row__text">
               <span class="wp-row__title" l:text="lang.title" />
@@ -137,6 +153,30 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
             </span>
           </button>
           {accent.row}
+        </div>
+      </section>
+      <section class="wp-group">
+        <h2 class="wp-group__title" l:text="update.title" />
+        <div class="wp-list">
+          <div class="wp-row">
+            <div class="wp-row__text">
+              <span class="wp-row__title" ref={versionText} />
+              <span class="wp-row__desc" role="status" ref={updateStatus} />
+            </div>
+            <span class="wp-row__end">
+              <button
+                type="button"
+                class="wp-btn wp-btn--secondary"
+                ref={updateBtn}
+                onclick={() => {
+                  post({
+                    type: store.update.available ? 'updateNow' : 'checkUpdate',
+                  });
+                }}
+              />
+            </span>
+          </div>
+          {autoUpdate.row}
         </div>
       </section>
     </div>
@@ -166,9 +206,28 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     setText(langValue, lang ? lang.originalName : t('lang.sameAsWindows'));
   };
 
+  const renderUpdate = (): void => {
+    const u = store.update;
+    const busy =
+      u.status === 'checking' ||
+      u.status === 'downloading' ||
+      u.status === 'installing';
+    setText(versionText, t('update.version', { version: u.version }));
+    // "Update now" restarts the service, which pauses Bluetooth.
+    setText(
+      updateStatus,
+      u.available && !busy
+        ? `${updateText()} ${t('update.nowDesc')}`
+        : updateText(),
+    );
+    setText(updateBtn, t(u.available ? 'update.now' : 'update.check'));
+    setDisabled(updateBtn, busy);
+    setChecked(autoUpdate.input, u.auto);
+  };
+
   return {
     el,
-    sections: { windows: render },
+    sections: { windows: render, update: renderUpdate },
     returnFocus: (from) =>
       from === 'language'
         ? toLanguage

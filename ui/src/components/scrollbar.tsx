@@ -1,6 +1,5 @@
-/* Overlay scrollbar for a scroller whose own bar is hidden (scrollbar-width: none): a thumb only, no track, drawn over
-   the content so it takes no width. Shows while scrolling or hovered, fades out when idle; drag it to scroll. Goes in
-   the scroller's positioned parent. */
+/* Draggable overlay thumb for a scroller with a hidden native bar, so it takes no width; shows while scrolling or
+   hovered. Goes in the scroller's positioned parent. */
 import { createFrame, setClass, setHidden } from '../dom';
 
 const MIN_THUMB = 24;
@@ -85,7 +84,7 @@ export const createOverlayScroll = (scroller: HTMLElement): HTMLDivElement => {
   );
   const resized = new ResizeObserver(update);
   resized.observe(scroller);
-  /* Pages are swapped in as children: watch each one so content growth updates the thumb too. */
+  // Pages are swapped in as children, so each one is watched for content growth too.
   new MutationObserver((records) => {
     for (const record of records) {
       for (const node of record.addedNodes) {
@@ -100,6 +99,6 @@ export const createOverlayScroll = (scroller: HTMLElement): HTMLDivElement => {
       }
     }
   }).observe(scroller, { childList: true });
-  
+
   return el;
 };

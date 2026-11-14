@@ -1,5 +1,5 @@
-/* Voice enhancement (app-wide, never locked): Off, then the enhancements under their localized names. The row whose
-   stage loads shows the spinner in its check slot. Also the radio-row pieces the Mic modes page shares. */
+/* Voice enhancement page (app-wide, never locked); the row whose stage is loading shows a spinner in its check slot.
+   Also exports the radio-row pieces shared with the Mic modes page. */
 import { Choice } from '../components/choiceList';
 import { setAttr, setClass } from '../dom';
 import { post } from '../host';
@@ -16,6 +16,7 @@ export const enhancementName = (id: string | null): string =>
 
 export const createCheck = (): Mark => {
   let checked: HTMLButtonElement | null = null;
+
   return (next) => {
     if (next === checked) {
       return;
@@ -79,14 +80,16 @@ export const createEnhancement = (ctx: Ctx): Page => {
 
   rows.set(
     '',
-    Choice('radio', bindText('mic.off'), () => pick(null)),
+    Choice('radio', bindText('mic.off'), () => {
+      pick(null);
+    }),
   );
   for (const option of store.micCatalog.enhancement) {
     rows.set(
       option.id,
-      Choice('radio', bindText(enhancementKey(option.id)), () =>
-        pick(option.id),
-      ),
+      Choice('radio', bindText(enhancementKey(option.id)), () => {
+        pick(option.id);
+      }),
     );
   }
   for (const row of rows.values()) {

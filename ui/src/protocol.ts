@@ -137,7 +137,21 @@ export type ToastId =
   | 'disconnectFailed'
   | 'micModelFailed'
   | 'micModeStopped'
-  | 'settingsReset';
+  | 'settingsReset'
+  | 'serviceDown'
+  | 'restartToFinish'
+  | 'bluetoothNative'
+  | 'updateFailed';
+/* `ready` means downloaded, installed on the next WPods start; `checked` is true once one check has finished;
+   `dismissed` is the version whose update note the user hid. */
+export type UpdateInfo = {
+  version: string;
+  available: string | null;
+  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'installing';
+  checked: boolean;
+  auto: boolean;
+  dismissed: string | null;
+};
 type OfferState = 'offer' | 'connecting' | 'connected' | 'failed';
 export type Offer = {
   id: DeviceId;
@@ -168,6 +182,9 @@ type MainInit = { type: 'init' } & Labels &
     windowsLanguageName: string;
     startup: boolean;
     firstRun: boolean;
+    adapterUnsupported: boolean;
+    restartPending: boolean;
+    update: UpdateInfo;
     devices: Device[];
     attached: DeviceId | null;
     selected: DeviceId | null;
@@ -198,6 +215,9 @@ export type HostToMain =
   | { type: 'mic'; status: MicStatus }
   | { type: 'micConfig'; config: MicConfig }
   | { type: 'micStage'; slot: MicSlot; id: string | null; state: StageLoad }
+  | { type: 'update'; update: UpdateInfo }
+  | { type: 'adapter'; unsupported: boolean }
+  | { type: 'restart'; pending: boolean }
   | { type: 'toast'; toast: ToastId; device: DeviceId | null; code?: string };
 
 export type HostToPopup =
@@ -212,7 +232,12 @@ export type MainToHost =
   | { type: 'setListeningMode'; mode: ListeningMode }
   | { type: 'setToggle'; name: ToggleName; value: boolean }
   | {
-      type: 'setHeartRate' | 'setHearingAid' | 'setAccent' | 'setStartup';
+      type:
+        | 'setHeartRate'
+        | 'setHearingAid'
+        | 'setAccent'
+        | 'setStartup'
+        | 'setAutoUpdate';
       value: boolean;
     }
   | { type: 'setMediaAssist'; name: 'calls' | 'media'; value: boolean }
@@ -238,8 +263,14 @@ export type MainToHost =
   | {
       type:
         | 'openBluetoothSettings'
+        | 'retryBluetooth'
+        | 'checkUpdate'
+        | 'updateNow'
+        | 'dismissUpdate'
+        | 'openReleaseNotes'
         | 'openAddDevice'
         | 'getStarted'
+        | 'restartWindows'
         | 'minimize'
         | 'close'
         | 'beginDrag';

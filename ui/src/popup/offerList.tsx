@@ -30,6 +30,7 @@ const batteryMeta = (b: Batteries): string => {
       out += (out ? ' \u00B7 ' : '') + t(key, { pct: bat.pct });
     }
   }
+
   return out;
 };
 
@@ -63,7 +64,13 @@ export const createOfferList = (o: {
     let name!: HTMLSpanElement;
     let meta!: HTMLSpanElement;
     const btn = (
-      <button type="button" class="wp-pick" onclick={() => o.onPick(offer.id)}>
+      <button
+        type="button"
+        class="wp-pick"
+        onclick={() => {
+          o.onPick(offer.id);
+        }}
+      >
         <span class="wp-pick__art">
           <Glyph name={offer.art === 'max' ? 'max' : 'pair'} />
         </span>
@@ -74,6 +81,7 @@ export const createOfferList = (o: {
         <Icon name="chevron-right" class="wp-pick__end" />
       </button>
     ) as HTMLButtonElement;
+
     return { btn, name, meta };
   };
 
@@ -92,9 +100,8 @@ export const createOfferList = (o: {
           { count: n },
         ),
       );
-      /* Keyed by offer id: only buttons whose ids appeared or disappeared are added or removed, so a still-present
-         button (and its focus) survives; a moved focused button takes focus back. A removed focused button hands
-         focus to the pick now at its position, or the last pick if it was the last. */
+      /* Keyed by offer id so a still-present button keeps its focus. A removed focused button hands focus to the pick
+         now at its position, or to the last pick. */
       const active = document.activeElement;
       const ids = new Set<DeviceId>();
       for (const offer of offers) {

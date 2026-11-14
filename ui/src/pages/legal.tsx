@@ -1,6 +1,5 @@
-/* Legal: not affiliated with Apple, trademarks, WPods' own features, third-party software, license, no warranty,
-   requests. The notices and the license open from the exe folder in the default text viewer (host). Also the
-   one-line footer that links here from Home and the No AirPods page. */
+/* Legal page and the one-line footer that links to it. The host opens the license and notices from the exe folder in
+   the default text viewer. */
 import { post } from '../host';
 import type { LabelKey } from '../i18n';
 import { Icon } from '../icons';
@@ -18,7 +17,9 @@ export const LegalFoot = (ctx: Ctx): LegalFoot => {
         class="wp-link wp-focusable"
         l:text="legal.link"
         ref={link}
-        onclick={() => ctx.go('legal')}
+        onclick={() => {
+          ctx.go('legal');
+        }}
       />
     </p>
   ) as HTMLParagraphElement;
@@ -51,7 +52,9 @@ const Section = (p: {
       <button
         type="button"
         class="wp-row wp-row--nav"
-        onclick={() => post({ type: 'openLegal', name })}
+        onclick={() => {
+          post({ type: 'openLegal', name });
+        }}
       >
         <span class="wp-row__text">
           <span class="wp-row__title" l:text={label} />
@@ -71,14 +74,14 @@ export const createLegal = (): Page => {
     <div class="wp-page">
       <section
         class="wp-card wp-disclaimer"
-        aria-labelledby="legalTestModeTitle"
+        aria-labelledby="legalAdapterTitle"
       >
         <h2
           class="wp-steps__title"
-          id="legalTestModeTitle"
-          l:text="legal.testModeTitle"
+          id="legalAdapterTitle"
+          l:text="legal.adapterTitle"
         />
-        <p class="wp-empty__body" l:text="legal.testModeBody" />
+        <p class="wp-empty__body" l:text="legal.adapterBody" />
       </section>
       <Section title="legal.notAppleTitle" body="legal.notAppleBody" />
       <Section title="legal.trademarksTitle" body="legal.trademarksBody" />

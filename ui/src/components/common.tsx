@@ -16,6 +16,7 @@ export const Note = (p: {
   if (p.id) {
     el.id = p.id;
   }
+
   return el;
 };
 
@@ -61,6 +62,7 @@ export const createBusy = (
       <Spinner class="wp-spinner--sm" />
     </span>
   ) as HTMLSpanElement;
+
   return {
     spin,
     set: (spinning, block) => {
@@ -88,13 +90,16 @@ export const createSwitch = (
         role="switch"
         aria-labelledby={labelledBy}
         ref={input}
-        onchange={() => onChange(input.checked)}
+        onchange={() => {
+          onChange(input.checked);
+        }}
       />
       <span class="wp-switch__track">
         <span class="wp-switch__thumb" />
       </span>
     </label>
   ) as HTMLLabelElement;
+
   return { el, input };
 };
 

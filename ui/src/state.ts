@@ -14,6 +14,7 @@ import type {
   MicStatus,
   State,
   ToastId,
+  UpdateInfo,
 } from './protocol';
 
 export type Section =
@@ -27,7 +28,8 @@ export type Section =
   | 'controls'
   | 'windows'
   | 'langs'
-  | 'firstRun';
+  | 'firstRun'
+  | 'update';
 type Entry = Device & { capSet: Set<Capability> };
 
 const BATTERY_PARTS = {
@@ -51,6 +53,7 @@ const ALL_SECTIONS: Section[] = [
   'title',
   'langs',
   'firstRun',
+  'update',
 ];
 
 export const store = {
@@ -64,6 +67,18 @@ export const store = {
   mic: 'notActive' as MicStatus,
   startup: false,
   firstRun: false,
+  // The PC's only Bluetooth adapters aren't connected over USB (error B3).
+  adapterUnsupported: false,
+  // usbip-win2 was installed and works only after a Windows restart.
+  restartPending: false,
+  update: {
+    version: '',
+    available: null,
+    status: 'idle',
+    checked: false,
+    auto: true,
+    dismissed: null,
+  } as UpdateInfo,
   language: '',
   languages: [] as Language[],
   languageByCode: new Map<string, Language>(),
@@ -94,6 +109,27 @@ export const store = {
   relabel: false,
 };
 
+const UPDATE_LABEL = {
+  idle: 'update.available',
+  checking: 'update.checking',
+  downloading: 'update.downloading',
+  ready: 'update.ready',
+  installing: 'update.installing',
+} as const;
+// Updater activity for a newer version if there is one, else "up to date" once a check has finished.
+export const updateText = (): string => {
+  const u = store.update;
+
+  if (u.status === 'checking') {
+    return t('update.checking');
+  }
+  if (u.available) {
+    return t(UPDATE_LABEL[u.status], { version: u.available });
+  }
+
+  return u.checked ? t('update.upToDate') : '';
+};
+
 export const dirty = new Set<Section>();
 export const mark = (...sections: Section[]): void => {
   for (const s of sections) {
@@ -111,6 +147,7 @@ export const effectiveMode = (saved: MicMode): MicMode => {
   for (let i = 0; i < 3 && !store.micEnabled.has(mode); i++) {
     mode = NEXT_MODE[mode];
   }
+
   return mode;
 };
 export const applyMicConfig = (config: MicConfig): void => {
@@ -210,6 +247,9 @@ export const apply = (msg: HostToMain): void => {
     case 'init':
       store.startup = msg.startup;
       store.firstRun = msg.firstRun;
+      store.adapterUnsupported = msg.adapterUnsupported;
+      store.restartPending = msg.restartPending;
+      store.update = msg.update;
       store.language = msg.language;
       store.languages = msg.languages;
       store.languageByCode.clear();
@@ -304,6 +344,18 @@ export const apply = (msg: HostToMain): void => {
     case 'micStage':
       store.micLoading[msg.slot] = msg.state === 'loading' ? msg.id : null;
       mark('mic');
+      break;
+    case 'update':
+      store.update = msg.update;
+      mark('update');
+      break;
+    case 'adapter':
+      store.adapterUnsupported = msg.unsupported;
+      mark('page');
+      break;
+    case 'restart':
+      store.restartPending = msg.pending;
+      mark('page');
       break;
     case 'prefs':
       if (msg.startup !== undefined) {

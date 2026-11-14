@@ -1,7 +1,5 @@
-/* A list row with a title, a description and a switch. `stack` rows put the text and switch in a head line so
-   more content (notes, live values) can follow below; `checking` adds `busy` (blocks the switch; its spinner
-   is not placed, the page shows one for the whole group).
-   `desc: null` leaves the description to the render (it gets the id `<id>-desc`). */
+/* `stack` puts text and switch in a head line so more content can follow below. `checking` blocks the switch without
+   a spinner of its own (the page shows one per group). `desc: null` leaves the description to the render. */
 import { bindText, type LabelKey } from '../i18n';
 import { type Busy, createBusy, createSwitch } from './common';
 
@@ -51,5 +49,6 @@ export const createSwitchRow = (o: {
       </div>
     ) as HTMLDivElement;
   }
+
   return { row, input: sw.input, desc, busy };
 };

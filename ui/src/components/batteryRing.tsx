@@ -122,6 +122,7 @@ export const createBatteries = (compact: boolean): BatteryRings => {
   const right = createRing('right', compact, el);
   const box = createRing('case', compact, el);
   const max = createRing('max', compact, el);
+
   return {
     el,
     update: (bat, ears, caseGlyph) => {
@@ -129,7 +130,8 @@ export const createBatteries = (compact: boolean): BatteryRings => {
       right.update(bat?.right ?? null, ears.right, caseGlyph);
       box.update(bat?.case ?? null, '', caseGlyph);
       max.update(bat?.headphone ?? null, '', caseGlyph);
-      return !!bat && !!(bat.left || bat.right || bat.case || bat.headphone);
+
+      return !!bat && !!(bat.left ?? bat.right ?? bat.case ?? bat.headphone);
     },
   };
 };

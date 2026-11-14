@@ -106,6 +106,55 @@ span.wp-menu__glyph {
   gap: var(--space-2);
 }
 
+.wp-update {
+  padding: var(--space-3) var(--space-4);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-3);
+}
+.wp-update[hidden] {
+  display: none;
+}
+.wp-update__badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.wp-update__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.wp-update__text {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.wp-update__links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.wp-update__links .wp-link {
+  font: inherit;
+}
+.wp-update__dot::before {
+  content: '\00B7';
+  color: var(--text-secondary);
+}
+.wp-update__now {
+  white-space: nowrap;
+}
+
 .wp-legal-foot {
   text-align: center;
 }
@@ -152,8 +201,6 @@ span.wp-menu__glyph {
   display: none;
 }
 
-/* Focus (user rule): a keyboard-focused control shows the design's focus ring AND its hover effect.
-   The rings come from bundle.css; these add each control's hover look while focused (pressed still wins). */
 .wp-btn--primary:focus-visible:not(:active) {
   background: var(--accent-hover);
 }
@@ -206,12 +253,15 @@ span.wp-menu__glyph {
   border-bottom-right-radius: var(--radius-lg);
 }
 
+.wp-row--nc {
+  padding-inline: var(--space-2);
+}
+
 .wp-seg__label {
   hyphens: auto;
   overflow-wrap: anywhere;
 }
 
-/* Overlay scrollbar thumb (components/scrollbar.tsx): no track, the wide box is the hit area, ::before is the pill. */
 .wp-scroll {
   position: absolute;
   top: 0;
@@ -265,10 +315,6 @@ span.wp-menu__glyph {
   color: var(--text-disabled);
 }
 
-/* Disabled look of disabled and busy pod-saved controls (busy ones use aria-disabled, not disabled, so keyboard focus
-   stays): no hover or pressed change; a keyboard-focused one still shows the focus ring. A disabled checked switch
-   keeps its disabled look under the pointer too. The switch cursor and thumb rules for both states are in
-   bundle.css. */
 .wp-switch
   .wp-switch__input:is(:disabled, [aria-disabled='true'])
   + .wp-switch__track {

@@ -66,7 +66,9 @@ export const createLanguage = (ctx: Ctx): Page => {
             role="radio"
             aria-checked="false"
             ref={auto}
-            onclick={() => pick('')}
+            onclick={() => {
+              pick('');
+            }}
           >
             <span class="wp-row__lead">
               <Icon name="globe" />
@@ -104,7 +106,9 @@ export const createLanguage = (ctx: Ctx): Page => {
         class="wp-row wp-choice"
         role="radio"
         aria-checked="false"
-        onclick={() => pick(l.code)}
+        onclick={() => {
+          pick(l.code);
+        }}
       >
         <span class="wp-row__text">
           <span class="wp-row__title" ref={title}>

@@ -6,10 +6,24 @@ const setVisible = (visible: boolean): void => {
   document.body.classList.toggle('is-hidden', !visible);
 };
 
-export const applyCommon = (msg: HostToMain | HostToPopup): void => {
+/** `relabel` receives a "labels" message to re-render once the language's hyphenation patterns have loaded. */
+export const applyCommon = <T extends HostToMain | HostToPopup>(
+  msg: T,
+  relabel: (msg: T) => void,
+): void => {
+  const again = (): void => {
+    if (msg.type === 'init' || msg.type === 'labels') {
+      relabel({
+        type: 'labels',
+        labels: msg.labels,
+        lang: msg.lang,
+        rtl: msg.rtl,
+      } as T);
+    }
+  };
   switch (msg.type) {
     case 'init':
-      setLabels(msg.labels, msg.lang, msg.rtl);
+      setLabels(msg.labels, msg.lang, msg.rtl, again);
       setThemePrefs({
         theme: msg.theme,
         useAccent: msg.useAccent,
@@ -18,7 +32,7 @@ export const applyCommon = (msg: HostToMain | HostToPopup): void => {
       setVisible(msg.visible);
       break;
     case 'labels':
-      setLabels(msg.labels, msg.lang, msg.rtl);
+      setLabels(msg.labels, msg.lang, msg.rtl, again);
       break;
     case 'prefs':
       setThemePrefs({ theme: msg.theme, useAccent: msg.useAccent });

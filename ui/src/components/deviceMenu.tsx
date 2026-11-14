@@ -72,10 +72,11 @@ export const createDeviceMenu = (o: {
       </button>
     ) as HTMLButtonElement;
     const item: Item = { btn, title, meta, check, index: 0 };
+
     return item;
   };
-  /* Keyed by device id: only items whose ids appeared or disappeared are added or removed, so a still-present
-     item (and its focus) survives. A moved or removed focused item hands focus back while the menu is open. */
+  /* Keyed by device id so a still-present item keeps its focus; a focused item that moves or goes away hands focus
+     back while the menu is open. */
   const syncItems = (): void => {
     const active = document.activeElement;
     const ids = new Set<DeviceId>();

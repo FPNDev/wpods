@@ -32,17 +32,20 @@ const readTokens = (): Record<'light' | 'dark', ThemeTokens> => {
       onAccent: cs.getPropertyValue('--on-accent').trim(),
     };
     probe.remove();
+
     return out;
   };
+
   return { light: read('light'), dark: read('dark') };
 };
 
 const rgb = (hex: string): Rgb | null => {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  const m = /^#([0-9a-f]{6})$/iu.exec(hex);
   if (!m) {
     return null;
   }
   const n = parseInt(m[1], 16);
+
   return [n >> 16, (n >> 8) & 255, n & 255];
 };
 const luminance = (hex: string): number => {
@@ -52,11 +55,13 @@ const luminance = (hex: string): number => {
     sum +=
       WEIGHTS[i] * (s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4);
   }
+
   return sum;
 };
 const contrast = (a: string, b: string): number => {
   const la = luminance(a);
   const lb = luminance(b);
+
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 };
 
@@ -107,6 +112,7 @@ const pickAccent = (
       ];
     }
   }
+
   return null;
 };
 

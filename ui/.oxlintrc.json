@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "oxc", "unicorn"],
+  "jsPlugins": ["@stylistic/eslint-plugin"],
+  "options": {
+    "typeAware": true
+  },
+  "categories": {
+    "correctness": "error",
+    "pedantic": "error",
+    "perf": "error"
+  },
+  "rules": {
+    "curly": ["error", "all"],
+    "@stylistic/padding-line-between-statements": [
+      "error",
+      { "blankLine": "always", "prev": "*", "next": "return" }
+    ],
+    "typescript/consistent-type-definitions": ["error", "type"],
+    "unicorn/no-array-for-each": "error",
+    "unicorn/prefer-number-coercion": "off",
+    "only-throw-error": "off",
+    "strict-void-return": "off",
+    "max-lines-per-function": "off",
+    "no-redeclare": "off",
+    "prefer-readonly-parameter-types": "off",
+    "strict-boolean-expressions": "off",
+    "no-misused-promises": "off",
+    "typescript/prefer-promise-reject-errors": "off",
+    "no-await-in-loop": "off",
+    "max-lines": "off",
+    "unicorn/prefer-top-level-await": "off",
+    "switch-exhaustiveness-check": "off",
+    "no-unassigned-vars": "off",
+    "no-loop-func": "off"
+  },
+  "ignorePatterns": ["dist/*", "*.mjs"]
+}

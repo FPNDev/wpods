@@ -1,5 +1,4 @@
-/* Segmented control: a radio group in a fieldset with a hidden legend. Keeps its inputs by value and the checked
-   value, so every update touches only the inputs that change. */
+// Segmented control on a radio group; tracks the checked value so updates touch only the inputs that change.
 import { setAttr, setDisabled, setHidden } from '../dom';
 import { bindText, type LabelKey } from '../i18n';
 import { Icon, type IconName } from '../icons';
@@ -75,6 +74,7 @@ export const createSegmented = <V extends string>(o: {
       setAttr(input, 'aria-describedby', describedBy);
     }
   };
+
   return {
     el,
     set: (value) => {

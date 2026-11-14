@@ -1,5 +1,3 @@
-/* Weight meter: 4 small bars, filled per weight (light 1 .. veryHeavy 4).
-   Its accessible label is the weight word. */
 import type { Weight } from '../protocol';
 
 const FILLED: Record<Weight, number> = {
@@ -21,5 +19,6 @@ export const WeightMeter = (weight: Weight): HTMLSpanElement => {
       />,
     );
   }
+
   return el;
 };

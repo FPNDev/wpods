@@ -1,5 +1,4 @@
-/* Nearby popup entry (NearbyPopup component). Protocol: scratchpad ui-protocol.md (v2), section 4.
-   Never focuses itself; the host focuses the window on Win+Shift+A and sends `focus`. */
+/* Nearby popup entry. It never focuses itself; the host focuses the window on Win+Shift+A and sends `focus`. */
 import { applyCommon } from '../common';
 import {
   createAnnouncer,
@@ -31,7 +30,7 @@ const dismiss = (): void => {
     post({ type: 'popupCancel' });
   }
   const ids = view === 'multi' ? offers.map((o) => o.id) : dev ? [dev.id] : [];
-  if (ids.length) {
+  if (ids.length > 0) {
     post({ type: 'popupDismiss', ids });
   }
 };
@@ -51,7 +50,9 @@ const offerView = createOfferView({
   },
 });
 const list = createOfferList({
-  onPick: (id) => post({ type: 'popupConnect', id }),
+  onPick: (id) => {
+    post({ type: 'popupConnect', id });
+  },
   onNotNow: dismiss,
 });
 
@@ -163,6 +164,7 @@ const render = (): void => {
   if (view === 'multi') {
     list.render(offers);
     setAttr(card, 'aria-label', t('popup.multiTitle'));
+
     return;
   }
   if (!dev) {
@@ -180,14 +182,16 @@ const render = (): void => {
         parseFloat(
           getComputedStyle(card).getPropertyValue('--dur-popup-confirm'),
         ) || 2500;
-      setTimeout(() => post({ type: 'popupDismiss', ids: [id] }), ms);
+      setTimeout(() => {
+        post({ type: 'popupDismiss', ids: [id] });
+      }, ms);
     }
   }
 };
 const schedule = createFrame(render);
 
-listen<HostToPopup>((msg) => {
-  applyCommon(msg);
+const onMessage = (msg: HostToPopup): void => {
+  applyCommon(msg, onMessage);
   switch (msg.type) {
     case 'init':
       setOffers(msg.offers);
@@ -213,7 +217,8 @@ listen<HostToPopup>((msg) => {
       break;
   }
   schedule();
-});
+};
+listen<HostToPopup>(onMessage);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {

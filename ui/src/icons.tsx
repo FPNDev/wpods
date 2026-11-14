@@ -51,6 +51,7 @@ const ICONS = {
   minimize: ['M3.5 8h9'],
   check: ['M3.5 8.5l3 3 6-7'],
   plus: ['M8 3v10M3 8h10'],
+  download: ['M8 2.25v8M4.75 7.25L8 10.5l3.25-3.25M3 13.25h10'],
   bolt: ['M9.2 1L3.4 9h4.1l-.9 6 5.9-8.1H8.4z'],
   heart: [
     'M8 14S2.25 10.6 2.25 6.6A3.1 3.1 0 0 1 8 4.9a3.1 3.1 0 0 1 5.75 1.7C13.75 10.6 8 14 8 14z',
@@ -235,6 +236,7 @@ const svg = (cls: string, viewBox: string, shapes: Shape[]): SVGSVGElement => {
   el.setAttribute('viewBox', viewBox);
   el.setAttribute('aria-hidden', 'true');
   draw(el, shapes);
+
   return el;
 };
 

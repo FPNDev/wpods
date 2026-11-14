@@ -3,6 +3,8 @@ import type { Section } from '../state';
 export type PageName =
   | 'firstRun'
   | 'empty'
+  | 'unsupported'
+  | 'restartNeeded'
   | 'home'
   | 'controls'
   | 'hearing'

@@ -1,12 +1,21 @@
-/* First run: welcome, three facts (the last carries the startup switch), the not-an-Apple-app disclaimer with a link
-   to the full terms, Agree and get started (= accepting it). */
+// First-run page; "Agree and get started" accepts the not-an-Apple-app terms.
 import { createSwitch } from '../components/common';
-import { setChecked } from '../dom';
+import { setChecked, setText } from '../dom';
 import { post } from '../host';
-import type { LabelKey } from '../i18n';
+import { t, type LabelKey } from '../i18n';
 import { Icon, type IconName } from '../icons';
-import { store } from '../state';
+import { current, store } from '../state';
 import type { Ctx, Page } from './page';
+
+// The WPods mic shows up in Windows as "Headset (A2DP, <AirPods name>)": the connected pair, else the selected one.
+const micName = (): string => {
+  const d =
+    store.attached === null
+      ? current()
+      : (store.byId.get(store.attached) ?? current());
+
+  return d?.name ?? 'AirPods';
+};
 
 const Fact = (p: { icon: IconName; title: LabelKey; desc: LabelKey }) => (
   <li>
@@ -26,6 +35,7 @@ export const createFirstRun = (ctx: Ctx): Page => {
     post({ type: 'setStartup', value });
   });
   let readTerms!: HTMLButtonElement;
+  let micDesc!: HTMLSpanElement;
   const el = (
     <div class="wp-page">
       <div class="wp-empty">
@@ -36,7 +46,15 @@ export const createFirstRun = (ctx: Ctx): Page => {
         <p class="wp-empty__body" l:text="firstRun.body" />
         <ul class="wp-steps">
           <Fact icon="pc" title="firstRun.trayTitle" desc="firstRun.trayDesc" />
-          <Fact icon="mic" title="firstRun.micTitle" desc="firstRun.micDesc" />
+          <li>
+            <span class="wp-steps__icon">
+              <Icon name="mic" />
+            </span>
+            <span>
+              <span class="wp-steps__title" l:text="firstRun.micTitle" />
+              <span class="wp-steps__desc" ref={micDesc} />
+            </span>
+          </li>
           <li>
             <span class="wp-steps__icon">
               <Icon name="power" />
@@ -66,7 +84,9 @@ export const createFirstRun = (ctx: Ctx): Page => {
             class="wp-btn wp-btn--subtle"
             l:text="legal.readTerms"
             ref={readTerms}
-            onclick={() => ctx.go('legal')}
+            onclick={() => {
+              ctx.go('legal');
+            }}
           />
         </section>
         <div class="wp-empty__actions">
@@ -87,7 +107,14 @@ export const createFirstRun = (ctx: Ctx): Page => {
 
   return {
     el,
-    sections: { firstRun: () => setChecked(startup.input, store.startup) },
+    sections: {
+      firstRun: () => {
+        setChecked(startup.input, store.startup);
+      },
+      mic: () => {
+        setText(micDesc, t('firstRun.micDesc', { name: micName() }));
+      },
+    },
     returnFocus: () => readTerms,
   };
 };

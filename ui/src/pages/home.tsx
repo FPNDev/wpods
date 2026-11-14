@@ -1,5 +1,4 @@
-/* Home: hero (art, switcher, status, batteries, action), noise control, microphone (mode, enhancement, side), features,
-   More, the legal footer. */
+// Home page: update note, hero, noise control, microphone, features, More and the legal footer.
 import { createBatteries } from '../components/batteryRing';
 import { createBusy, NavRow, Note } from '../components/common';
 import { createDeviceMenu } from '../components/deviceMenu';
@@ -33,6 +32,7 @@ import {
   effectiveMode,
   live,
   store,
+  updateText,
 } from '../state';
 import { enhancementName } from './enhancement';
 import { LegalFoot } from './legal';
@@ -110,7 +110,7 @@ const FEATURES: FeatureDef[] = [
   },
 ];
 
-// Hearing Assistance row: what is on, once the AirPods (or the remembered state) tell it.
+// Hearing Assistance row summary from the live or remembered AirPods state.
 const hearingSummary = (
   pods: Pick<
     State,
@@ -127,6 +127,7 @@ const hearingSummary = (
     return 'hearing.desc';
   }
   const assist = !!pods.mediaAssistCalls || !!pods.mediaAssistMedia;
+
   return pods.hearingAidEnabled
     ? assist
       ? 'hearing.bothOn'
@@ -138,6 +139,7 @@ const hearingSummary = (
 
 const earText = (st: State | null, side: Side): string => {
   const ear = st ? st.ear[side] : null;
+
   return ear === 'inEar' || ear === 'out' || ear === 'inCase'
     ? t(EAR_KEY[ear])
     : '';
@@ -175,6 +177,9 @@ export const createHome = (ctx: Ctx): Page => {
   };
 
   let hero!: HTMLElement;
+  let updateNote!: HTMLElement;
+  let updateNoteText!: HTMLParagraphElement;
+  let updateNow!: HTMLButtonElement;
   let status!: HTMLSpanElement;
   let statusText!: HTMLSpanElement;
   let hint!: HTMLParagraphElement;
@@ -197,7 +202,9 @@ export const createHome = (ctx: Ctx): Page => {
         'windows',
       );
     },
-    onPair: () => ctx.go('pair'),
+    onPair: () => {
+      ctx.go('pair');
+    },
   });
   const batteries = createBatteries(false);
 
@@ -261,9 +268,9 @@ export const createHome = (ctx: Ctx): Page => {
     },
   });
 
-  const toEnhancement = PickerRow('mic.enhancement', () =>
-    ctx.go('enhancement'),
-  );
+  const toEnhancement = PickerRow('mic.enhancement', () => {
+    ctx.go('enhancement');
+  });
   const micSide = createSegmented<MicSide>({
     name: 'micSide',
     legend: 'mic.side',
@@ -300,7 +307,9 @@ export const createHome = (ctx: Ctx): Page => {
       desc: null,
       stack: true,
       checking: def.podSaved,
-      onChange: (on) => onFeature(def.key, on),
+      onChange: (on) => {
+        onFeature(def.key, on);
+      },
     });
     row.row.hidden = true;
     features.push({ ...row, def });
@@ -335,11 +344,14 @@ export const createHome = (ctx: Ctx): Page => {
   let hearingDesc!: HTMLSpanElement;
   let hearingArrow!: HTMLSpanElement;
   let hearingSpin!: HTMLSpanElement;
+
   const toHearing = (
     <button
       type="button"
       class="wp-row wp-row--nav"
-      onclick={() => ctx.go('hearing')}
+      onclick={() => {
+        ctx.go('hearing');
+      }}
     >
       <span class="wp-row__text">
         <span class="wp-row__title" l:text="hearing.title" />
@@ -364,18 +376,71 @@ export const createHome = (ctx: Ctx): Page => {
     icon: 'press',
     title: 'controls.title',
     desc: 'home.controlsDesc',
-    onclick: () => ctx.go('controls'),
+    onclick: () => {
+      ctx.go('controls');
+    },
   });
   const toWindows = NavRow({
     icon: 'pc',
     title: 'windows.title',
     desc: 'home.windowsDesc',
-    onclick: () => ctx.go('windows'),
+    onclick: () => {
+      ctx.go('windows');
+    },
   });
   const legal = LegalFoot(ctx);
 
   const el = (
     <div class="wp-page">
+      <section
+        class="wp-card wp-update"
+        l:aria-label="update.title"
+        hidden
+        ref={updateNote}
+      >
+        <span class="wp-update__badge">
+          <Icon name="download" />
+        </span>
+        <div class="wp-update__body">
+          <p class="wp-update__text" role="status" ref={updateNoteText} />
+          <div class="wp-update__links">
+            <button
+              type="button"
+              class="wp-link"
+              l:text="update.whatsNew"
+              onclick={() => {
+                post({ type: 'openReleaseNotes' });
+              }}
+            />
+            <span class="wp-update__dot" aria-hidden="true" />
+            <button
+              type="button"
+              class="wp-link"
+              l:text="update.hide"
+              onclick={() => {
+                // The host saves the dismissal; a newer version shows the note again.
+                store.update.dismissed = store.update.available;
+                post({ type: 'dismissUpdate' });
+                ctx.update('update');
+              }}
+            />
+          </div>
+        </div>
+        <button
+          type="button"
+          class="wp-btn wp-btn--primary wp-update__now"
+          ref={updateNow}
+          onclick={() => {
+            post({ type: 'updateNow' });
+            // Shows busy right away, until the service reports its own status.
+            store.update.status = 'checking';
+            ctx.update('update');
+          }}
+        >
+          <Spinner class="wp-spinner--sm" />
+          <span l:text="update.now" />
+        </button>
+      </section>
       <section
         class="wp-card wp-hero"
         l:aria-label="home.yourAirPods"
@@ -432,7 +497,7 @@ export const createHome = (ctx: Ctx): Page => {
           {ncBusy.spin}
         </h2>
         <div class="wp-list">
-          <div class="wp-row wp-row--stack">
+          <div class="wp-row wp-row--stack wp-row--nc">
             {nc.el}
             {ncOneBud}
             {ncOutOfEar}
@@ -635,13 +700,13 @@ export const createHome = (ctx: Ctx): Page => {
       nc.lockItem(
         mode,
         !st || outOfEar || (oneIn && needsBoth),
-        !st
-          ? null
-          : outOfEar
+        st
+          ? outOfEar
             ? 'ncOutOfEar'
             : oneIn && needsBoth
               ? 'ncOneBud'
-              : null,
+              : null
+          : null,
       );
     }
     nc.set(st ? st.listeningMode : d.saved.listeningMode);
@@ -655,7 +720,9 @@ export const createHome = (ctx: Ctx): Page => {
     const mic = store.mic;
     setAttr(chip, 'data-state', mic);
     setText(chipLabel, t(`mic.status.${mic}`));
-    setText(micDesc, t(`mic.desc.${mic}`));
+    const named =
+      store.attached === null ? d : (store.byId.get(store.attached) ?? d);
+    setText(micDesc, t(`mic.desc.${mic}`, { name: named.name || 'AirPods' }));
     const st = live(d);
     const enabled = store.micEnabled;
     setHidden(micModeRow, enabled.size < 2);
@@ -742,6 +809,18 @@ export const createHome = (ctx: Ctx): Page => {
     el,
     sections: {
       hero: renderHero,
+      update: () => {
+        const u = store.update;
+        const show = u.available !== null && u.available !== u.dismissed;
+        setHidden(updateNote, !show);
+        if (show) {
+          setText(updateNoteText, updateText());
+          // Blocks repeat presses while the updater is working.
+          const busy = u.status !== 'idle' && u.status !== 'ready';
+          setClass(updateNow, 'is-loading', busy);
+          setDisabled(updateNow, busy);
+        }
+      },
       menu: () => {
         const d = current();
         if (d) {

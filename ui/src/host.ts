@@ -9,6 +9,7 @@ type WebView = {
 };
 
 declare global {
+  // oxlint-disable-next-line consistent-type-definitions
   interface Window {
     chrome?: { webview?: WebView };
   }
@@ -21,5 +22,7 @@ export const post = (message: MainToHost | PopupToHost): void => {
 };
 
 export const listen = <M>(apply: (message: M) => void): void => {
-  webview?.addEventListener('message', (e) => apply(e.data as M));
+  webview?.addEventListener('message', (e) => {
+    apply(e.data as M);
+  });
 };

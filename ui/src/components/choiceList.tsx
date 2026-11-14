@@ -42,12 +42,13 @@ export const createChoiceList = <V extends string>(o: {
   const byValue = new Map<V, HTMLButtonElement>();
   const rows: HTMLButtonElement[] = [];
   for (const item of o.items) {
-    const row = Choice('checkbox', bindText(item.label), () =>
-      o.onPick(item.value),
-    );
+    const row = Choice('checkbox', bindText(item.label), () => {
+      o.onPick(item.value);
+    });
     byValue.set(item.value, row);
     rows.push(row);
   }
+
   return {
     rows,
     set: (value, on) => {

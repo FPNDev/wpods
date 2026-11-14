@@ -1,5 +1,5 @@
-/* Toast: one at a time, closes itself after --dur-toast (paused while hovered or focused), x closes it at once.
-   Only its buttons take the pointer (app.css), so it never blocks the controls under it. */
+/* One toast at a time; closes itself after --dur-toast unless hovered or focused. Only its buttons take the pointer
+   (app.css), so it never blocks the controls under it. */
 import { setHidden, setText } from '../dom';
 import { t } from '../i18n';
 import { Icon } from '../icons';
@@ -23,9 +23,15 @@ const ACTIONS: Record<ToastId, ToastAction | null> = {
   micModelFailed: null,
   micModeStopped: null,
   settingsReset: null,
+  serviceDown: null,
+  restartToFinish: null,
+  bluetoothNative: 'tryAgain',
+  updateFailed: null,
 };
 
-export const createToast = (onAction: (action: ToastAction) => void): Toast => {
+export const createToast = (
+  onAction: (action: ToastAction, id: ToastId) => void,
+): Toast => {
   let msg!: HTMLSpanElement;
   let actionBtn!: HTMLButtonElement;
   let shown: ToastId | null = null;
@@ -37,7 +43,9 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
     shown = null;
     setHidden(el, true);
   };
-  const pause = (): void => clearTimeout(timer);
+  const pause = (): void => {
+    clearTimeout(timer);
+  };
   const arm = (): void => {
     clearTimeout(timer);
     if (shown) {
@@ -67,10 +75,11 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
         class="wp-btn wp-btn--subtle"
         ref={actionBtn}
         onclick={() => {
-          const action = shown && ACTIONS[shown];
+          const id = shown;
+          const action = id && ACTIONS[id];
           hide();
-          if (action) {
-            onAction(action);
+          if (id && action) {
+            onAction(action, id);
           }
         }}
       />
@@ -96,6 +105,7 @@ export const createToast = (onAction: (action: ToastAction) => void): Toast => {
       setText(actionBtn, t(`toast.action.${action}`));
     }
   };
+
   return {
     el,
     show: (id, faultCode) => {

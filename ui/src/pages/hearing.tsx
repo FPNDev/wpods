@@ -1,7 +1,5 @@
-/* Hearing Assistance: Hearing Aid, and Media Assist for music and video and for calls. All need hearing set up on an
-   iPhone or iPad (0x2C enrolled); until then the note at the bottom says so instead of where the settings come from,
-   and the switches are off and disabled. While the AirPods are checked the switches are locked and each group title
-   shows the spinner. */
+/* Hearing Aid and Media Assist need hearing set up on an iPhone or iPad (0x2C enrolled); until then the switches are
+   off and disabled and the bottom note says so. */
 import { createBusy, Note } from '../components/common';
 import { createSwitchRow, type SwitchRow } from '../components/switchRow';
 import {
@@ -54,6 +52,7 @@ export const createHearing = (ctx: Ctx): Page => {
       },
     });
     setHidden(row.desc, !desc);
+
     return row;
   };
   const music = assistRow('hearing.music', null, 'mediaAssistMedia', 'media');
@@ -100,7 +99,7 @@ export const createHearing = (ctx: Ctx): Page => {
   const assistBusy = createBusy(assistList, []);
   assistTitle.append(assistBusy.spin);
 
-  // value: shown state (remembered while checking); usable: the live state allows a change.
+  // `value` may be the remembered state while checking; `usable` means the live state allows a change.
   const renderRow = (
     r: SwitchRow,
     value: boolean | null,

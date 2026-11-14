@@ -7,6 +7,7 @@ import { t, type LabelKey } from './i18n';
 import { Glyph, Icon } from './icons';
 import { createControls } from './pages/controls';
 import { createEmpty } from './pages/empty';
+import { createUnsupported } from './pages/unsupported';
 import { createEnhancement } from './pages/enhancement';
 import { createFirstRun } from './pages/firstRun';
 import { createHearing } from './pages/hearing';
@@ -16,6 +17,7 @@ import { createLegal } from './pages/legal';
 import { createMicModes } from './pages/micModes';
 import type { Ctx, Page, PageName } from './pages/page';
 import { createPairGuide } from './pages/pairGuide';
+import { createRestartNeeded } from './pages/restartNeeded';
 import { createWindowsSettings } from './pages/windowsSettings';
 import type { HostToMain } from './protocol';
 import { apply, current, dirty, mark, type Section, store } from './state';
@@ -30,6 +32,8 @@ type Built = { page: Page; renders: [Section, () => void][] };
 const ROUTES: Record<PageName, Route> = {
   firstRun: { create: createFirstRun, title: null, parent: null },
   empty: { create: createEmpty, title: null, parent: null },
+  unsupported: { create: createUnsupported, title: null, parent: null },
+  restartNeeded: { create: createRestartNeeded, title: null, parent: null },
   home: { create: createHome, title: null, parent: null },
   controls: { create: createControls, title: 'controls.title', parent: 'home' },
   hearing: { create: createHearing, title: 'hearing.title', parent: 'home' },
@@ -54,7 +58,9 @@ let requested: PageName = 'home';
 let shown: PageName | null = null;
 let navDir = 0;
 
-const schedule = createFrame(() => render());
+const schedule = createFrame(() => {
+  render();
+});
 const ctx: Ctx = {
   go: (page) => {
     requested = page;
@@ -81,9 +87,11 @@ let pageTitle!: HTMLSpanElement;
 let appTitle!: HTMLDivElement;
 let body!: HTMLDivElement;
 let announce!: HTMLDivElement;
-const toast = createToast((action) => {
+const toast = createToast((action, id) => {
   if (action === 'openSettings') {
     post({ type: 'openBluetoothSettings' });
+  } else if (id === 'bluetoothNative') {
+    post({ type: 'retryBluetooth' });
   } else {
     const id = store.toastDevice ?? store.selected;
     if (id !== null) {
@@ -91,7 +99,9 @@ const toast = createToast((action) => {
     }
   }
 });
-const noDrag = (e: MouseEvent): void => e.stopPropagation();
+const noDrag = (e: MouseEvent): void => {
+  e.stopPropagation();
+};
 const shell = (
   <div class="wp-window">
     <div
@@ -125,7 +135,9 @@ const shell = (
           class="wp-iconbtn"
           l:aria-label="window.minimize"
           onmousedown={noDrag}
-          onclick={() => post({ type: 'minimize' })}
+          onclick={() => {
+            post({ type: 'minimize' });
+          }}
         >
           <Icon name="minimize" />
         </button>
@@ -134,7 +146,9 @@ const shell = (
           class="wp-iconbtn wp-iconbtn--close"
           l:aria-label="window.close"
           onmousedown={noDrag}
-          onclick={() => post({ type: 'close' })}
+          onclick={() => {
+            post({ type: 'close' });
+          }}
         >
           <Icon name="close" />
         </button>
@@ -159,6 +173,7 @@ const pageOf = (name: PageName): Built => {
     };
     built.set(name, b);
   }
+
   return b;
 };
 
@@ -173,15 +188,27 @@ const renderTitle = (): void => {
 };
 
 const renderPage = (): void => {
+  // An adapter WPods can't use leaves only its own page, the language page and the legal page.
   const top: PageName =
     requested === 'legal'
       ? 'legal'
       : store.firstRun
         ? 'firstRun'
-        : store.devices.length === 0
-          ? 'empty'
-          : requested;
-  if (top === 'firstRun' || top === 'empty') {
+        : store.restartPending
+          ? 'restartNeeded'
+          : store.adapterUnsupported
+            ? requested === 'language'
+              ? 'language'
+              : 'unsupported'
+            : store.devices.length === 0
+              ? 'empty'
+              : requested;
+  if (
+    top === 'firstRun' ||
+    top === 'empty' ||
+    top === 'unsupported' ||
+    top === 'restartNeeded'
+  ) {
     requested = 'home';
   }
   if (top === shown) {
@@ -234,7 +261,14 @@ const render = (): void => {
   if (dirty.has('title')) {
     renderTitle();
   }
-  if (shown && (current() || shown === 'firstRun' || shown === 'empty')) {
+  if (
+    shown &&
+    (current() ||
+      shown === 'firstRun' ||
+      shown === 'empty' ||
+      shown === 'unsupported' ||
+      shown === 'language')
+  ) {
     for (const [section, run] of pageOf(shown).renders) {
       if (dirty.has(section)) {
         run();
@@ -244,11 +278,12 @@ const render = (): void => {
   dirty.clear();
 };
 
-listen<HostToMain>((msg) => {
-  applyCommon(msg);
+const onMessage = (msg: HostToMain): void => {
+  applyCommon(msg, onMessage);
   apply(msg);
   schedule();
-});
+};
+listen<HostToMain>(onMessage);
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && shown && ROUTES[shown].parent) {

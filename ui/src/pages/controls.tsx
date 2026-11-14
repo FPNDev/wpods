@@ -1,5 +1,4 @@
-/* Controls: double-press speed, press-and-hold duration, the modes press-and-hold cycles through, tone volume
-   (each shown only when supported). */
+// Controls page; each group shows only when the AirPods support it.
 import { createChoiceList } from '../components/choiceList';
 import { type Busy, createBusy } from '../components/common';
 import { createSegmented, type Segmented } from '../components/segmented';
@@ -96,9 +95,8 @@ export const createControls = (ctx: Ctx): Page => {
       },
     }),
   );
-  /* Press-and-hold cycle. The Off row shows only while Allow Off isn't known to be off. At least STEM_MIN modes stay
-     checked: a click that would leave fewer is ignored, without a message (iPhone behaviour). Rows show in the stem's
-     own cycle order. */
+  /* Press-and-hold cycle. The Off row shows only while Allow Off isn't known to be off; a click that would leave fewer
+     than STEM_MIN modes is silently ignored, as on iPhone. */
   const stemChecked = new Set<StemMode>();
   const stem = createChoiceList<StemMode>({
     items: [
@@ -127,8 +125,7 @@ export const createControls = (ctx: Ctx): Page => {
 
   let stemGroup!: HTMLElement;
   let stemList!: HTMLDivElement;
-  /* Conversation awareness "Lower media to": host setting duckPercent (10..90 step 5); shown with the
-     conversationAwareness cap, enabled while the pair is attached (whether Conversation awareness is on or off). */
+  // Conversation awareness "Lower media to"; enabled while the pair is attached, even with the feature off.
   let duckGroup!: HTMLElement;
   let duck!: HTMLInputElement;
   let duckValue!: HTMLSpanElement;
@@ -197,7 +194,9 @@ export const createControls = (ctx: Ctx): Page => {
                 step="5"
                 aria-labelledby="duckTitle"
                 ref={duck}
-                oninput={() => showDuck(Number(duck.value))}
+                oninput={() => {
+                  showDuck(Number(duck.value));
+                }}
                 onchange={() => {
                   const d = current();
                   const value = Number(duck.value);
@@ -237,7 +236,9 @@ export const createControls = (ctx: Ctx): Page => {
                 max={String(TONE_MAX)}
                 l:aria-label="controls.tone"
                 ref={tone}
-                oninput={() => showTone(tone.value)}
+                oninput={() => {
+                  showTone(tone.value);
+                }}
                 onchange={() => {
                   const value = Number(tone.value);
                   lastTone = value;

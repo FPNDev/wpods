@@ -1,6 +1,10 @@
+import { shown } from './i18n';
+
+/** Sets text with the current language's soft hyphens. */
 export const setText = (el: Element, s: string): void => {
-  if (el.textContent !== s) {
-    el.textContent = s;
+  const text = shown(s);
+  if (el.textContent !== text) {
+    el.textContent = text;
   }
 };
 
@@ -48,10 +52,13 @@ export const setDisabled = (
 
 export const createAnnouncer = (el: Element): ((text: string) => void) => {
   let frame = 0;
+
   return (text) => {
     cancelAnimationFrame(frame);
     setText(el, '');
-    frame = requestAnimationFrame(() => setText(el, text));
+    frame = requestAnimationFrame(() => {
+      setText(el, text);
+    });
   };
 };
 
@@ -61,6 +68,7 @@ export const createFrame = (render: () => void): (() => void) => {
     scheduled = false;
     render();
   };
+
   return () => {
     if (!scheduled) {
       scheduled = true;
