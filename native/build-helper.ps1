@@ -24,13 +24,14 @@ if (-not (Test-Path "$cppwinrt\winrt\base.h")) {
 Import-Msvc $Sdk
 
 cl /nologo /c /std:c++20 /permissive- /W4 /WX /O2 /EHsc /MT /Gy /Gw /guard:cf /Brepro /DNOMINMAX /DWINRT_NO_SOURCE_LOCATION `
-    "/I$cppwinrt" "/Fo$obj\" "$src\wpods_native.cpp"
+    "/I$cppwinrt" "/Fo$obj\" "$src\wpods_native.cpp" "$src\mixer.cpp" "$src\jitter.cpp"
 if ($LASTEXITCODE) {
     throw 'cl failed'
 }
 
 link /nologo /DLL /guard:cf /Brepro /OPT:REF /OPT:ICF "/DEF:$src\wpods_native.def" /NODEFAULTLIB:libucrt.lib ucrt.lib `
-    runtimeobject.lib ole32.lib oleaut32.lib cfgmgr32.lib "/OUT:$bin\wpods_native.dll" "/IMPLIB:$obj\wpods_native.lib" "$obj\wpods_native.obj"
+    runtimeobject.lib ole32.lib oleaut32.lib cfgmgr32.lib avrt.lib "/OUT:$bin\wpods_native.dll" "/IMPLIB:$obj\wpods_native.lib" `
+    "$obj\wpods_native.obj" "$obj\mixer.obj" "$obj\jitter.obj"
 if ($LASTEXITCODE) {
     throw 'link failed'
 }

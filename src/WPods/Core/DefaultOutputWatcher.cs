@@ -104,7 +104,6 @@ public sealed partial class DefaultOutputWatcher : IDisposable
             }
             _running = true;
         }
-        Log.Info("follow", $"default render device changed (role {role})");
         _ = Task.Run(RunAsync);
     }
 

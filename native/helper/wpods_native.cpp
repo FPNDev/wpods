@@ -29,6 +29,7 @@
 #include <winrt/Windows.Media.Control.h>
 #include <winrt/Windows.Storage.Streams.h>
 
+#include "internal.h"
 #include "wpods_native.h"
 
 using namespace winrt::Windows::Devices::Bluetooth;
@@ -75,6 +76,8 @@ bool g_dirty;                           // an event arrived since the evaluator 
 bool g_resubscribe;                     // SessionsChanged arrived: subscribe the new session list
 bool g_evaluating;                      // an event thread runs evaluate_watch
 
+} // namespace
+
 HRESULT ensure_mta()
 {
     static HRESULT const hr = [] {
@@ -83,6 +86,8 @@ HRESULT ensure_mta()
     }();
     return hr;
 }
+
+namespace {
 
 void on_received(BluetoothLEAdvertisementWatcher const&, BluetoothLEAdvertisementReceivedEventArgs const& args)
 {
@@ -114,6 +119,8 @@ void set_callback(wpn_adv_cb callback, void* context)
     g_context = context;
     ReleaseSRWLockExclusive(&g_callbackLock);
 }
+
+} // namespace
 
 // BTHENUM\DEV_<address> devnode -> container ID shared by the device's audio endpoints.
 bool find_container_id(uint64_t address, GUID& containerId)
@@ -150,6 +157,8 @@ bool find_container_id(uint64_t address, GUID& containerId)
     }
     return false;
 }
+
+namespace {
 
 // KS filter IDs (BTHENUM = A2DP, BTHHFENUM = Hands-Free) wired to the audio endpoints of the device; only the
 // Hands-Free ones when handsFreeOnly.
@@ -661,14 +670,7 @@ int32_t __stdcall wpn_bt_handsfree_mic_in_use(uint64_t btAddress)
     }
 }
 
-uint32_t __stdcall wpn_fp_set_ftz_daz(void)
+void __stdcall wpn_fp_set_ftz_daz(void)
 {
-    unsigned int const previous = _mm_getcsr();
-    _mm_setcsr(previous | 0x8040);
-    return previous;
-}
-
-void __stdcall wpn_fp_restore(uint32_t mxcsr)
-{
-    _mm_setcsr(mxcsr);
+    _mm_setcsr(_mm_getcsr() | 0x8040);
 }

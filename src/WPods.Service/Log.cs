@@ -10,7 +10,7 @@ namespace WPods.Service;
 /// </summary>
 internal static class Log
 {
-    private const long MaxBytes = 500L * 1024 * 1024;
+    private const long MaxBytes = 20L * 1024 * 1024;
     private const int WriteIntervalMs = 200;
 
     private readonly record struct Entry(long UtcTicks, string Level, string Area, string Text);
@@ -135,14 +135,15 @@ internal static class Log
 internal static class LogFile
 {
     /// <summary>
-    /// Keeps the newest ~90 % of <paramref name="maxBytes"/> from a line start; the file must not be open for writing.
+    /// Keeps the newest half of <paramref name="maxBytes"/> from a line start, so the cut runs rarely; the file must not
+    /// be open for writing.
     /// </summary>
     public static void CutOldest(string path, long maxBytes)
     {
         string temp = path + ".tmp";
         using (var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
         {
-            source.Position = Math.Max(0, source.Length - (maxBytes / 10 * 9));
+            source.Position = Math.Max(0, source.Length - (maxBytes / 2));
             // Start at a line.
             int b;
             while ((b = source.ReadByte()) >= 0 && b != '\n')

@@ -15,6 +15,7 @@ import { createHome } from './pages/home';
 import { createLanguage } from './pages/language';
 import { createLegal } from './pages/legal';
 import { createMicModes } from './pages/micModes';
+import { createMixer } from './pages/mixer';
 import type { Ctx, Page, PageName } from './pages/page';
 import { createPairGuide } from './pages/pairGuide';
 import { createRestartNeeded } from './pages/restartNeeded';
@@ -50,6 +51,7 @@ const ROUTES: Record<PageName, Route> = {
     parent: 'home',
   },
   micModes: { create: createMicModes, title: 'mic.modes', parent: 'windows' },
+  mixer: { create: createMixer, title: 'mixer.title', parent: 'windows' },
   legal: { create: createLegal, title: 'legal.title', parent: 'home' },
 };
 

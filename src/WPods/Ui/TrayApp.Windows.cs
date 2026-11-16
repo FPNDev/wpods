@@ -270,6 +270,7 @@ internal sealed partial class TrayApp
         w.WriteString("mic", MessageWriter.Camel(_micStatus));
         MessageWriter.WriteMicCatalog(w);
         MessageWriter.WriteMicConfig(w, "micConfig", _settings.Mic);
+        MessageWriter.WriteMixer(w, _mixer.Devices, _settings, _prefs);
         w.WriteBoolean("visible", _mainShown);
         PostMain(_writer.End());
         _mainInitSent = true;
@@ -285,7 +286,7 @@ internal sealed partial class TrayApp
     {
         Array.Clear(_lastSent);
         PostVisibility(pane, true);
-        SendMainDeltas(Dirty.Devices | Dirty.Session | Dirty.Mic, _session?.State);
+        SendMainDeltas(Dirty.Devices | Dirty.Session | Dirty.Mic | Dirty.Mixer, _session?.State);
         SendStartupPref();
         SendUpdate();
         SendAdapter();

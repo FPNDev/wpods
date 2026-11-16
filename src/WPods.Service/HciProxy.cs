@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using System.Threading.Channels;
 
 namespace WPods.Service;
 
@@ -17,6 +17,13 @@ internal sealed class HciProxy
     private const ushort OurMtu = Protocol.MaxAapPacket;
     // Controller ACL buffers our own packets may hold at once.
     private const int MaxOursOutstanding = 1;
+    // Windows' ACL OUT waiting this long for controller buffers is logged as a stall.
+    private const int StalledBuffersMs = 500;
+
+    // FirstOfKind: count per command or event kind since the last per-minute summary.
+    private static readonly Lock RepeatsLock = new();
+    private static readonly Dictionary<string, int> Repeats = [];
+    private static long _repeatsSince = Environment.TickCount64;
     private static readonly TimeSpan OpenTimeout = TimeSpan.FromSeconds(10);
     private const ushort RfcommPsm = 0x0003;
     // The whole Hands-Free decline normally takes well under a second; past this it is cut short.
@@ -63,6 +70,17 @@ internal sealed class HciProxy
     // Open SCO/eSCO (call audio) links: handle -> device address.
     private readonly Dictionary<int, ulong> _scoLinks = [];
 
+    private const long MicSettleMs = 500;
+    // A STOP right after a START is ignored: sent again this often while the AirPods still report the mic on.
+    private const long MicStopRetryMs = 300;
+    // Under the engine's 3 s limit for an unanswered command.
+    private const long MaxCallAudioHoldMs = 2000;
+    // AACP_STOP_AUDIO, as the app sends it.
+    private static readonly byte[] StopMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x02, 0x00, 0x03, 0x01];
+    // The link whose call audio setup from Windows is held (one HCI command at a time), and since when.
+    private Link? _heldCallAudio;
+    private long _heldSince;
+
     /// <summary>The last SCO/eSCO link closed. Raised under the proxy lock on the event pipe thread; return at once.</summary>
     public event Action? CallAudioEnded;
 
@@ -102,13 +120,41 @@ internal sealed class HciProxy
         Volatile.Write(ref _commandSentAt, 0);
     }
 
-    /// <summary>HCI command from Windows (control OUT, class request).</summary>
-    public void OnCommand(ReadOnlySpan<byte> command)
+    // Poll latency asked for AirPods links. Windows asks 25 ms: the AirPods may send only when polled, so their mic
+    // packets (one per 30 ms) waited a varying part of that and often went two at once.
+    private const uint AirPodsPollLatencyUs = 3750;
+
+    /// <summary>Windows' QoS_Setup for AirPods goes to the radio with a shorter latency.</summary>
+    public void RewriteCommand(Span<byte> command)
     {
-        if (command.Length < 3)
+        if (command.Length < 3 + 20 || BinaryPrimitives.ReadUInt16LittleEndian(command) != 0x0807)
         {
             return;
         }
+        lock (_gate)
+        {
+            int handle = BinaryPrimitives.ReadUInt16LittleEndian(command[3..]) & 0x0FFF;
+            if (!_links.TryGetValue(handle, out Link? link) || !link.AapDevice)
+            {
+                return;
+            }
+            uint asked = BinaryPrimitives.ReadUInt32LittleEndian(command[15..]);
+            BinaryPrimitives.WriteUInt32LittleEndian(command[15..], AirPodsPollLatencyUs);
+            Log.Info("hci", $"{link.Address:X12}: QoS_Setup latency {asked} -> {AirPodsPollLatencyUs} us");
+        }
+    }
+
+    /// <summary>
+    /// HCI command from Windows (control OUT, class request). True when it must not reach the radio while
+    /// <see cref="CallAudioHeld"/> is true.
+    /// </summary>
+    public bool OnCommand(ReadOnlySpan<byte> command)
+    {
+        if (command.Length < 3)
+        {
+            return false;
+        }
+        bool held = false;
         ushort opcode = BinaryPrimitives.ReadUInt16LittleEndian(command);
         // Vendor commands (OGF 0x3F) may be answered outside the event pipe (Intel's bootloader answers on the bulk pipe,
         // MediaTek's WMT commands through a vendor request): they are not timed.
@@ -116,8 +162,11 @@ internal sealed class HciProxy
         {
             Volatile.Write(ref _commandSentAt, Environment.TickCount64);
         }
-        // First 32 parameter bytes of every command, vendor ones included; never key material.
-        Log.Info("hci", $"command 0x{opcode:X4} {(CarriesKey(opcode) ? "(parameters not logged: they carry a key)" : Convert.ToHexString(command[3..Math.Min(command.Length, 35)]))}");
+        // First 32 parameter bytes of each opcode's first command, vendor ones included; never key material.
+        if (FirstOfKind($"command 0x{opcode:X4}"))
+        {
+            Log.Info("hci", $"command 0x{opcode:X4} {(CarriesKey(opcode) ? "(parameters not logged: they carry a key)" : Convert.ToHexString(command[3..Math.Min(command.Length, 35)]))}");
+        }
         if (opcode is 0x0428 or 0x043D && command.Length >= 5)
         {
             // (Enhanced_)Setup_Synchronous_Connection on an ACL link: Windows starts call audio.
@@ -126,6 +175,7 @@ internal sealed class HciProxy
                 if (_links.TryGetValue(BinaryPrimitives.ReadUInt16LittleEndian(command[3..]) & 0x0FFF, out Link? link))
                 {
                     SetCallAudioLocked(link, true, "Windows sets up call audio");
+                    held = HoldForMicLocked(link);
                 }
             }
         }
@@ -165,6 +215,7 @@ internal sealed class HciProxy
             // Windows does not use this; if on, the controller would wait for acks of the packets consumed here.
             Log.Warn("hci", "Windows enabled controller-to-host ACL flow control: AAP traffic may stall");
         }
+        return held;
     }
 
     // The interrupt and bulk IN pipes are byte streams: a packet may span transfers and a transfer may hold several, so
@@ -322,7 +373,6 @@ internal sealed class HciProxy
         }
         _aclHandle = handle;
         _aclRemaining = total - _aclHeadHave;
-        Log.Info("acl", $"in 0x{handle:X3}{(link is null ? " (no known link)" : link.Le ? " LE" : "")} pb {pb} len {total - 4}{L2capText(head[4..], pb)} -> {(ours ? "ours" : "Windows")}");
         if (ours)
         {
             _aclRoute = Route.Ours;
@@ -453,6 +503,7 @@ internal sealed class HciProxy
         lock (_gate)
         {
             long waitStart = 0;
+            long stalledAt = 0;
             while (true)
             {
                 if (cancelled())
@@ -468,16 +519,17 @@ internal sealed class HciProxy
                 {
                     waitStart = Environment.TickCount64;
                 }
-                else if (waitStart > 0 && Environment.TickCount64 - waitStart > 2000)
+                else if (waitStart > 0 && Environment.TickCount64 - waitStart > StalledBuffersMs)
                 {
                     waitStart = -1;
-                    Log.Warn("hci", $"ACL OUT (Windows') waiting for controller buffers over 2 s: {_outstanding} of {_aclBuffers} outstanding ({OwnersText()})");
+                    stalledAt = Environment.TickCount64;
+                    Log.Warn("hci", $"ACL OUT (Windows') waiting for controller buffers over {StalledBuffersMs} ms: {_outstanding} of {_aclBuffers} outstanding ({OwnersText()})");
                 }
                 Monitor.Wait(_gate, 100);
             }
-            if (waitStart != 0)
+            if (stalledAt != 0)
             {
-                Log.Info("acl", $"ACL OUT (Windows') waited {(waitStart > 0 ? $"{Environment.TickCount64 - waitStart} ms" : "over 2 s")} for controller buffers");
+                Log.Info("hci", $"controller buffers free again after {Environment.TickCount64 - stalledAt + StalledBuffersMs} ms");
             }
             RecordLocked(packets, ours: false);
             return true;
@@ -516,9 +568,7 @@ internal sealed class HciProxy
     {
         ForEachPacket(packets, (handle, pb, payload) =>
         {
-            _links.TryGetValue(handle, out Link? link);
-            Log.Info("acl", $"out 0x{handle:X3}{(link is null ? " (no known link)" : link.Le ? " LE" : "")} pb {pb} len {payload.Length}{L2capText(payload, pb)}{(ours ? " (ours)" : "")}");
-            if (link is null)
+            if (!_links.TryGetValue(handle, out Link? link))
             {
                 return;
             }
@@ -650,9 +700,94 @@ internal sealed class HciProxy
             {
                 return false;
             }
-            SendL2capLocked(ch.Link, ch.RemoteCid, packet);
+            Link link = ch.Link;
+            if (MicCommand(packet) is { } start)
+            {
+                if (start && link.CallAudio)
+                {
+                    // Hands-Free has the mic: a stream started now makes the AirPods refuse call audio or drop the link.
+                    Log.Info("aap", $"{link.Address:X12}: mic START dropped, call audio is starting or up");
+                    return true;
+                }
+                link.MicStreaming = start;
+                link.MicChangedAt = Environment.TickCount64;
+            }
+            SendL2capLocked(link, ch.RemoteCid, packet);
             return true;
         }
+    }
+
+    // The app's AAP 0x58 mic START (true) or STOP (false), else null.
+    private static bool? MicCommand(ReadOnlySpan<byte> p) =>
+        p.Length >= 9 && p[0] == 0x04 && p[2] == 0x04 && p[4] == 0x58 && p[5] == 0x00 && p[6] == 0x00
+            ? p[8] switch { 0x09 => true, 0x02 => false, _ => null }
+            : null;
+
+    // Windows' call audio setup must not reach the AirPods while their mic streams over AAP or within MicSettleMs of
+    // its last START or STOP: they refuse it or drop the link. True when the setup is held (see CallAudioHeld).
+    private bool HoldForMicLocked(Link link)
+    {
+        long now = Environment.TickCount64;
+        if (link.MicStreaming || link.MicReported)
+        {
+            StopMicLocked(link, now);
+        }
+        if (!link.MicReported && (link.MicChangedAt == 0 || now - link.MicChangedAt >= MicSettleMs))
+        {
+            return false;
+        }
+        _heldCallAudio = link;
+        _heldSince = now;
+        Log.Info("hci", $"{link.Address:X12}: call audio setup held until the mic is off");
+        return true;
+    }
+
+    /// <summary>
+    /// True while Windows' held call audio setup must still wait: the AirPods report their mic on (STOP is sent again
+    /// every MicStopRetryMs) or it changed under MicSettleMs ago. At most MaxCallAudioHoldMs, then it goes anyway.
+    /// </summary>
+    public bool CallAudioHeld()
+    {
+        lock (_gate)
+        {
+            if (_heldCallAudio is not { } link)
+            {
+                return false;
+            }
+            long now = Environment.TickCount64;
+            bool gone = !_links.TryGetValue(link.Handle, out Link? current) || current != link;
+            if (!gone && now - _heldSince < MaxCallAudioHoldMs)
+            {
+                if (link.MicReported)
+                {
+                    if (now - link.MicStopSentAt >= MicStopRetryMs)
+                    {
+                        StopMicLocked(link, now);
+                    }
+                    return true;
+                }
+                if (now - link.MicChangedAt < MicSettleMs)
+                {
+                    return true;
+                }
+            }
+            _heldCallAudio = null;
+            Log.Info("hci", $"{link.Address:X12}: call audio setup released after {now - _heldSince} ms{(link.MicReported ? ", the AirPods still report the mic on" : "")}");
+            return false;
+        }
+    }
+
+    private void StopMicLocked(Link link, long now)
+    {
+        if (link.Aap is not { IsOpen: true } ch)
+        {
+            return;
+        }
+        Log.Info("aap", $"{link.Address:X12}: mic STOP before call audio setup{(link.MicReported ? " (the AirPods report the mic on)" : "")}");
+        SendL2capLocked(link, ch.RemoteCid, StopMicrophone);
+        link.MicStreaming = false;
+        link.MicChangedAt = now;
+        link.MicStopSentAt = now;
     }
 
     /// <summary>Closes the channel for the app, disconnecting it at the AirPods if the link is still up.</summary>
@@ -903,10 +1038,6 @@ internal sealed class HciProxy
             int o = 3 + (i * 4);
             int handle = BinaryPrimitives.ReadUInt16LittleEndian(e.AsSpan(o)) & 0x0FFF;
             int count = BinaryPrimitives.ReadUInt16LittleEndian(e.AsSpan(o + 2));
-            if (_links.TryGetValue(handle, out Link? traced))
-            {
-                Log.Info("acl", $"completed 0x{handle:X3} x{count}, outstanding before {traced.Owners.Count} ({string.Concat(traced.Owners.Select(o => o ? 'O' : 'W'))}), total {_outstanding}/{_aclBuffers}");
-            }
             if (_links.TryGetValue(handle, out Link? link) && Counted(link))
             {
                 int ours = 0;
@@ -1138,10 +1269,18 @@ internal sealed class HciProxy
         }
         else if (link.Aap is { IsOpen: true } ch && cid == ch.LocalCid)
         {
-            // Header and opcode only (the app logs packets); mic audio (0x58, ~50 per second) is not logged.
-            if (!(pdu.Length >= 10 && pdu[8] == 0x58 && pdu[9] == 0x00))
+            // Audio state: 04 00 04 00 0E 00, source address (6 bytes), state bits; 0x20 = mic streaming over AAP.
+            if (pdu.Length == 17 && pdu[4] == 0x04 && pdu[6] == 0x04 && pdu[8] == 0x0E && pdu[9] == 0x00)
             {
-                Log.Info("aap", $"deliver {pdu.Length - 4} bytes {Convert.ToHexString(pdu.AsSpan(4, Math.Min(6, pdu.Length - 4)))}");
+                bool mic = (pdu[16] & 0x20) != 0;
+                if (mic != link.MicReported)
+                {
+                    link.MicReported = mic;
+                    if (!mic)
+                    {
+                        link.MicChangedAt = Environment.TickCount64;
+                    }
+                }
             }
             ch.Deliver(pdu[4..]);
         }
@@ -1322,7 +1461,10 @@ internal sealed class HciProxy
     {
         if (ch.Link.Aap == ch)
         {
+            // Without a channel the AirPods mic cannot stream here, and its last report would hold call audio setups.
             ch.Link.Aap = null;
+            ch.Link.MicStreaming = false;
+            ch.Link.MicReported = false;
         }
         ch.IsOpen = false;
     }
@@ -1519,22 +1661,9 @@ internal sealed class HciProxy
     private static bool CarriesKey(ushort opcode) =>
         opcode is 0x040B or 0x040D or 0x0430 or 0x0445 or 0x2017 or 0x2019 or 0x201A or 0x2027;
 
-    // Command bytes are logged only for the signaling channels (BR/EDR 1, LE 5); other channels' data
-    // (audio, input, pairing, files) never is.
-    private static string L2capText(ReadOnlySpan<byte> l2, int pb)
-    {
-        if (pb == 1 || l2.Length < 4)
-        {
-            return "";
-        }
-        ushort cid = BinaryPrimitives.ReadUInt16LittleEndian(l2[2..]);
-        return cid is 0x0001 or 0x0005
-            ? $" cid 0x{cid:X4} {Convert.ToHexString(l2[4..Math.Min(l2.Length, 36)])}"
-            : $" cid 0x{cid:X4}";
-    }
-
-    // Skips advertising reports and Number_Of_Completed_Packets (logged per link); events and answers carrying a key
-    // or secret are logged by code only.
+    // Skips advertising reports and Number_Of_Completed_Packets. Failed commands and link events (connection,
+    // disconnection, encryption, hardware error, role change, call audio) always log; the rest via FirstOfKind.
+    // Events and answers carrying a key or secret are logged by code only.
     private static void LogEvent(byte[] e)
     {
         if (e[0] == 0x13 || (e[0] == 0x3E && e.Length >= 3 && e[2] is 0x02 or 0x0B or 0x0D))
@@ -1546,15 +1675,55 @@ internal sealed class HciProxy
         if (e[0] == 0x0E && e.Length >= 6)
         {
             ushort opcode = BinaryPrimitives.ReadUInt16LittleEndian(e.AsSpan(3));
-            Log.Info("hci", $"command complete 0x{opcode:X4} status {e[5]} {(AnswerCarriesSecret(opcode) ? "(return parameters not logged)" : Convert.ToHexString(e.AsSpan(6, Math.Min(e.Length - 6, 32))))}");
+            if (e[5] != 0 || FirstOfKind($"command complete 0x{opcode:X4}"))
+            {
+                Log.Info("hci", $"command complete 0x{opcode:X4} status {e[5]} {(AnswerCarriesSecret(opcode) ? "(return parameters not logged)" : Convert.ToHexString(e.AsSpan(6, Math.Min(e.Length - 6, 32))))}");
+            }
         }
         else if (e[0] == 0x0F && e.Length >= 6)
         {
-            Log.Info("hci", $"command status 0x{BinaryPrimitives.ReadUInt16LittleEndian(e.AsSpan(4)):X4} status {e[2]}");
+            ushort opcode = BinaryPrimitives.ReadUInt16LittleEndian(e.AsSpan(4));
+            if (e[2] != 0 || FirstOfKind($"command status 0x{opcode:X4}"))
+            {
+                Log.Info("hci", $"command status 0x{opcode:X4} status {e[2]}");
+            }
         }
         else
         {
-            Log.Info("hci", $"event 0x{e[0]:X2}{(e[0] == 0x3E && e.Length >= 3 ? $"/{e[2]:X2}" : "")} {(secret ? "(parameters not logged: they carry a key)" : Convert.ToHexString(e.AsSpan(2, Math.Min(e.Length - 2, 32))))}");
+            string code = $"event 0x{e[0]:X2}{(e[0] == 0x3E && e.Length >= 3 ? $"/{e[2]:X2}" : "")}";
+            if (e[0] is 0x03 or 0x05 or 0x08 or 0x10 or 0x12 or 0x2C or 0x30 || FirstOfKind(code))
+            {
+                Log.Info("hci", $"{code} {(secret ? "(parameters not logged: they carry a key)" : Convert.ToHexString(e.AsSpan(2, Math.Min(e.Length - 2, 32))))}");
+            }
+        }
+    }
+
+    // True for the first command or event of its kind; later ones are only counted, as one line per kind at most once a
+    // minute.
+    private static bool FirstOfKind(string kind)
+    {
+        lock (RepeatsLock)
+        {
+            long elapsed = Environment.TickCount64 - _repeatsSince;
+            if (elapsed >= 60_000)
+            {
+                foreach (string key in Repeats.Keys.ToList())
+                {
+                    if (Repeats[key] > 0)
+                    {
+                        Log.Info("hci", $"{key} x{Repeats[key]} in the last {elapsed / 1000} s");
+                        Repeats[key] = 0;
+                    }
+                }
+                _repeatsSince += elapsed;
+            }
+            if (!Repeats.TryGetValue(kind, out int count))
+            {
+                Repeats[kind] = 0;
+                return true;
+            }
+            Repeats[kind] = count + 1;
+            return false;
         }
     }
 
@@ -1590,6 +1759,13 @@ internal sealed class HciProxy
         public bool Encrypted;
         /// <summary>Call audio (SCO/eSCO) is being set up or is up on this link.</summary>
         public bool CallAudio;
+        /// <summary>The app's last mic write was START (the AirPods' mic streams over AAP).</summary>
+        public bool MicStreaming;
+        /// <summary>The AirPods report their mic streaming over AAP (audio state 0x0E, bit 0x20).</summary>
+        public bool MicReported;
+        /// <summary>Environment.TickCount64 of the last mic START or STOP, or of the AirPods reporting it off; 0 = none.</summary>
+        public long MicChangedAt;
+        public long MicStopSentAt;
         /// <summary>Per packet sent and not yet completed, in order: true = ours.</summary>
         public readonly LinkedList<bool> Owners = new();
         public int WindowsRemaining;
@@ -1648,7 +1824,8 @@ internal sealed class HciProxy
 /// <summary>One AAP channel per app connection; <see cref="Messages"/> holds framed pipe messages for the app.</summary>
 internal sealed class AapChannel
 {
-    private readonly Channel<byte[]> _messages = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true });
+    // Read by one dedicated writer thread (Pipes): no thread pool hop between the radio and the app.
+    private readonly BlockingCollection<byte[]> _messages = [];
 
     public AapChannel(HciProxy.Link link, ushort localCid)
     {
@@ -1664,7 +1841,7 @@ internal sealed class AapChannel
     public bool LocalConfigured { get; set; }
     public bool IsOpen { get; set; }
     public TaskCompletionSource<int> Opened { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public ChannelReader<byte[]> Messages => _messages.Reader;
+    public BlockingCollection<byte[]> Messages => _messages;
 
     // Mic audio queued for the app is capped (~30 ms per packet): an app slower than real time gets dropped audio
     // instead of an ever-growing delay. Control packets always pass.
@@ -1688,11 +1865,23 @@ internal sealed class AapChannel
         var m = new byte[1 + packet.Length];
         m[0] = Protocol.AapData;
         packet.CopyTo(m, 1);
-        _messages.Writer.TryWrite(m);
+        Post(m);
     }
 
     /// <summary>Queues the call audio (Hands-Free) state of the channel's link for the app.</summary>
-    public void SendCallAudio(bool on) => _messages.Writer.TryWrite([Protocol.AapCallAudio, on ? (byte)1 : (byte)0]);
+    public void SendCallAudio(bool on) => Post([Protocol.AapCallAudio, on ? (byte)1 : (byte)0]);
+
+    // Ignored once the channel ended.
+    private void Post(byte[] message)
+    {
+        try
+        {
+            _messages.Add(message);
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
 
     /// <summary>A message from <see cref="Messages"/> reached the app's pipe.</summary>
     public void Sent(byte[] message)
@@ -1712,13 +1901,13 @@ internal sealed class AapChannel
     {
         if (Opened.TrySetResult(error == 0 ? Protocol.ErrorNotConnected : error))
         {
-            _messages.Writer.TryComplete();
+            _messages.CompleteAdding();
             return;
         }
         var m = new byte[5];
         m[0] = Protocol.AapEnded;
         BinaryPrimitives.WriteInt32LittleEndian(m.AsSpan(1), error);
-        _messages.Writer.TryWrite(m);
-        _messages.Writer.TryComplete();
+        Post(m);
+        _messages.CompleteAdding();
     }
 }

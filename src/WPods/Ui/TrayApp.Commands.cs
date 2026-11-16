@@ -37,7 +37,11 @@ internal sealed partial class TrayApp
         {
             return;
         }
-        Log.Info("ui", "main command " + Describe(m));
+        // A volume drag sends one preview per step; only the release is logged.
+        if (m.Type != "previewMixerVolume")
+        {
+            Log.Info("ui", "main command " + Describe(m));
+        }
         ulong id = Mac.TryParse(m.Id, out ulong address) ? address : 0;
         switch (m.Type)
         {
@@ -119,6 +123,22 @@ internal sealed partial class TrayApp
                 || (m.Value.ValueKind == JsonValueKind.String && MicCatalog.FindEnhancement(m.Value.GetString()!) is not null):
                 SaveMicConfig(_settings.Mic with { Enhancement = m.Value.GetString() });
                 break;
+            case "setMixerSource" when m.Id is not null && m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                _mixer.SetPicked(m.Id, m.Value.GetBoolean());
+                SendMixer();
+                break;
+            case "setMixerVolume" or "previewMixerVolume" when m.Id is not null && m.Value.ValueKind == JsonValueKind.Number
+                && m.Value.TryGetInt32(out int percent) && percent is >= 0 and <= 100:
+                _mixer.SetVolume(m.Id, percent, save: m.Type == "setMixerVolume");
+                break;
+            case "setMixerFilter" when m.Name is "disconnected" or "disabled" && m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+            {
+                // The page sends "show"; the prefs store "hide" so a missing value shows everything.
+                bool hide = !m.Value.GetBoolean();
+                SavePrefs(m.Name == "disconnected" ? _prefs with { MixerHideDisconnected = hide } : _prefs with { MixerHideDisabled = hide });
+                SendMixer();
+                break;
+            }
             case "setTheme" when m.Theme is "light" or "dark" or "auto":
                 SavePrefs(_prefs with { Theme = m.Theme });
                 ApplyTheme();

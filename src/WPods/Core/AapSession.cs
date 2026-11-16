@@ -76,9 +76,11 @@ public sealed class AapSession : IAsyncDisposable
     private bool _noInitialReport;
     // Heart rate ran in the session this one replaced (CarryOver): started again once Ready.
     private bool _resumeHeartRate;
-    // Read loop: 0x58 mic audio packets are logged as one count per second.
+    // Read loop: 0x58 mic audio packets are logged as one count at the end of the session.
     private int _audioCount;
     private long _audioWindowStart;
+    // Read loop: the last inbound packet per opcode, so a repeat of the same content is not logged again.
+    private readonly Dictionary<int, byte[]> _lastInbound = [];
 
     /// <param name="productId">The pair's Bluetooth product ID (<see cref="LinkDevice.ProductId"/>), 0 when unknown.</param>
     internal AapSession(ulong address, NamedPipeClientStream stream, SettingsStore settings, ushort productId)
@@ -479,7 +481,7 @@ public sealed class AapSession : IAsyncDisposable
             }
             if (_audioCount > 0)
             {
-                Log.Info("aap", $"RX 0x58 audio x{_audioCount} in the last {Environment.TickCount64 - _audioWindowStart} ms");
+                Log.Info("aap", $"RX 0x58 audio x{_audioCount} over {Environment.TickCount64 - _audioWindowStart} ms");
                 _audioCount = 0;
             }
             try
@@ -646,32 +648,28 @@ public sealed class AapSession : IAsyncDisposable
         });
     }
 
-    // Every inbound packet as hex, except 0x58 mic audio (count per second) and the 0x31 keys reply (length only).
+    // Inbound packets as hex when they differ from the last one with the same opcode, except 0x58 mic audio (counted)
+    // and the 0x31 keys reply (length only).
     private void LogInbound(ReadOnlySpan<byte> packet)
     {
         int opcode = packet.Length >= 6 && packet[0] == 0x04 && packet[1] == 0x00 && packet[2] == 0x04 && packet[3] == 0x00
             ? packet[4] | (packet[5] << 8)
             : -1;
-        long now = Environment.TickCount64;
         if (opcode == 0x58)
         {
             if (_audioCount++ == 0)
             {
-                _audioWindowStart = now;
+                _audioWindowStart = Environment.TickCount64;
             }
         }
         else if (opcode == 0x31)
         {
             Log.Info("aap", $"RX 0x31 keys reply, {packet.Length} bytes (content not logged)");
         }
-        else
+        else if (!_lastInbound.TryGetValue(opcode, out byte[]? last) || !packet.SequenceEqual(last))
         {
+            _lastInbound[opcode] = packet.ToArray();
             Log.Packet(outbound: false, packet);
-        }
-        if (_audioCount > 0 && now - _audioWindowStart >= 1000)
-        {
-            Log.Info("aap", $"RX 0x58 audio x{_audioCount} in {now - _audioWindowStart} ms");
-            _audioCount = 0;
         }
     }
 

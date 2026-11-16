@@ -16,8 +16,8 @@ internal enum CaptureState
 }
 
 /// <summary>
-/// Client of the WPods.Service virtual mic pipe: sends the target pair and PCM, receives the capture state.
-/// Failures reopen with capped backoff. The state callback runs under the internal lock and must not call back in.
+/// Client of the WPods.Service virtual mic pipe: sends the pair and PCM, receives the capture state (under the internal
+/// lock, must not call back in). Failures reopen with capped backoff.
 /// </summary>
 internal sealed class VirtualMic
 {
@@ -27,7 +27,7 @@ internal sealed class VirtualMic
     private readonly Action<CaptureState> _stateChanged;
     private readonly Lock _lock = new();
     private readonly Timer _reopen;
-    private readonly byte[] _pcmMessage = new byte[1 + MaxPcmBytes];
+    private readonly byte[] _pcmMessage = new byte[1 + 8 + MaxPcmBytes];
     private NamedPipeClientStream? _pipe;
     // The 0x10 message of the pair the mic is for, sent on every (re)connect.
     private byte[]? _device;
@@ -70,8 +70,11 @@ internal sealed class VirtualMic
         }
     }
 
-    /// <summary>Writes mono 48 kHz s16 PCM (at most 32768 samples) as one message. Dropped while the pipe is closed.</summary>
-    public void Write(ReadOnlySpan<short> pcm)
+    /// <summary>
+    /// Writes mono 48 kHz s16 PCM (at most 32768 samples) as one message, its first sample at
+    /// <paramref name="position"/> on the AirPods' clock (48 kHz samples). Dropped while the pipe is closed.
+    /// </summary>
+    public void Write(ReadOnlySpan<short> pcm, long position)
     {
         lock (_lock)
         {
@@ -80,8 +83,9 @@ internal sealed class VirtualMic
                 return;
             }
             ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(pcm);
-            bytes.CopyTo(_pcmMessage.AsSpan(1));
-            SendLocked(pipe, _pcmMessage.AsSpan(0, 1 + bytes.Length), "PCM");
+            BinaryPrimitives.WriteInt64LittleEndian(_pcmMessage.AsSpan(1), position);
+            bytes.CopyTo(_pcmMessage.AsSpan(9));
+            SendLocked(pipe, _pcmMessage.AsSpan(0, 9 + bytes.Length), "PCM");
         }
     }
 
@@ -113,7 +117,8 @@ internal sealed class VirtualMic
         _ = ReadLoopAsync(pipe);
     }
 
-    // Capture-state messages until the pipe fails or the service closes it; then closes it unless that already happened.
+    // Capture-state messages until the pipe fails or the service closes it; then closes it unless that already
+    // happened.
     private async Task ReadLoopAsync(NamedPipeClientStream pipe)
     {
         byte[] buffer = new byte[16];

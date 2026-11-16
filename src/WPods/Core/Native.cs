@@ -63,6 +63,129 @@ internal static unsafe partial class Native
         }
     }
 
+    // CPU set IDs of the highest efficiency class (performance cores); null when every core has the same class.
+    private static readonly uint[]? PerformanceCpuSets = ReadPerformanceCpuSets();
+
+    /// <summary>
+    /// True restricts every thread of the process without its own CPU sets (thread pool, ONNX Runtime and DeepFilter
+    /// workers) to performance cores; false lets Windows schedule them anywhere again. Nothing on CPUs without E-cores.
+    /// </summary>
+    public static void SetPerformanceCoresOnly(bool on)
+    {
+        if (PerformanceCpuSets is not { } ids)
+        {
+            return;
+        }
+        bool ok;
+        fixed (uint* list = ids)
+        {
+            ok = on ? SetProcessDefaultCpuSets(GetCurrentProcess(), list, (uint)ids.Length) : SetProcessDefaultCpuSets(GetCurrentProcess(), null, 0);
+        }
+        if (!ok)
+        {
+            Log.Warn("native", $"performance cores {(on ? "only" : "default")} not set: Win32 error {Marshal.GetLastPInvokeError()}");
+        }
+    }
+
+    /// <summary>
+    /// Makes the calling thread a real-time audio thread for its lifetime: MMCSS "Pro Audio" priority, no power
+    /// throttling, and performance cores only.
+    /// </summary>
+    public static void MakeAudioThread()
+    {
+        uint taskIndex = 0;
+        if (AvSetMmThreadCharacteristics("Pro Audio", ref taskIndex) == 0)
+        {
+            Log.Warn("native", $"MMCSS Pro Audio not set: Win32 error {Marshal.GetLastPInvokeError()}");
+        }
+        // ThreadPowerThrottling = 3; ControlMask EXECUTION_SPEED with StateMask 0 = never throttled (HighQoS).
+        var state = new PowerThrottlingState { Version = 1, ControlMask = 1, StateMask = 0 };
+        if (!SetThreadInformation(GetCurrentThread(), 3, ref state, (uint)sizeof(PowerThrottlingState)))
+        {
+            Log.Warn("native", $"thread power throttling not disabled: Win32 error {Marshal.GetLastPInvokeError()}");
+        }
+        if (PerformanceCpuSets is not { } ids)
+        {
+            return;
+        }
+        fixed (uint* list = ids)
+        {
+            if (!SetThreadSelectedCpuSets(GetCurrentThread(), list, (uint)ids.Length))
+            {
+                Log.Warn("native", $"thread CPU sets not set: Win32 error {Marshal.GetLastPInvokeError()}");
+            }
+        }
+    }
+
+    // SYSTEM_CPU_SET_INFORMATION entries: Size u32 @0, Type u32 @4 (0 = CpuSetInformation), Id u32 @8,
+    // EfficiencyClass u8 @18 (higher = faster).
+    private static uint[]? ReadPerformanceCpuSets()
+    {
+        GetSystemCpuSetInformation(null, 0, out uint length, 0, 0);
+        byte[] buffer = new byte[length];
+        fixed (byte* data = buffer)
+        {
+            if (!GetSystemCpuSetInformation(data, length, out length, 0, 0))
+            {
+                Log.Warn("native", $"CPU sets not read: Win32 error {Marshal.GetLastPInvokeError()}");
+                return null;
+            }
+        }
+        var ids = new List<uint>();
+        byte best = 0;
+        bool mixed = false;
+        for (int offset = 0; offset + 19 <= (int)length;)
+        {
+            int size = BitConverter.ToInt32(buffer, offset);
+            if (size <= 0)
+            {
+                break;
+            }
+            if (BitConverter.ToInt32(buffer, offset + 4) == 0)
+            {
+                byte efficiency = buffer[offset + 18];
+                if (ids.Count > 0 && efficiency != best)
+                {
+                    mixed = true;
+                }
+                if (ids.Count == 0 || efficiency > best)
+                {
+                    best = efficiency;
+                    ids.Clear();
+                }
+                if (efficiency == best)
+                {
+                    ids.Add(BitConverter.ToUInt32(buffer, offset + 8));
+                }
+            }
+            offset += size;
+        }
+        Log.Info("native", mixed ? $"performance cores: {ids.Count} CPU sets of efficiency class {best}" : "no efficiency cores");
+        return mixed ? [.. ids] : null;
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetSystemCpuSetInformation(byte* information, uint bufferLength, out uint returnedLength, nint process, uint flags);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetProcessDefaultCpuSets(nint process, uint* cpuSetIds, uint cpuSetIdCount);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetThreadSelectedCpuSets(nint thread, uint* cpuSetIds, uint cpuSetIdCount);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetThreadInformation(nint thread, int infoClass, ref PowerThrottlingState info, uint size);
+
+    [LibraryImport("kernel32.dll")]
+    private static partial nint GetCurrentThread();
+
+    [LibraryImport("avrt.dll", EntryPoint = "AvSetMmThreadCharacteristicsW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial nint AvSetMmThreadCharacteristics(string taskName, ref uint taskIndex);
+
     // ---- Configuration manager ----
 
     public const int CmNotifyFilterTypeDeviceInterface = 0;
@@ -497,9 +620,5 @@ internal static unsafe partial class Native
 
     [LibraryImport("wpods_native.dll")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
-    public static partial uint wpn_fp_set_ftz_daz();
-
-    [LibraryImport("wpods_native.dll")]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
-    public static partial void wpn_fp_restore(uint mxcsr);
+    public static partial void wpn_fp_set_ftz_daz();
 }

@@ -97,6 +97,9 @@ internal static class UsbIp
     /// <summary>
     /// RET_SUBMIT for an isochronous URB as usbip-win2 expects it: IN data packed back to back, descriptors keep the
     /// CMD_SUBMIT offsets and lengths, error_count = packets with nonzero status (all of them fails the whole URB).
+    /// IN packets that carry data (or failed) go to the first descriptors, in order: usbip-win2 receives the packed data at
+    /// the buffer's start and moves each packet to its offset, so a packet reported further back leaves a copy at the
+    /// start that Windows' Bluetooth driver reads as one more SCO packet (every call audio frame twice: slow motion).
     /// </summary>
     public static byte[] RetIso(uint seq, int status, uint startFrame, byte[] cmdDescriptors, int packets, bool isIn, IsoResult? result)
     {
@@ -104,20 +107,36 @@ internal static class UsbIp
         var descriptors = new byte[16 * packets];
         uint total = 0;
         uint errors = 0;
+        int next = 0;
         for (int i = 0; i < packets; i++)
         {
             uint offset = U32(cmdDescriptors, 16 * i);
             uint length = U32(cmdDescriptors, (16 * i) + 4);
             uint actual = 0;
             int packetStatus = EXDEV;
-            if (result is { } r)
+            if (result is { } r && isIn)
             {
-                actual = (uint)Math.Clamp(r.Actual[i], 0, (int)length);
-                packetStatus = r.Status[i] == 0 ? 0 : EXDEV;
-                if (isIn && actual > 0)
+                // Descriptor i takes the next packet that has data or failed; the rest stay empty and successful.
+                packetStatus = 0;
+                while (next < packets && r.Actual[next] <= 0 && r.Status[next] == 0)
                 {
-                    payload.Write(r.Data, r.Offsets[i], (int)actual);
+                    next++;
                 }
+                if (next < packets)
+                {
+                    actual = (uint)Math.Clamp(r.Actual[next], 0, (int)length);
+                    packetStatus = r.Status[next] == 0 ? 0 : EXDEV;
+                    if (actual > 0)
+                    {
+                        payload.Write(r.Data, r.Offsets[next], (int)actual);
+                    }
+                    next++;
+                }
+            }
+            else if (result is { } o)
+            {
+                actual = (uint)Math.Clamp(o.Actual[i], 0, (int)length);
+                packetStatus = o.Status[i] == 0 ? 0 : EXDEV;
             }
             if (packetStatus != 0)
             {

@@ -49,6 +49,17 @@ body {
   content: none;
 }
 
+.wp-row.wp-mixer__volume {
+  min-height: 0;
+  padding-top: 0;
+}
+.wp-list > .wp-row.wp-mixer__volume::before {
+  content: none;
+}
+.wp-mixer__inactive .wp-row__title {
+  color: var(--text-secondary);
+}
+
 .wp-hero__switch {
   position: relative;
   max-width: 100%;

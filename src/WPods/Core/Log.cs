@@ -21,7 +21,7 @@ internal static class Log
 
     private readonly record struct Entry(long UtcTicks, int Thread, Level Level, string Category, string Message);
 
-    private const long MaxBytes = 100L * 1024 * 1024;
+    private const long MaxBytes = 10L * 1024 * 1024;
     private const int WriteIntervalMs = 500;
 
     private static readonly ConcurrentQueue<Entry> Queue = new();
@@ -146,13 +146,13 @@ internal static class Log
         return _writer;
     }
 
-    // Under WriteLock, file closed: keeps the newest 90 % of MaxBytes, starting at a line.
+    // Under WriteLock, file closed: keeps the newest half of MaxBytes, starting at a line, so the cut runs rarely.
     private static void CutOldest()
     {
         string temp = FilePath + ".tmp";
         using (var source = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
         {
-            source.Position = Math.Max(0, source.Length - (MaxBytes / 10 * 9));
+            source.Position = Math.Max(0, source.Length - (MaxBytes / 2));
             int b;
             while ((b = source.ReadByte()) >= 0 && b != '\n')
             {

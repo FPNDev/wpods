@@ -11,4 +11,15 @@ EXPORTS
     wpn_media_forget
     wpn_audio_is_default_output
     wpn_fp_set_ftz_daz
-    wpn_fp_restore
+    wpn_mixer_init
+    wpn_mixer_shutdown
+    wpn_mixer_enum_devices
+    wpn_mixer_set_target
+    wpn_mixer_set_source
+    wpn_mixer_remove_source
+    wpn_mixer_push_mic
+    wpn_jitter_create
+    wpn_jitter_reset
+    wpn_jitter_push
+    wpn_jitter_pull
+    wpn_jitter_get_stats

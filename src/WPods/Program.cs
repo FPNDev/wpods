@@ -64,11 +64,12 @@ internal static class Program
         var mic = new MicPipeline(connections);
         var keepAlive = new LowLatencyKeepAlive(connections);
         var ducker = new ConversationDucker(connections, mic);
+        var mixer = new Mixer(connections, mic);
         _ = new EarPause(connections);
         var nearby = new NearbyService(connections);
         // Opening the case releases a pair the user disconnected while Windows still has its link up.
         nearby.CaseOpened += connections.OnCaseOpened;
-        var app = new TrayApp(settings, connections, nearby, mic, keepAlive, ducker, locales, startHidden: startup);
+        var app = new TrayApp(settings, connections, nearby, mic, keepAlive, ducker, mixer, locales, startHidden: startup);
         using var defaultOutput = new DefaultOutputWatcher(connections);
         connections.Start();
         nearby.Start();

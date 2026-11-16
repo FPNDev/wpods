@@ -57,11 +57,64 @@ int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress);
 // capture endpoint with its container ID: only Hands-Free has one), 0 if not or if there is no such
 // endpoint, negative HRESULT on error. Synchronous, call off the UI thread.
 int32_t __stdcall wpn_bt_handsfree_mic_in_use(uint64_t btAddress);
-// Sets flush-to-zero (0x8000) and denormals-are-zero (0x0040) in the calling thread's MXCSR and returns the
-// previous MXCSR. Pair with wpn_fp_restore on the same thread, so a thread-pool thread is handed back unchanged.
-uint32_t __stdcall wpn_fp_set_ftz_daz(void);
-// Writes mxcsr (a value returned by wpn_fp_set_ftz_daz) back to the calling thread's MXCSR.
-void __stdcall wpn_fp_restore(uint32_t mxcsr);
+// Sets flush-to-zero (0x8000) and denormals-are-zero (0x0040) in the calling thread's MXCSR, for good: only for a
+// thread of the caller's own (never a thread-pool thread).
+void __stdcall wpn_fp_set_ftz_daz(void);
+
+// ---- Jitter buffer (jitter.cpp) ----
+// The WPods mic's jitter buffer, used by the service's virtual USB mic and the mixer's direct source. Thread-safe
+// between one producer (push) and one consumer (pull); real-time safe.
+// Gets a summary line once a minute while dropouts happen, outside the internal lock; must return quickly.
+typedef void (__stdcall *wpn_jitter_log_cb)(void* ctx, const wchar_t* line);
+typedef struct wpn_jitter_stats {
+    int64_t received;  // samples pushed
+    int64_t sent;      // samples pulled
+    int64_t concealed; // pulled samples that were concealment or silence
+    int64_t dropouts;  // dropouts concealed
+    int64_t trimmed;   // samples that arrived after their time had passed
+    int32_t delayMs;   // current playout delay
+} wpn_jitter_stats;
+// Mono 48 kHz; NULL on allocation failure. Lives as long as the process (there is no destroy). log may be NULL.
+void* __stdcall wpn_jitter_create(wpn_jitter_log_cb log, void* ctx);
+// Empties it (capture start); the last stream's arrival spread (at most 40 ms) is used at least for the first seconds;
+// stats zeroed.
+void __stdcall wpn_jitter_reset(void* jitter);
+// Queues PCM whose first sample is at pos on the AirPods' clock (48 kHz samples).
+void __stdcall wpn_jitter_push(void* jitter, const int16_t* pcm, uint32_t count, int64_t pos);
+// The next count samples, int16 scale (-32768..32767); never fails (concealment or silence when the PCM ran out).
+void __stdcall wpn_jitter_pull(void* jitter, float* out, uint32_t count);
+void __stdcall wpn_jitter_get_stats(void* jitter, wpn_jitter_stats* stats);
+
+// Mixer (mixer.cpp): plays picked endpoints live in the pair's A2DP endpoint (Hands-Free while that is active), on top
+// of Windows audio. The WPods virtual mic is played directly from wpn_mixer_push_mic instead of through Windows.
+// Event kinds: 0 = devices changed (id NULL: re-run wpn_mixer_enum_devices); 1 = a source no longer exists in Windows
+// and was dropped (id = its endpoint ID); 2 = a log line from the direct source's jitter buffer.
+typedef void (__stdcall *wpn_mixer_event_cb)(void* ctx, int32_t kind, const wchar_t* id);
+// Callbacks run on any thread, must return quickly and never call wpn_mixer_shutdown. Returns HRESULT; S_FALSE when
+// already initialized (the first callback stays).
+int32_t __stdcall wpn_mixer_init(wpn_mixer_event_cb callback, void* ctx);
+// Stops the engine (all streams, thread), forgets all sources and the target, unregisters. After return no further
+// callbacks run. Safe when not initialized.
+void __stdcall wpn_mixer_shutdown(void);
+// flow: 0 render, 1 capture. state: DEVICE_STATE_*. pair: the address from pairs[] whose Hands-Free mic this is,
+// else 0. flags: 1 = the WPods virtual mic. Strings are valid only during the callback.
+typedef void (__stdcall *wpn_mixer_device_cb)(void* ctx, const wchar_t* id, const wchar_t* name, int32_t flow,
+                                              uint32_t state, uint64_t pair, uint32_t flags);
+// Every audio endpoint in any state, except the render endpoints of the pairs in pairs[]. Synchronous; callable
+// without wpn_mixer_init. Returns HRESULT.
+int32_t __stdcall wpn_mixer_enum_devices(const uint64_t* pairs, uint32_t pairCount, wpn_mixer_device_cb cb,
+                                         void* ctx);
+// Plays to the paired device with this address (0 = none). S_OK does not mean found: the engine looks it up.
+int32_t __stdcall wpn_mixer_set_target(uint64_t btAddress);
+// Adds a source by endpoint ID (render endpoints are captured by loopback) or updates its gain (linear, 0..1).
+int32_t __stdcall wpn_mixer_set_source(const wchar_t* id, float gain);
+// Removes a source; S_FALSE if it was not added. Returns HRESULT.
+int32_t __stdcall wpn_mixer_remove_source(const wchar_t* id);
+// Feeds the WPods mic's PCM (mono 48 kHz, what the virtual mic gets) to the direct source; ignored while there is none.
+// One producer thread. pos: the first sample's position on the AirPods' clock (see wpn_jitter_push).
+void __stdcall wpn_mixer_push_mic(const int16_t* pcm, uint32_t count, int64_t pos);
+// All wpn_mixer_* functions are thread-safe and never hold an internal lock while a callback runs, so they may be
+// called under a lock the event callback also takes.
 
 #ifdef __cplusplus
 }

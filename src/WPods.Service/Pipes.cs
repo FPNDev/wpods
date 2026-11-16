@@ -156,14 +156,16 @@ internal sealed class AapPipeServer(HciProxy hci)
         {
             return;
         }
-        // Inbound packets and the end of the channel go to the app; the pipe closes after the last message.
-        Task writer = Task.Run(async () =>
+        // Inbound packets and the end of the channel go to the app; the pipe closes after the last message. A thread of
+        // its own: on the thread pool a mic packet sometimes waited tens of ms for a worker.
+        var written = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        new Thread(() =>
         {
             try
             {
-                await foreach (byte[] m in ch.Messages.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
+                foreach (byte[] m in ch.Messages.GetConsumingEnumerable())
                 {
-                    await pipe.WriteAsync(m, CancellationToken.None).ConfigureAwait(false);
+                    pipe.Write(m);
                     ch.Sent(m);
                 }
             }
@@ -172,7 +174,8 @@ internal sealed class AapPipeServer(HciProxy hci)
                 // The app closed the pipe.
             }
             pipe.Dispose();
-        }, CancellationToken.None);
+            written.SetResult();
+        }) { IsBackground = true, Name = "aap pipe", Priority = ThreadPriority.Highest }.Start();
         try
         {
             while (true)
@@ -192,7 +195,7 @@ internal sealed class AapPipeServer(HciProxy hci)
         finally
         {
             hci.Close(ch);
-            await writer.ConfigureAwait(false);
+            await written.Task.ConfigureAwait(false);
         }
     }
 }
@@ -239,7 +242,7 @@ internal sealed class MicPipeServer(Engine engine)
         Log.Info("mic", "app connected");
         try
         {
-            var buffer = new byte[1 + Protocol.MaxPcm];
+            var buffer = new byte[1 + 8 + Protocol.MaxPcm];
             while (true)
             {
                 int n = await Pipes.ReadMessageAsync(pipe, buffer, stop).ConfigureAwait(false);
@@ -247,9 +250,9 @@ internal sealed class MicPipeServer(Engine engine)
                 {
                     break;
                 }
-                if (buffer[0] == Protocol.MicPcm)
+                if (buffer[0] == Protocol.MicPcm && n >= 9)
                 {
-                    engine.MicPush(buffer.AsSpan(1, n - 1));
+                    engine.MicPush(BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(1)), buffer.AsSpan(9, n - 9));
                 }
                 else if (buffer[0] == Protocol.MicDevice && n >= 10)
                 {

@@ -23,6 +23,22 @@ internal sealed class RadioLink : IDisposable
     private bool _callAudioEnded;
     private readonly HashSet<byte> _isoOpenFailed = [];
     private readonly Dictionary<byte, IsoPipe> _isoPipes = [];
+    // Under _isoLock, per alternate setting: whether Windows sent any call audio out, our silence packets so far, and
+    // the SCO packet header being parsed from the incoming stream.
+    private bool _windowsSendsOut;
+    private long _silencePackets;
+    private readonly byte[] _scoInHeader = new byte[3];
+    private int _scoInHave;
+    private int _scoInSkip;
+    private int _silenceSequence;
+    // mSBC frame of silence (57 bytes; ffmpeg sbc -msbc of 16 kHz zeros) and the H2 header's sequence bytes.
+    private static readonly byte[] MsbcSilence =
+    [
+        0xAD, 0x00, 0x00, 0xC5, 0x00, 0x00, 0x00, 0x00, 0x77, 0x6D, 0xB6, 0xDD, 0xDB, 0x6D, 0xB7, 0x76, 0xDB, 0x6D, 0xDD,
+        0xB6, 0xDB, 0x77, 0x6D, 0xB6, 0xDD, 0xDB, 0x6D, 0xB7, 0x76, 0xDB, 0x6D, 0xDD, 0xB6, 0xDB, 0x77, 0x6D, 0xB6, 0xDD,
+        0xDB, 0x6D, 0xB7, 0x76, 0xDB, 0x6D, 0xDD, 0xB6, 0xDB, 0x77, 0x6D, 0xB6, 0xDD, 0xDB, 0x6D, 0xB7, 0x76, 0xDB, 0x6C,
+    ];
+    private static readonly byte[] H2Sequence = [0x08, 0x38, 0xC8, 0xF8];
     private readonly byte _eventPipe;
     private readonly byte _aclIn;
     private readonly byte _aclOut;
@@ -150,7 +166,8 @@ internal sealed class RadioLink : IDisposable
                 urb = new Urb { Seq = seq, Pipe = 0, In = dir == 1, Length = length, Data = withSetup };
                 if (header[40] == 0x20)
                 {
-                    _hci.OnCommand(data);
+                    _hci.RewriteCommand(withSetup.AsSpan(8));
+                    urb.Held = _hci.OnCommand(data);
                 }
             }
             else
@@ -158,6 +175,13 @@ internal sealed class RadioLink : IDisposable
                 urb = new Urb { Seq = seq, Pipe = pipe, In = dir == 1, Length = length, Data = data };
             }
             _live[seq] = urb;
+            if (ep == 0 && header[40] == 0x01 && header[41] == 0x0B)
+            {
+                // SET_INTERFACE runs here, before the iso URBs Windows sends right after it: queued behind other control
+                // transfers it would come too late, and the first call audio URBs would fail without bandwidth.
+                Execute(0, urb);
+                continue;
+            }
             Queue(urb.Pipe).Add(urb);
         }
     }
@@ -241,6 +265,9 @@ internal sealed class RadioLink : IDisposable
     private void Work(byte pipe, BlockingCollection<Urb> q)
     {
         var deferred = new Queue<Urb>();
+        // Own packets deferred since the last log line: at most one line a minute.
+        int deferrals = 0;
+        long deferralsSince = Environment.TickCount64;
         try
         {
             while (!q.IsCompleted)
@@ -256,10 +283,22 @@ internal sealed class RadioLink : IDisposable
                     // controller has no buffers, and behind earlier ones of ours.
                     if (deferred.Count > 0 || _hci.MustDefer((int)u.Seq) || !WriteInternal(u))
                     {
-                        Log.Info("acl", $"own ACL packet for 0x{u.Seq:X3} deferred ({deferred.Count} waiting)");
                         deferred.Enqueue(u);
+                        deferrals++;
+                        long elapsed = Environment.TickCount64 - deferralsSince;
+                        if (elapsed >= 60_000)
+                        {
+                            Log.Info("acl", $"{deferrals} own ACL packets deferred in the last {elapsed / 1000} s (Windows mid-PDU or no controller buffers)");
+                            deferrals = 0;
+                            deferralsSince = Environment.TickCount64;
+                        }
                     }
                     continue;
+                }
+                // Call audio setup waiting for the AirPods' mic to stop.
+                while (u.Held && _hci.CallAudioHeld())
+                {
+                    Thread.Sleep(20);
                 }
                 if (u.Cancelled)
                 {
@@ -500,6 +539,10 @@ internal sealed class RadioLink : IDisposable
                 // A new alternate setting: call audio may flow again, and open failures are worth one warning again.
                 _callAudioEnded = false;
                 _isoOpenFailed.Clear();
+                _windowsSendsOut = false;
+                _silencePackets = 0;
+                _scoInHave = 0;
+                _scoInSkip = 0;
             }
             int error = _device.SetAlternate(ifn, (byte)value);
             Log.Info("radio", $"SET_INTERFACE {ifn} alt {value}: {(error == 0 ? "ok" : $"Win32 error {error}")}");
@@ -569,33 +612,133 @@ internal sealed class RadioLink : IDisposable
                 RetIso(u, 0, IsoPipe.OutResult(u));
                 return;
             }
-            if (!_isoPipes.TryGetValue(u.Pipe, out IsoPipe? ip) && _device.TryGetPipeInterface(u.Pipe, out nint iface))
-            {
-                try
-                {
-                    ip = new IsoPipe(_device, iface, u.Pipe, RetIso);
-                    _isoPipes[u.Pipe] = ip;
-                }
-                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
-                {
-                    // Once per pipe and alternate setting: Windows keeps submitting until it selects one with bandwidth.
-                    if (_isoOpenFailed.Add(u.Pipe))
-                    {
-                        Log.Warn("radio", $"iso pipe 0x{u.Pipe:X2} open failed: {e.Message}");
-                    }
-                }
-            }
-            if (ip is null)
+            if (OpenIsoPipeLocked(u.Pipe) is not { } ip)
             {
                 RetIso(u, UsbIp.EPIPE, null);
                 return;
+            }
+            if (!u.In && !_windowsSendsOut)
+            {
+                _windowsSendsOut = true;
+                Log.Info("radio", $"call audio: Windows sends outgoing audio{(_silencePackets > 0 ? $" (after {_silencePackets} silence packets of ours)" : "")}");
             }
             ip.Submit(u);
         }
     }
 
+    // The open pipe, else opened now; null when the interface's current setting has none or no bandwidth for it.
+    private IsoPipe? OpenIsoPipeLocked(byte pipe)
+    {
+        if (_isoPipes.TryGetValue(pipe, out IsoPipe? ip) || !_device.TryGetPipeInterface(pipe, out nint iface))
+        {
+            return ip;
+        }
+        try
+        {
+            ip = new IsoPipe(_device, iface, pipe, RetIso);
+            _isoPipes[pipe] = ip;
+            return ip;
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Once per pipe and alternate setting: Windows keeps submitting until it selects one with bandwidth.
+            if (_isoOpenFailed.Add(pipe))
+            {
+                Log.Warn("radio", $"iso pipe 0x{pipe:X2} open failed: {e.Message}");
+            }
+            return null;
+        }
+    }
+
+    // While a call audio link is up and Windows sends nothing out (only recording, nothing playing), the AirPods hang up
+    // after ~3 s. Each SCO packet that comes in is answered with a silent one of the same size until Windows sends.
+    private void FeedSilence(Urb inUrb, IsoResult result)
+    {
+        if (_windowsSendsOut || !_isoLock.TryEnter())
+        {
+            return;
+        }
+        try
+        {
+            if (_windowsSendsOut || _callAudioEnded)
+            {
+                return;
+            }
+            var silence = new List<byte>();
+            int count = 0;
+            for (int i = 0; i < inUrb.Packets; i++)
+            {
+                if (result.Status[i] != 0)
+                {
+                    continue;
+                }
+                for (int b = result.Offsets[i]; b < result.Offsets[i] + result.Actual[i]; b++)
+                {
+                    if (_scoInSkip > 0)
+                    {
+                        _scoInSkip--;
+                        continue;
+                    }
+                    _scoInHeader[_scoInHave++] = result.Data[b];
+                    if (_scoInHave < 3)
+                    {
+                        continue;
+                    }
+                    _scoInHave = 0;
+                    int length = _scoInHeader[2];
+                    _scoInSkip = length;
+                    // Same handle (flags cleared) and length as the packet that came in.
+                    silence.Add(_scoInHeader[0]);
+                    silence.Add((byte)(_scoInHeader[1] & 0x0F));
+                    silence.Add((byte)length);
+                    silence.AddRange(SilencePayload(length, result.Data.AsSpan(b + 1)));
+                    count++;
+                }
+            }
+            if (count == 0)
+            {
+                return;
+            }
+            byte outPipe = (byte)(inUrb.Pipe & 0x7F);
+            if (OpenIsoPipeLocked(outPipe) is not { } ip)
+            {
+                return;
+            }
+            if (_silencePackets == 0)
+            {
+                Log.Info("radio", "call audio: Windows sends nothing out, sending silence until it does");
+            }
+            _silencePackets += count;
+            ip.Submit(new Urb { Pipe = outPipe, In = false, Internal = true, Data = [.. silence], Packets = count });
+        }
+        finally
+        {
+            _isoLock.Exit();
+        }
+    }
+
+    // Silence for one SCO payload: an mSBC frame of silence when the call carries mSBC (the AirPods' packets start with
+    // the H2 header), else zero PCM.
+    private byte[] SilencePayload(int length, ReadOnlySpan<byte> incoming)
+    {
+        var payload = new byte[length];
+        bool msbc = length >= 2 + MsbcSilence.Length && incoming.Length >= 3 && incoming[0] == 0x01 && (incoming[1] & 0x0F) == 0x08 && incoming[2] == 0xAD;
+        if (msbc)
+        {
+            payload[0] = 0x01;
+            payload[1] = H2Sequence[_silenceSequence];
+            _silenceSequence = (_silenceSequence + 1) % H2Sequence.Length;
+            MsbcSilence.CopyTo(payload, 2);
+        }
+        return payload;
+    }
+
     private void RetIso(Urb u, int status, IsoResult? result)
     {
+        if (u.Internal)
+        {
+            return;
+        }
         _live.TryRemove(u.Seq, out _);
         if (u.Cancelled)
         {
@@ -608,6 +751,10 @@ internal sealed class RadioLink : IDisposable
         catch (Exception e) when (e is IOException or ObjectDisposedException)
         {
             // The connection is ending; the URB loop reports it.
+        }
+        if (u.In && status == 0 && result is { } r)
+        {
+            FeedSilence(u, r);
         }
     }
 

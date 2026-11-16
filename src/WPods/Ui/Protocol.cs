@@ -269,6 +269,37 @@ internal sealed class MessageWriter
     }
 
     /// <summary>
+    /// "mixer": the endpoint list in <see cref="Mixer.Devices"/> order with each one's pick and volume, and the page
+    /// filters. A pair's Hands-Free mic is left out while that pair's Hands-Free is disabled, unless it is picked.
+    /// </summary>
+    public static void WriteMixer(Utf8JsonWriter w, IReadOnlyList<MixerDevice> devices, SettingsStore settings, UiPrefs prefs)
+    {
+        MixerConfig config = settings.Mixer;
+        w.WriteStartObject("mixer");
+        w.WriteStartArray("devices");
+        foreach (MixerDevice device in devices)
+        {
+            bool on = config.Sources.Contains(device.Id);
+            if (device.Pair != 0 && !on && settings.Get(device.Pair).DisableHandsFree)
+            {
+                continue;
+            }
+            w.WriteStartObject();
+            w.WriteString("id", device.Id);
+            w.WriteString("name", device.Name);
+            w.WriteString("flow", Camel(device.Flow));
+            w.WriteString("state", Camel(device.State));
+            w.WriteBoolean("on", on);
+            w.WriteNumber("volume", config.Volume(device.Id));
+            w.WriteEndObject();
+        }
+        w.WriteEndArray();
+        w.WriteBoolean("hideDisconnected", prefs.MixerHideDisconnected);
+        w.WriteBoolean("hideDisabled", prefs.MixerHideDisabled);
+        w.WriteEndObject();
+    }
+
+    /// <summary>
     /// One Device object; <paramref name="batteries"/> only for a pair offered nearby. "saved" = the settings remembered
     /// for the pair (display while not attached).
     /// </summary>

@@ -32,6 +32,7 @@ internal sealed partial class TrayApp : ApplicationContext
         Toast = 1 << 11,
         Caps = 1 << 12,
         Checking = 1 << 13,
+        Mixer = 1 << 14,
     }
 
     // Main-page messages whose last sent JSON is kept to skip sends that change nothing.
@@ -62,6 +63,7 @@ internal sealed partial class TrayApp : ApplicationContext
     private readonly NearbyService _nearby;
     private readonly MicPipeline _mic;
     private readonly ConversationDucker _ducker;
+    private readonly Mixer _mixer;
     private readonly Localization _locales;
     private readonly SynchronizationContext _ui;
     private readonly HostWindow _host;
@@ -110,13 +112,14 @@ internal sealed partial class TrayApp : ApplicationContext
     private string _connLogged = "";
 
     public TrayApp(SettingsStore settings, ConnectionManager connections, NearbyService nearby, MicPipeline mic,
-        LowLatencyKeepAlive keepAlive, ConversationDucker ducker, Localization locales, bool startHidden)
+        LowLatencyKeepAlive keepAlive, ConversationDucker ducker, Mixer mixer, Localization locales, bool startHidden)
     {
         _settings = settings;
         _connections = connections;
         _nearby = nearby;
         _mic = mic;
         _ducker = ducker;
+        _mixer = mixer;
         _locales = locales;
         SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         _ui = SynchronizationContext.Current!;
@@ -147,6 +150,7 @@ internal sealed partial class TrayApp : ApplicationContext
         mic.StageChanged += OnMicStage;
         mic.StageStopped += address => QueueToast("micModeStopped", address, "M3");
         keepAlive.Failed += OnLowLatencyFailed;
+        mixer.Changed += () => MarkDirty(Dirty.Mixer);
         nearby.OffersChanged += () => MarkDirty(Dirty.Offers);
         nearby.NearbyChanged += () => MarkDirty(Dirty.Devices);
         Program.ActivationRequested += () => _ui.Post(static s => ((TrayApp)s!).ShowMain(), this);
@@ -280,7 +284,8 @@ internal sealed partial class TrayApp : ApplicationContext
         {
             _hostSettingsDirty.Add(address);
         }
-        MarkDirty(Dirty.HostSettings);
+        // The Mixer shows a pair's Hands-Free mic only while its Hands-Free is enabled.
+        MarkDirty(Dirty.HostSettings | Dirty.Mixer);
     }
 
     // Under MicPipeline's lock. Entering Problem while an app captures shows a toast with the fault code.
@@ -500,6 +505,10 @@ internal sealed partial class TrayApp : ApplicationContext
             w.WriteString("status", MessageWriter.Camel(_micStatus));
             SendMain(Sent.Mic, _writer.End(), force: false);
         }
+        if ((dirty & Dirty.Mixer) != 0)
+        {
+            SendMixer();
+        }
         if ((dirty & Dirty.HostSettings) != 0)
         {
             ulong[] addresses;
@@ -601,6 +610,13 @@ internal sealed partial class TrayApp : ApplicationContext
         w.WriteString("id", Mac.Format(address));
         MessageWriter.WriteHost(w, _settings.Get(address));
         w.WriteBoolean("handsFreeApplying", _handsFreeApplying.ContainsKey(address));
+        PostMain(_writer.End());
+    }
+
+    private void SendMixer()
+    {
+        Utf8JsonWriter w = _writer.Begin("mixer");
+        MessageWriter.WriteMixer(w, _mixer.Devices, _settings, _prefs);
         PostMain(_writer.End());
     }
 
@@ -889,7 +905,9 @@ internal sealed partial class TrayApp : ApplicationContext
         DestroyPopup();
         DestroyMain();
         await _mic.StopStreamAsync();
+        // After the detach: the Mixer letting go of the mic earlier would START it again in low latency mode.
         await _connections.DisposeAsync();
+        _mixer.Dispose();
         _ducker.Dispose();
         _nearby.Dispose();
         _service.Dispose();

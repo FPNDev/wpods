@@ -25,8 +25,8 @@ internal sealed class Urb
     public int Packets;
     public uint StartFrame;
     public nint Overlapped;
-    /// <summary>Isochronous OUT already completed towards Windows before the device finished it.</summary>
-    public bool Early;
+    /// <summary>Control only: an HCI command that waits while <see cref="HciProxy.CallAudioHeld"/> is true.</summary>
+    public bool Held;
     /// <summary>The service's own ACL OUT packets (one L2CAP PDU, already fragmented); no RET goes to Windows.</summary>
     public bool Internal;
     public byte[][]? Fragments;
@@ -380,16 +380,18 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
 
 /// <summary>
 /// One isochronous pipe (Bluetooth SCO for Hands-Free). URBs go to WinUSB at once, so several are in flight as on a real
-/// host controller; one thread completes them in order. Must be closed before the alternate setting changes.
+/// host controller, and one thread completes them in order. OUT URBs complete once the frames Windows scheduled them
+/// for have passed, as from a host controller: Windows paces call audio by those completions. Must be closed before the
+/// alternate setting changes.
 /// </summary>
 internal sealed unsafe partial class IsoPipe
 {
     private const int Slots = 64;
     private const int SlotSize = 4096;
     private const int MaxPackets = 256;
-    // Windows sends the next SCO OUT packet only after a completion, and the USB/IP round trip exceeds the 1 ms frame:
-    // OUT URBs complete early while at most OutDepth frames are queued in WinUSB, bounding added latency to OutDepth ms.
-    private const int OutDepth = 8;
+    // A first start frame further than this from the system time means frame numbers are not milliseconds since
+    // boot (another usbip-win2 version): OUT URBs then complete back to back instead.
+    private const long TimeFrameToleranceMs = 1000;
 
     private readonly WinUsbDevice _device;
     private readonly byte _pipe;
@@ -398,14 +400,18 @@ internal sealed unsafe partial class IsoPipe
     private readonly nint _descriptors;
     private readonly nint _registration;
     private readonly nint[] _overlapped = new nint[Slots];
-    private readonly BlockingCollection<(Urb Urb, int Slot)> _pending = new(Slots - 1);
-    private readonly Queue<Urb> _held = new();
+    private readonly BlockingCollection<(Urb Urb, int Slot, long End)> _pending = new(Slots - 1);
     private readonly Action<Urb, int, IsoResult?> _done;
     private readonly Thread _completer;
     private int _next;
     private long _urbs;
     private long _failed;
     private volatile bool _streaming;
+    private volatile bool _closing;
+    // Submit only: whether Windows' start frames are milliseconds since boot (null until the first OUT URB),
+    // and the frame after the last OUT URB.
+    private bool? _timeFrames;
+    private long _nextFrame;
 
     public IsoPipe(WinUsbDevice device, nint iface, byte pipe, Action<Urb, int, IsoResult?> done)
     {
@@ -439,7 +445,7 @@ internal sealed unsafe partial class IsoPipe
 
     public nint Interface { get; }
 
-    /// <summary>Called only from the URB loop thread.</summary>
+    /// <summary>Called under RadioLink's iso lock (Windows' URBs and the service's own silence).</summary>
     public void Submit(Urb u)
     {
         int slot = _next;
@@ -457,12 +463,21 @@ internal sealed unsafe partial class IsoPipe
         *(long*)(ov + 8) = 0;
         u.Overlapped = ov;
         uint offset = (uint)(slot * SlotSize);
+        long end = 0;
         if (!u.In)
         {
             Marshal.Copy(u.Data, 0, _buffer + (int)offset, length);
         }
-        int error = Start(u, slot, offset, length, _streaming);
-        if (error != 0 && _streaming)
+        // The service's own silence completes towards nobody, so it never waits for a frame.
+        if (!u.In && !u.Internal)
+        {
+            end = FrameFor(u.StartFrame, NowFrame()) + u.Packets;
+            _nextFrame = end;
+        }
+        // OUT data is sparse (one SCO packet every few frames), so each write starts at the next possible frame.
+        bool continueStream = u.In && _streaming;
+        int error = Start(u, slot, offset, length, continueStream);
+        if (error != 0 && continueStream)
         {
             // The stream ran dry (a gap): restart it at the next possible frame.
             error = Start(u, slot, offset, length, false);
@@ -476,14 +491,44 @@ internal sealed unsafe partial class IsoPipe
         }
         _streaming = true;
         u.Running = true;
-        _pending.Add((u, slot));
-        if (!u.In)
+        _pending.Add((u, slot, end));
+    }
+
+    // The frame an OUT URB runs in: the one Windows asked for while frame numbers are milliseconds since boot, else
+    // right after the previous URB, as a host controller places an ASAP transfer; never before now.
+    private long FrameFor(uint asked, long now)
+    {
+        // Frame numbers are 32-bit: take the one nearest to now.
+        long nearest = now + unchecked((int)(asked - (uint)now));
+        if (_timeFrames is null && asked != 0)
         {
-            lock (_held)
+            _timeFrames = Math.Abs(nearest - now) <= TimeFrameToleranceMs;
+            if (_timeFrames == false)
             {
-                _held.Enqueue(u);
-                DrainLocked();
+                Log.Warn("usb", $"iso pipe 0x{_pipe:X2}: start frame {asked} is not system time ({now} ms): URBs complete back to back");
             }
+        }
+        return _timeFrames == true && asked != 0 ? nearest : Math.Max(_nextFrame, now + 1);
+    }
+
+    /// <summary>The current USB frame number as usbip-win2 0.9.8.1 numbers frames: KeQueryInterruptTime() / 10000, ms since boot.</summary>
+    public static long NowFrame()
+    {
+        QueryInterruptTimePrecise(out ulong time);
+        return (long)(time / 10_000);
+    }
+
+    // Cut short while closing.
+    private void WaitForFrame(long frame)
+    {
+        while (!_closing)
+        {
+            long ms = frame - NowFrame();
+            if (ms <= 0)
+            {
+                return;
+            }
+            Thread.Sleep((int)Math.Min(ms, 50));
         }
     }
 
@@ -498,6 +543,7 @@ internal sealed unsafe partial class IsoPipe
     /// <summary>Aborts what is in flight, waits for the completions, then releases the buffer registration.</summary>
     public void Close()
     {
+        _closing = true;
         WinUsbDevice.Abort(Interface, _pipe);
         _pending.CompleteAdding();
         if (_completer.Join(2000))
@@ -518,17 +564,6 @@ internal sealed unsafe partial class IsoPipe
         return error == 997 /* ERROR_IO_PENDING */ ? 0 : error;
     }
 
-    // Caller holds _held.
-    private void DrainLocked()
-    {
-        while (_held.Count > 0 && _pending.Count <= OutDepth)
-        {
-            Urb h = _held.Dequeue();
-            h.Early = true;
-            _done(h, 0, OutResult(h));
-        }
-    }
-
     /// <summary>Result of an isochronous OUT transfer with every packet counted as sent.</summary>
     public static IsoResult OutResult(Urb u)
     {
@@ -542,18 +577,11 @@ internal sealed unsafe partial class IsoPipe
 
     private void Complete()
     {
-        foreach ((Urb u, int slot) in _pending.GetConsumingEnumerable())
+        foreach ((Urb u, int slot, long end) in _pending.GetConsumingEnumerable())
         {
             bool ok = WinUsb_GetOverlappedResult(Interface, u.Overlapped, out _, true);
             int error = ok ? 0 : Marshal.GetLastPInvokeError();
             u.Running = false;
-            if (!u.In)
-            {
-                lock (_held)
-                {
-                    DrainLocked();
-                }
-            }
             if (!ok)
             {
                 if (error != WinUsbDevice.ErrorAborted)
@@ -561,20 +589,14 @@ internal sealed unsafe partial class IsoPipe
                     _failed++;
                 }
                 _streaming = false;
-                if (!u.Early)
-                {
-                    _done(u, error == WinUsbDevice.ErrorAborted ? UsbIp.ECONNRESET : UsbIp.EPROTO, null);
-                }
+                _done(u, error == WinUsbDevice.ErrorAborted ? UsbIp.ECONNRESET : UsbIp.EPROTO, null);
                 continue;
             }
             _urbs++;
-            if (u.Early)
-            {
-                continue;
-            }
             if (!u.In)
             {
-                _done(u, 0, OutResult(u));
+                WaitForFrame(end);
+                _done(u, 0, u.Internal ? null : OutResult(u));
                 continue;
             }
             int n = u.Packets;
@@ -609,6 +631,9 @@ internal sealed unsafe partial class IsoPipe
         NativeMemory.Free((void*)_buffer);
         NativeMemory.Free((void*)_descriptors);
     }
+
+    [LibraryImport("kernelbase.dll")]
+    private static partial void QueryInterruptTimePrecise(out ulong time);
 
     [LibraryImport("winusb.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

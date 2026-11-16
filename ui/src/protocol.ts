@@ -169,6 +169,24 @@ type Prefs = {
   visible: boolean;
 };
 
+type MixerFlow = 'input' | 'output';
+type MixerState = 'active' | 'disabled' | 'notPresent' | 'unplugged';
+export type MixerDevice = {
+  id: string;
+  name: string;
+  flow: MixerFlow;
+  state: MixerState;
+  on: boolean;
+  // 0..100, kept while not picked.
+  volume: number;
+};
+// Devices: inputs first, then outputs; in each, active ones first, then by name.
+export type Mixer = {
+  devices: MixerDevice[];
+  hideDisconnected: boolean;
+  hideDisabled: boolean;
+};
+
 type CommonMessage =
   | ({ type: 'labels' } & Labels)
   | { type: 'prefs'; startup?: boolean; theme?: Theme; useAccent?: boolean }
@@ -192,6 +210,7 @@ type MainInit = { type: 'init' } & Labels &
     mic: MicStatus;
     micCatalog: MicCatalog;
     micConfig: MicConfig;
+    mixer: Mixer;
   };
 
 export type HostToMain =
@@ -215,6 +234,7 @@ export type HostToMain =
   | { type: 'mic'; status: MicStatus }
   | { type: 'micConfig'; config: MicConfig }
   | { type: 'micStage'; slot: MicSlot; id: string | null; state: StageLoad }
+  | { type: 'mixer'; mixer: Mixer }
   | { type: 'update'; update: UpdateInfo }
   | { type: 'adapter'; unsupported: boolean }
   | { type: 'restart'; pending: boolean }
@@ -257,6 +277,11 @@ export type MainToHost =
   | { type: 'setMicModes'; modes: MicMode[] }
   | { type: 'setMicModel'; mode: MicMode; name: string }
   | { type: 'setEnhancement'; value: string | null }
+  | { type: 'setMixerSource'; id: string; value: boolean }
+  // preview: live while dragging, not saved; set: on release, saved.
+  | { type: 'previewMixerVolume' | 'setMixerVolume'; id: string; value: number }
+  // value = show.
+  | { type: 'setMixerFilter'; name: 'disconnected' | 'disabled'; value: boolean }
   | { type: 'setTheme'; theme: Theme }
   | { type: 'setLanguage'; code: string }
   | { type: 'openLegal'; name: 'license' | 'notices' }

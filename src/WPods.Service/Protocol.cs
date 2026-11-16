@@ -18,7 +18,8 @@ namespace WPods.Service;
 ///   app -> service: 0x10 + u64 address + u8 name source + UTF-8 name, on connect and on change. Source 1 = AirPods'
 ///     name, 0 = Windows' name (used only while the service has none). Only that pair's mic is shown; renaming the mic
 ///     being recorded from waits until recording stops.
-///   app -> service: 0x11 + PCM, mono 48 kHz s16le, even length, max 65536 bytes.
+///   app -> service: 0x11 + i64 position of the first sample on the AirPods' clock (48 kHz samples) + PCM,
+///     mono 48 kHz s16le, even length, max 65536 bytes.
 ///   service -> app: 0x12 + u8 capture state (1 = an app records). After connect and on change.
 ///
 /// \\.\pipe\WPods.Service - service state and updates.

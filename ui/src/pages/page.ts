@@ -13,6 +13,7 @@ export type PageName =
   | 'pair'
   | 'enhancement'
   | 'micModes'
+  | 'mixer'
   | 'legal';
 
 export type Page = {

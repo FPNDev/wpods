@@ -44,6 +44,8 @@ Name: autoupdate; Description: "Keep WPods up to date automatically"
 [InstallDelete]
 ; Service files the previous update moved aside while the service used them (see MoveServiceFilesAside).
 Type: files; Name: "{app}\*.old-*"
+; Left by an older service version that rotated its log; nothing writes it any more.
+Type: files; Name: "{commonappdata}\WPods\logs\service.1.log"
 ; Folders fully owned by the app: drop files a previous version had (e.g. a removed locale would stay selectable).
 Type: filesandordirs; Name: "{app}\web"
 Type: filesandordirs; Name: "{app}\locales"
@@ -523,12 +525,14 @@ end;
 // delete and the service (and Bluetooth) keeps running until the end; if a rename fails, it is stopped first.
 function ServiceFiles: TArrayOfString;
 begin
-  SetArrayLength(Result, 5);
+  SetArrayLength(Result, 6);
   Result[0] := 'WPods.Service.exe';
   Result[1] := 'WPods.Service.dll';
   Result[2] := 'System.ServiceProcess.ServiceController.dll';
   Result[3] := 'System.Diagnostics.EventLog.dll';
   Result[4] := 'System.Diagnostics.EventLog.Messages.dll';
+  // The mic's shared jitter buffer.
+  Result[5] := 'wpods_native.dll';
 end;
 
 // Puts moved-aside files back where nothing replaced them: after a partial move or a cancelled or failed install.

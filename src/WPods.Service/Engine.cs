@@ -465,7 +465,7 @@ internal sealed class Engine
         client?.Dispose();
     }
 
-    public void MicPush(ReadOnlySpan<byte> pcm) => Volatile.Read(ref _mic)?.Push(pcm);
+    public void MicPush(long position, ReadOnlySpan<byte> pcm) => Volatile.Read(ref _mic)?.Push(position, pcm);
 
     private void SetState(ServiceState state, string detail)
     {

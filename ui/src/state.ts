@@ -12,6 +12,7 @@ import type {
   MicMode,
   MicSlot,
   MicStatus,
+  Mixer,
   State,
   ToastId,
   UpdateInfo,
@@ -29,7 +30,8 @@ export type Section =
   | 'windows'
   | 'langs'
   | 'firstRun'
-  | 'update';
+  | 'update'
+  | 'mixer';
 type Entry = Device & { capSet: Set<Capability> };
 
 const BATTERY_PARTS = {
@@ -54,6 +56,7 @@ const ALL_SECTIONS: Section[] = [
   'langs',
   'firstRun',
   'update',
+  'mixer',
 ];
 
 export const store = {
@@ -95,6 +98,7 @@ export const store = {
     enhancement: null,
   } as MicConfig,
   micEnabled: new Set<MicMode>(),
+  mixer: { devices: [], hideDisconnected: false, hideDisabled: false } as Mixer,
   micLoading: { mode: null, enhancement: null } as Record<
     MicSlot,
     string | null
@@ -259,6 +263,7 @@ export const apply = (msg: HostToMain): void => {
       store.windowsLanguageName = msg.windowsLanguageName;
       store.micCatalog = msg.micCatalog;
       applyMicConfig(msg.micConfig);
+      store.mixer = msg.mixer;
       store.micLoading.mode = null;
       store.micLoading.enhancement = null;
       store.mic = msg.mic;
@@ -344,6 +349,10 @@ export const apply = (msg: HostToMain): void => {
     case 'micStage':
       store.micLoading[msg.slot] = msg.state === 'loading' ? msg.id : null;
       mark('mic');
+      break;
+    case 'mixer':
+      store.mixer = msg.mixer;
+      mark('mixer');
       break;
     case 'update':
       store.update = msg.update;

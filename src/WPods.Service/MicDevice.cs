@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
 namespace WPods.Service;
@@ -11,34 +13,22 @@ namespace WPods.Service;
 /// named "&lt;terminal&gt; (&lt;product&gt;)" = "Headset (A2DP, &lt;AirPods name&gt;)". The serial comes from the
 /// pair's address, so each pair has its own endpoint. SET_INTERFACE 1 alt 1/0 = an app started/stopped recording.
 /// </summary>
-internal sealed class MicDevice
+internal sealed unsafe partial class MicDevice
 {
     public const ushort Vid = 0x1209;
     // pid.codes shared test PID.
     public const ushort Pid = 0x0001;
     private const int Rate = 48000;
-    // At most ~85 ms of PCM waits for the host; older samples are dropped so latency cannot grow.
-    private const int Backlog = 4096;
 
     private readonly Dictionary<byte, byte[]> _strings = [];
+    // Peaks of Push and Fill, which run on different threads.
     private readonly Lock _pcmLock = new();
-    private readonly short[] _ring = new short[Backlog];
-    private int _ringStart;
-    private int _ringCount;
+    // The shared jitter buffer (wpods_native jitter.cpp: playout by the AirPods' clock, concealment). One for the
+    // service's lifetime: a mic is made per attach, and only one is attached at a time.
+    private static readonly nint Jitter = wpn_jitter_create(&OnJitterLog, 0);
     private volatile bool _capturing;
-    // Per-capture log stats: samples received, sent, and sent as silence because the app's PCM ran out; peak levels.
-    private long _received;
-    private long _sent;
-    private long _missing;
     private int _peakIn;
     private int _peakOut;
-    // Latency trim, under _pcmLock: least PCM left after a transfer in the current window, the window's length, and
-    // samples dropped this capture.
-    private const int TrimAbove = 480; // 10 ms
-    private const int TrimTo = 240; // 5 ms
-    private int _leastLeft = int.MaxValue;
-    private int _levelMs;
-    private long _trimmed;
     // Feature unit 2 as Windows set it: mute, and volume in 1/256 dB (-60..0 dB) with its linear gain.
     private const short MinVolume = -60 * 256;
     private volatile bool _muted;
@@ -89,28 +79,27 @@ internal sealed class MicDevice
 
     public static string SerialOf(ulong address) => $"WPODS{address:X12}";
 
-    /// <summary>Queues PCM from the app (mono 48 kHz s16le). Dropped while no app records.</summary>
-    public void Push(ReadOnlySpan<byte> pcm)
+    /// <summary>
+    /// Queues PCM from the app (mono 48 kHz s16le) whose first sample is at <paramref name="position"/> on the AirPods'
+    /// clock. Dropped while no app records.
+    /// </summary>
+    public void Push(long position, ReadOnlySpan<byte> pcm)
     {
         if (!_capturing)
         {
             return;
         }
+        ReadOnlySpan<short> samples = MemoryMarshal.Cast<byte, short>(pcm[..(pcm.Length & ~1)]);
         lock (_pcmLock)
         {
-            _received += pcm.Length / 2;
-            for (int i = 0; i + 1 < pcm.Length; i += 2)
+            foreach (short s in samples)
             {
-                short s = BinaryPrimitives.ReadInt16LittleEndian(pcm[i..]);
                 _peakIn = Math.Max(_peakIn, Math.Abs((int)s));
-                if (_ringCount == Backlog)
-                {
-                    _ringStart = (_ringStart + 1) % Backlog;
-                    _ringCount--;
-                }
-                _ring[(_ringStart + _ringCount) % Backlog] = s;
-                _ringCount++;
             }
+        }
+        fixed (short* data = samples)
+        {
+            wpn_jitter_push(Jitter, data, (uint)samples.Length, position);
         }
     }
 
@@ -119,7 +108,7 @@ internal sealed class MicDevice
     {
         NetworkStream s = client.GetStream();
         var write = new Lock();
-        var jobs = new BlockingCollection<(uint Seq, uint StartFrame, byte[] Descriptors, int Packets, long Due)>();
+        var jobs = new BlockingCollection<(uint Seq, byte[] Descriptors, int Packets, long Due)>();
         var pending = new ConcurrentDictionary<uint, bool>();
         void Send(byte[] frame)
         {
@@ -139,7 +128,7 @@ internal sealed class MicDevice
                     {
                         continue; // unlinked
                     }
-                    Send(UsbIp.RetIso(job.Seq, 0, job.StartFrame, job.Descriptors, job.Packets, isIn: true, Fill(job.Descriptors, job.Packets)));
+                    Send(UsbIp.RetIso(job.Seq, 0, StartFrameOf(job.Packets), job.Descriptors, job.Packets, isIn: true, Fill(job.Descriptors, job.Packets)));
                 }
             }
             catch (Exception e) when (e is IOException or ObjectDisposedException)
@@ -194,7 +183,7 @@ internal sealed class MicDevice
                     long now = Stopwatch.GetTimestamp();
                     nextDue = Math.Max(nextDue, now) + (packets * Stopwatch.Frequency / 1000);
                     pending[seq] = true;
-                    jobs.Add((seq, UsbIp.U32(header, 28), descriptors, (int)packets, nextDue));
+                    jobs.Add((seq, descriptors, (int)packets, nextDue));
                     continue;
                 }
                 Send(UsbIp.Ret(seq, UsbIp.EPIPE, 0, []));
@@ -214,6 +203,10 @@ internal sealed class MicDevice
         }
     }
 
+    // The frame a transfer that just ended started in, as a host controller reports it (frame numbers: see
+    // IsoPipe.NowFrame); usbaudio dates captured audio by it (an echoed 0 makes recordings empty).
+    private static uint StartFrameOf(int packets) => (uint)(IsoPipe.NowFrame() - packets);
+
     private static void WaitUntil(long due)
     {
         while (true)
@@ -229,7 +222,7 @@ internal sealed class MicDevice
         }
     }
 
-    // One iso IN transfer: every packet full (its CMD length), PCM from the backlog, silence when it runs out.
+    // One iso IN transfer: every packet full (its CMD length) with PCM from the jitter buffer.
     private IsoResult Fill(byte[] descriptors, int packets)
     {
         var offsets = new int[packets];
@@ -244,20 +237,20 @@ internal sealed class MicDevice
         var data = new byte[total];
         if (_capturing)
         {
+            int want = total / 2;
+            var pulled = new float[want];
+            fixed (float* samples = pulled)
+            {
+                wpn_jitter_pull(Jitter, samples, (uint)want);
+            }
             lock (_pcmLock)
             {
-                int n = Math.Min(_ringCount, total / 2);
-                for (int i = 0; i < n; i++)
+                for (int i = 0; i < want; i++)
                 {
-                    short s = Scale(_ring[(_ringStart + i) % Backlog]);
+                    short s = Scale((short)pulled[i]);
                     _peakOut = Math.Max(_peakOut, Math.Abs((int)s));
                     BinaryPrimitives.WriteInt16LittleEndian(data.AsSpan(2 * i), s);
                 }
-                _ringStart = (_ringStart + n) % Backlog;
-                _ringCount -= n;
-                _sent += total / 2;
-                _missing += (total / 2) - n;
-                TrimLocked(packets);
             }
         }
         return new IsoResult(data, offsets, actual, new int[packets]);
@@ -266,27 +259,40 @@ internal sealed class MicDevice
     // Windows' mute and input volume for this mic (feature unit 2), applied to every sample sent.
     private short Scale(short s) => _muted ? (short)0 : _gain == 1f ? s : (short)(s * _gain);
 
-    // PCM left over after a transfer is latency; the least left over across a second was never needed (e.g. late PCM
-    // queued behind gap-filling silence). Above TrimAbove it is trimmed to TrimTo, oldest first.
-    // Caller holds _pcmLock; packets = this transfer's 1 ms frames.
-    private void TrimLocked(int packets)
+    // The jitter buffer's once-a-minute summary while dropouts happen, on the pulling thread.
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static void OnJitterLog(nint context, char* line) => Log.Info("mic", new string(line));
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct wpn_jitter_stats
     {
-        _leastLeft = Math.Min(_leastLeft, _ringCount);
-        _levelMs += packets;
-        if (_levelMs < 1000)
-        {
-            return;
-        }
-        if (_leastLeft > TrimAbove)
-        {
-            int drop = _leastLeft - TrimTo;
-            _ringStart = (_ringStart + drop) % Backlog;
-            _ringCount -= drop;
-            _trimmed += drop;
-        }
-        _leastLeft = int.MaxValue;
-        _levelMs = 0;
+        public long Received;
+        public long Sent;
+        public long Concealed;
+        public long Dropouts;
+        public long Trimmed;
+        public int DelayMs;
     }
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    private static partial nint wpn_jitter_create(delegate* unmanaged[Stdcall]<nint, char*, void> log, nint context);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    private static partial void wpn_jitter_reset(nint jitter);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    private static partial void wpn_jitter_push(nint jitter, short* pcm, uint count, long position);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    private static partial void wpn_jitter_pull(nint jitter, float* output, uint count);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    private static partial void wpn_jitter_get_stats(nint jitter, wpn_jitter_stats* stats);
 
     // Returns (data, status): status 0 = OK, -32 = stall.
     private (byte[]? Data, int Status) Control(ReadOnlySpan<byte> setup, byte[] outData)
@@ -399,19 +405,21 @@ internal sealed class MicDevice
             return;
         }
         string stats = "";
-        lock (_pcmLock)
+        if (now)
         {
-            if (now)
+            wpn_jitter_reset(Jitter);
+            lock (_pcmLock)
             {
-                _ringCount = 0;
-                _received = _sent = _missing = _trimmed = 0;
                 _peakIn = _peakOut = 0;
-                _leastLeft = int.MaxValue;
-                _levelMs = 0;
             }
-            else
+        }
+        else
+        {
+            wpn_jitter_stats s;
+            wpn_jitter_get_stats(Jitter, &s);
+            lock (_pcmLock)
             {
-                stats = $": {_received} samples from the app, {_sent} sent, {_missing} of them silence (no PCM in time), {_trimmed} dropped as latency; peak in {_peakIn}, out {_peakOut}";
+                stats = $": {s.Received} samples from the app, {s.Sent} sent, {s.Concealed} of them concealment or silence (no PCM in time), {s.Dropouts} dropouts concealed, {s.Trimmed} arrived too late, delay {s.DelayMs} ms; peak in {_peakIn}, out {_peakOut}";
             }
         }
         _capturing = now;

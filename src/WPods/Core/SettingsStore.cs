@@ -46,6 +46,23 @@ public sealed record UiPrefs
     public bool FirstRunDone { get; init; }
     /// <summary>Version whose "update available" note the user dismissed.</summary>
     public string? DismissedUpdate { get; init; }
+    /// <summary>The Mixer page hides unplugged endpoints (picked ones always show).</summary>
+    public bool MixerHideDisconnected { get; init; }
+    /// <summary>The Mixer page hides endpoints disabled in Windows (picked ones always show).</summary>
+    public bool MixerHideDisabled { get; init; }
+}
+
+/// <summary>
+/// App-wide Mixer settings (settings.json "mixer"): the picked Windows audio endpoint IDs and each endpoint's volume
+/// in percent (0..100), kept while it is not picked.
+/// </summary>
+public sealed record MixerConfig(IReadOnlySet<string> Sources, IReadOnlyDictionary<string, int> Volumes)
+{
+    public const int DefaultVolume = 100;
+
+    public static readonly MixerConfig Default = new(new HashSet<string>(), new Dictionary<string, int>());
+
+    public int Volume(string id) => Volumes.GetValueOrDefault(id, DefaultVolume);
 }
 
 /// <summary>
@@ -137,6 +154,7 @@ public sealed class SettingsStore
     private ulong _lastUsed;
     private UiPrefs _ui = UiPrefs.Default;
     private MicConfig _mic = MicConfig.Default;
+    private MixerConfig _mixer = MixerConfig.Default;
 
     public SettingsStore()
         : this(
@@ -249,6 +267,27 @@ public sealed class SettingsStore
         finally
         {
             MicConfigChanged?.Invoke(config);
+        }
+    }
+
+    public MixerConfig Mixer
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _mixer;
+            }
+        }
+    }
+
+    /// <summary>Stores a caller-validated config; it is kept in memory even when saving throws.</summary>
+    public void SetMixer(MixerConfig config)
+    {
+        lock (_lock)
+        {
+            _mixer = config;
+            SaveSettings();
         }
     }
 
@@ -439,6 +478,7 @@ public sealed class SettingsStore
             UiPrefs ui = file.Ui ?? UiPrefs.Default;
             _ui = ui with { Theme = ui.Theme ?? UiPrefs.Default.Theme, Language = ui.Language ?? UiPrefs.Default.Language };
             _mic = file.Mic is { } mic ? LoadMic(mic) : MicConfig.Default;
+            _mixer = file.Mixer is { } mixer ? LoadMixer(mixer) : MixerConfig.Default;
             if (file.LastUsed is { } last && Mac.TryParse(last, out ulong lastUsed))
             {
                 _lastUsed = lastUsed;
@@ -507,6 +547,7 @@ public sealed class SettingsStore
             _lastUsed = 0;
             _ui = UiPrefs.Default;
             _mic = MicConfig.Default;
+            _mixer = MixerConfig.Default;
             _devices.Clear();
             _models.Clear();
             _capabilities.Clear();
@@ -582,6 +623,27 @@ public sealed class SettingsStore
 
     private static string ModeName(MicMode mode) => JsonNamingPolicy.CamelCase.ConvertName(mode.ToString());
 
+    // Null entries are dropped and volumes clamped to 0..100.
+    private static MixerConfig LoadMixer(MixerFile file)
+    {
+        var sources = new HashSet<string>();
+        foreach (string? id in file.Sources ?? [])
+        {
+            if (id is not null)
+            {
+                sources.Add(id);
+            }
+        }
+        var volumes = new Dictionary<string, int>();
+        foreach ((string id, int volume) in file.Volumes ?? [])
+        {
+            volumes[id] = Math.Clamp(volume, 0, 100);
+        }
+        return new MixerConfig(sources, volumes);
+    }
+
+    private static MixerFile SaveMixer(MixerConfig config) => new() { Sources = [.. config.Sources], Volumes = new(config.Volumes) };
+
     // One-time import of %UserProfile%\.wpods\device_settings.jsonl (left in place).
     private void Migrate(string legacyFile)
     {
@@ -619,7 +681,7 @@ public sealed class SettingsStore
 
     private void SaveSettings()
     {
-        var file = new SettingsFile { LastUsed = _lastUsed == 0 ? null : Mac.Format(_lastUsed), Ui = _ui, Mic = SaveMic(_mic) };
+        var file = new SettingsFile { LastUsed = _lastUsed == 0 ? null : Mac.Format(_lastUsed), Ui = _ui, Mic = SaveMic(_mic), Mixer = SaveMixer(_mixer) };
         SaveMap(_devices, file.Devices);
         SaveMap(_models, file.Models);
         SaveMap(_capabilities, file.Capabilities);
@@ -716,6 +778,8 @@ internal sealed class SettingsFile
     public UiPrefs? Ui { get; set; }
     /// <summary>Missing means <see cref="MicConfig.Default"/>.</summary>
     public MicFile? Mic { get; set; }
+    /// <summary>Missing means <see cref="MixerConfig.Default"/>.</summary>
+    public MixerFile? Mixer { get; set; }
     public Dictionary<string, HostSettings> Devices { get; set; } = [];
     public Dictionary<string, DeviceModel> Models { get; set; } = [];
     public Dictionary<string, DeviceCapabilities> Capabilities { get; set; } = [];
@@ -740,6 +804,13 @@ internal sealed class MicFile
     /// <summary>Model id per lower-camel mode name.</summary>
     public Dictionary<string, string>? Models { get; set; }
     public string? Enhancement { get; set; }
+}
+
+/// <summary>settings.json "mixer": picked endpoint IDs and volume (percent) per endpoint ID.</summary>
+internal sealed class MixerFile
+{
+    public List<string?>? Sources { get; set; }
+    public Dictionary<string, int>? Volumes { get; set; }
 }
 
 internal sealed class LegacyRecord
