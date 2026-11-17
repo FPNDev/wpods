@@ -225,6 +225,9 @@ internal sealed partial class TrayApp
             case "beginDrag":
                 main.BeginDrag();
                 break;
+            case "fitHeight" when !_prefs.FirstRunDone && m.Height > 0:
+                main.FitContentHeight(m.Height);
+                break;
         }
     }
 

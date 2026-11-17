@@ -85,6 +85,8 @@ const back = (): void => {
   ctx.update('page');
 };
 
+let titlebar!: HTMLDivElement;
+let fitted = 0;
 let backBtn!: HTMLButtonElement;
 let pageTitle!: HTMLSpanElement;
 let appTitle!: HTMLDivElement;
@@ -109,6 +111,7 @@ const shell = (
   <div class="wp-window">
     <div
       class="wp-titlebar"
+      ref={titlebar}
       onmousedown={(e) => {
         if (e.button === 0) {
           e.preventDefault();
@@ -244,6 +247,28 @@ const renderPage = (): void => {
   navDir = 0;
 };
 
+// The welcome page asks for a window height that shows all of it: titlebar, body padding and its centred box's
+// content (the box itself stretches to the window, so its children are measured).
+const fitFirstRun = (page: HTMLElement): void => {
+  const box = page.firstElementChild as HTMLElement;
+  const top = (box.firstElementChild as HTMLElement).getBoundingClientRect().top;
+  const bottom = (box.lastElementChild as HTMLElement).getBoundingClientRect().bottom;
+  const bodyStyle = getComputedStyle(body);
+  const boxStyle = getComputedStyle(box);
+  const height = Math.ceil(
+    titlebar.offsetHeight +
+      parseFloat(bodyStyle.paddingTop) +
+      parseFloat(boxStyle.paddingTop) +
+      (bottom - top) +
+      parseFloat(boxStyle.paddingBottom) +
+      parseFloat(bodyStyle.paddingBottom),
+  );
+  if (height !== fitted) {
+    fitted = height;
+    post({ type: 'fitHeight', height });
+  }
+};
+
 const render = (): void => {
   if (store.announce) {
     const text = store.announce;
@@ -283,6 +308,9 @@ const render = (): void => {
     }
   }
   dirty.clear();
+  if (shown === 'firstRun') {
+    fitFirstRun(pageOf('firstRun').page.el);
+  }
 };
 
 const onMessage = (msg: HostToMain): void => {

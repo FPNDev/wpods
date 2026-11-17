@@ -311,6 +311,8 @@ export type MainToHost =
         | 'recordHotkey';
       value: boolean;
     }
+  // The welcome page's content height in DIPs: the window opens at it.
+  | { type: 'fitHeight'; height: number }
   // null clears the hotkey.
   | { type: 'setHotkey'; name: HotkeyAction; value: Shortcut | null }
   | { type: 'setMediaAssist'; name: 'calls' | 'media'; value: boolean }

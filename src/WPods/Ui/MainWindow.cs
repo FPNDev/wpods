@@ -58,6 +58,23 @@ internal sealed class MainWindow : Form
         Dispose();
     }
 
+    /// <summary>
+    /// Resizes to fit the page's content (DIPs, without the resize strips) within the height limits and the work area,
+    /// keeping the window's centre. Not saved as the user's height.
+    /// </summary>
+    public void FitContentHeight(double contentDip)
+    {
+        if (WindowState != FormWindowState.Normal)
+        {
+            return;
+        }
+        Rectangle area = Screen.FromHandle(Handle).WorkingArea;
+        double dip = Math.Clamp(contentDip + 2 * ResizeStripDip, MinHeightDip, MaxHeightDip);
+        int height = Math.Min((int)Math.Ceiling(dip * DpiScale), area.Height);
+        int top = Math.Clamp(Top - (height - Height) / 2, area.Top, area.Bottom - height);
+        NativeUi.SetBounds(Handle, new Rectangle(Left, top, Width, height));
+    }
+
     public void BeginDrag()
     {
         NativeUi.ReleaseCapture();
