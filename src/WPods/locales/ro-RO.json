@@ -34,7 +34,7 @@
     "restart.confirmRestart": "Reporniți",
     "restart.cancel": "Anulați",
     "legal.firstRunTitle":"Nu este o aplicație Apple",
-    "legal.firstRunBody": "WPods este un proiect independent, cu sursă deschisă. Nu este creat, sponsorizat, aprobat sau susținut de Apple. AirPods și numele funcționalităților lor aparțin Apple Inc.; WPods le folosește doar pentru a indica produsele cu care funcționează. WPods este oferit fără nicio garanție: îl utilizați pe propriul risc. Pentru a comunica cu căștile AirPods, serviciul WPods care rulează în fundal preia adaptorul Bluetooth; consultați termenii completi.",
+    "legal.firstRunBody": "WPods este un proiect independent, cu sursă deschisă. Nu este creat, sponsorizat, aprobat sau susținut de Apple. AirPods și numele funcționalităților lor aparțin Apple Inc.; WPods le folosește doar pentru a indica produsele cu care funcționează. WPods este oferit fără nicio garanție: îl utilizați pe propriul risc.",
     "legal.adapterTitle": "Adaptor Bluetooth",
     "legal.adapterBody": "Serviciul WPods care rulează în fundal preia adaptorul Bluetooth și îl redă sistemului Windows ca adaptor virtual prin usbip-win2 (autor: Vadym Hrynchyshyn), astfel încât toate dispozitivele Bluetooth continuă să funcționeze. Când dezinstalați WPods sau dacă acest lucru eșuează în mod repetat, adaptorul revine la driverul propriu al Windows.",
     "legal.readTerms": "Citiți termenii completi",

@@ -34,7 +34,7 @@
     "restart.confirmRestart": "Yeniden başlat",
     "restart.cancel": "İptal",
     "legal.firstRunTitle":"Bir Apple uygulaması değildir",
-    "legal.firstRunBody": "WPods bağımsız, açık kaynaklı bir projedir. Apple tarafından geliştirilmemiş, sponsorluğu yapılmamış, onaylanmamış veya desteklenmemiştir. AirPods ve özelliklerinin adları Apple Inc.'e aittir; WPods bunları yalnızca neyle çalıştığını belirtmek için kullanır. WPods hiçbir garanti olmadan sunulur: WPods'u kullanmanın riski size aittir. AirPods'unuzla iletişim kurmak için WPods arka plan hizmeti Bluetooth adaptörünüzü devralır. Ayrıntılar için tüm koşullara bakın.",
+    "legal.firstRunBody": "WPods bağımsız, açık kaynaklı bir projedir. Apple tarafından geliştirilmemiş, sponsorluğu yapılmamış, onaylanmamış veya desteklenmemiştir. AirPods ve özelliklerinin adları Apple Inc.'e aittir; WPods bunları yalnızca neyle çalıştığını belirtmek için kullanır. WPods hiçbir garanti olmadan sunulur: WPods'u kullanmanın riski size aittir.",
     "legal.adapterTitle": "Bluetooth adaptörü",
     "legal.adapterBody": "WPods arka plan hizmeti Bluetooth adaptörünüzü devralır ve Vadym Hrynchyshyn'in geliştirdiği usbip-win2 aracılığıyla onu sanal bir adaptör olarak Windows'a geri verir; böylece tüm Bluetooth cihazlarınız çalışmaya devam eder. WPods'u kaldırdığınızda veya bu işlem art arda başarısız olursa adaptör, Windows'un kendi sürücüsüne geri döner.",
     "legal.readTerms": "Tüm koşulları oku",

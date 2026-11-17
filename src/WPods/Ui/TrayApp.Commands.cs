@@ -212,6 +212,8 @@ internal sealed partial class TrayApp
                 break;
             case "getStarted":
                 SavePrefs(_prefs with { FirstRunDone = true });
+                // The welcome page fitted the window to itself; the app goes back to the user's height.
+                main.SetHeightDip(_prefs.WindowHeight);
                 break;
             case "restartWindows":
                 RestartWindows();

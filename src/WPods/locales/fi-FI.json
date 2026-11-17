@@ -34,7 +34,7 @@
     "restart.confirmRestart": "Käynnistä uudelleen",
     "restart.cancel": "Peruuta",
     "legal.firstRunTitle":"Ei Applen sovellus",
-    "legal.firstRunBody": "WPods on itsenäinen avoimen lähdekoodin projekti. Apple ei ole tehnyt, sponsoroinut tai hyväksynyt sitä eikä tue sitä. AirPods ja sen ominaisuuksien nimet kuuluvat Apple Inc:lle; WPods käyttää niitä vain kertoakseen, minkä kanssa se toimii. WPods toimitetaan ilman takuuta: käytät sitä omalla vastuullasi. Jotta WPods saa yhteyden AirPods-kuulokkeisiisi, sen taustapalvelu ottaa Bluetooth-sovittimesi hallintaansa; katso täydet ehdot.",
+    "legal.firstRunBody": "WPods on itsenäinen avoimen lähdekoodin projekti. Apple ei ole tehnyt, sponsoroinut tai hyväksynyt sitä eikä tue sitä. AirPods ja sen ominaisuuksien nimet kuuluvat Apple Inc:lle; WPods käyttää niitä vain kertoakseen, minkä kanssa se toimii. WPods toimitetaan ilman takuuta: käytät sitä omalla vastuullasi.",
     "legal.adapterTitle": "Bluetooth-sovitin",
     "legal.adapterBody": "WPodsin taustapalvelu ottaa Bluetooth-sovittimesi hallintaansa ja antaa sen takaisin Windowsille virtuaalisena sovittimena usbip-win2:n avulla (tekijä Vadym Hrynchyshyn), joten kaikki Bluetooth-laitteesi toimivat edelleen. Kun poistat WPodsin, tai jos tämä epäonnistuu toistuvasti, sovitin palaa Windowsin omalle ohjaimelle.",
     "legal.readTerms": "Lue täydet ehdot",

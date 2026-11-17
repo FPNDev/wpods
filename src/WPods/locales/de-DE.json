@@ -34,7 +34,7 @@
     "restart.confirmRestart": "Neu starten",
     "restart.cancel": "Abbrechen",
     "legal.firstRunTitle":"Keine App von Apple",
-    "legal.firstRunBody": "WPods ist ein unabhängiges Open-Source-Projekt. Es wird nicht von Apple entwickelt, gesponsert, gebilligt oder unterstützt. AirPods und die Namen ihrer Funktionen gehören Apple Inc.; WPods verwendet sie nur, um anzugeben, womit es funktioniert. WPods wird ohne Gewährleistung bereitgestellt: Sie nutzen es auf eigenes Risiko. Um mit Ihren AirPods zu kommunizieren, übernimmt der Hintergrunddienst von WPods Ihren Bluetooth-Adapter. Näheres finden Sie in den vollständigen Bedingungen.",
+    "legal.firstRunBody": "WPods ist ein unabhängiges Open-Source-Projekt. Es wird nicht von Apple entwickelt, gesponsert, gebilligt oder unterstützt. AirPods und die Namen ihrer Funktionen gehören Apple Inc.; WPods verwendet sie nur, um anzugeben, womit es funktioniert. WPods wird ohne Gewährleistung bereitgestellt: Sie nutzen es auf eigenes Risiko.",
     "legal.adapterTitle": "Bluetooth-Adapter",
     "legal.adapterBody": "Der Hintergrunddienst von WPods übernimmt Ihren Bluetooth-Adapter und gibt ihn über usbip-win2 von Vadym Hrynchyshyn als virtuellen Adapter an Windows zurück, sodass alle Ihre Bluetooth-Geräte weiter funktionieren. Wenn Sie WPods deinstallieren oder dies wiederholt fehlschlägt, geht der Adapter an den Windows-eigenen Treiber zurück.",
     "legal.readTerms": "Vollständige Bedingungen lesen",

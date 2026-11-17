@@ -34,7 +34,7 @@
     "restart.confirmRestart": "Újraindítás",
     "restart.cancel": "Mégse",
     "legal.firstRunTitle":"Nem az Apple appja",
-    "legal.firstRunBody": "A WPods független, nyílt forráskódú projekt. Nem az Apple készítette, és az Apple nem szponzorálja, nem hagyta jóvá és nem támogatja. Az AirPods és funkcióinak nevei az Apple Inc. tulajdonát képezik; a WPods csak annak jelzésére használja őket, hogy mivel működik. A WPods mindenféle garancia nélkül érhető el: használata saját felelősségére történik. Az AirPods eléréséhez a WPods háttérszolgáltatása átveszi a Bluetooth-adaptert; részletek a teljes feltételekben.",
+    "legal.firstRunBody": "A WPods független, nyílt forráskódú projekt. Nem az Apple készítette, és az Apple nem szponzorálja, nem hagyta jóvá és nem támogatja. Az AirPods és funkcióinak nevei az Apple Inc. tulajdonát képezik; a WPods csak annak jelzésére használja őket, hogy mivel működik. A WPods mindenféle garancia nélkül érhető el: használata saját felelősségére történik.",
     "legal.adapterTitle": "Bluetooth-adapter",
     "legal.adapterBody": "A WPods háttérszolgáltatása átveszi a Bluetooth-adaptert, és az usbip-win2 (készítője: Vadym Hrynchyshyn) segítségével virtuális adapterként visszaadja a Windowsnak, így minden Bluetooth-eszköze tovább működik. A WPods eltávolításakor, illetve ha ez többször egymás után nem sikerül, az adapter visszakerül a Windows saját illesztőprogramjához.",
     "legal.readTerms": "A teljes feltételek megtekintése",

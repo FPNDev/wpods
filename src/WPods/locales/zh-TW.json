@@ -34,7 +34,7 @@
     "restart.confirmRestart": "重新啟動",
     "restart.cancel": "取消",
     "legal.firstRunTitle":"非 Apple 官方應用程式",
-    "legal.firstRunBody": "WPods 是獨立的開放原始碼專案，並非由 Apple 製作、贊助、背書或支援。AirPods 及其功能名稱屬於 Apple Inc.；WPods 使用這些名稱僅為說明其支援的產品與功能。WPods 不提供任何擔保：使用 WPods 的風險由你自行承擔。為了與 AirPods 通訊，WPods 的背景服務會接管你的藍牙介面卡；詳情請參閱完整條款。",
+    "legal.firstRunBody": "WPods 是獨立的開放原始碼專案，並非由 Apple 製作、贊助、背書或支援。AirPods 及其功能名稱屬於 Apple Inc.；WPods 使用這些名稱僅為說明其支援的產品與功能。WPods 不提供任何擔保：使用 WPods 的風險由你自行承擔。",
     "legal.adapterTitle": "藍牙介面卡",
     "legal.adapterBody": "WPods 的背景服務會接管你的藍牙介面卡，並透過 usbip-win2（作者 Vadym Hrynchyshyn）將它以虛擬介面卡的形式交還給 Windows，因此你的所有藍牙裝置都能照常使用。解除安裝 WPods 時，或此程序反覆失敗時，介面卡會改回使用 Windows 內建的驅動程式。",
     "legal.readTerms": "閱讀完整條款",

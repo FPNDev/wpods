@@ -34,7 +34,7 @@
     "restart.confirmRestart": "Reštartovať",
     "restart.cancel": "Zrušiť",
     "legal.firstRunTitle":"Toto nie je aplikácia od Apple",
-    "legal.firstRunBody": "WPods je nezávislý projekt s otvoreným zdrojovým kódom. Spoločnosť Apple ho nevytvorila, nesponzoruje, neschvaľuje ani nepodporuje. AirPods a názvy ich funkcií patria spoločnosti Apple Inc.; WPods ich používa len na označenie toho, s čím funguje. WPods sa poskytuje bez akejkoľvek záruky: používate ho na vlastné riziko. Aby sa WPods mohol spojiť s vašimi AirPods, jeho služba na pozadí prevezme váš adaptér Bluetooth. Podrobnosti nájdete v úplných podmienkach.",
+    "legal.firstRunBody": "WPods je nezávislý projekt s otvoreným zdrojovým kódom. Spoločnosť Apple ho nevytvorila, nesponzoruje, neschvaľuje ani nepodporuje. AirPods a názvy ich funkcií patria spoločnosti Apple Inc.; WPods ich používa len na označenie toho, s čím funguje. WPods sa poskytuje bez akejkoľvek záruky: používate ho na vlastné riziko.",
     "legal.adapterTitle": "Adaptér Bluetooth",
     "legal.adapterBody": "Služba WPods na pozadí prevezme váš adaptér Bluetooth a pomocou usbip-win2 (autor: Vadym Hrynchyshyn) ho vráti systému Windows ako virtuálny adaptér, takže všetky vaše zariadenia Bluetooth naďalej fungujú. Keď WPods odinštalujete alebo keď to opakovane zlyhá, adaptér sa vráti k vlastnému ovládaču systému Windows.",
     "legal.readTerms": "Prečítať úplné podmienky",
