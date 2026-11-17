@@ -1,3 +1,4 @@
+<!-- release: v0.3.2 -->
 <p align="center"><img src="docs/logo.png" width="128" alt="WPods logo"></p>
 
 <h1 align="center">WPods</h1>
@@ -47,7 +48,9 @@
 - **Voice enhancement.** Make your voice clearer and more even for calls.
 - **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid and Media Assist, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
 - **Nearby popup, like on iPhone.** When your AirPods are near and connected to another device, WPods shows them with their battery. One click to connect. Works with several pairs.
-- **Low audio latency mode** for games and calls.
+- **Hotkeys that work anywhere.** Switch noise control and mic modes, or turn the mixer, low latency, Hearing Aid and more on and off, without leaving your game or call. A small notification and a soft sound confirm each change.
+- **Mixer.** Hear your own mic or any other audio device in your AirPods, each at its own volume, on top of everything else.
+- **Low audio latency mode** for games and calls. It keeps your AirPods' sound and mic awake, so game sounds don't arrive late and your voice comes through the moment you start talking.
 - **One installer does it all.** It installs .NET and WebView2 if missing, plus WPods' background service and usbip-win2. Works with Secure Boot on.
 - **Looks at home on Windows.** Light, Dark or Auto theme and your Windows accent color. 45 languages.
 
@@ -117,15 +120,39 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 For each pair (while connected):
 
 - **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. If you leave Hands-Free mode on, an app that uses the Hands-Free mic takes over the AirPods mic, and `Headset (A2DP, <AirPods name>)` goes quiet until that app stops using it.
-- **Low audio latency** gives less delay for games and calls. It keeps your AirPods awake and may use more battery.
+- **Low audio latency** gives less delay for games and calls. Your AirPods' sound and mic stay awake, so nothing has to wake up first: sounds play right away and your mic is live the moment an app opens it. It may use more battery.
 
 For the app:
 
 - Mic modes: turn modes on or off and pick a model for each.
+- Mixer and Hotkeys (see below).
 - Start with Windows (opens in the tray when you sign in).
 - Theme: Light, Dark or Auto (Auto follows Windows).
 - Language.
 - Use Windows accent color.
+
+### Mixer
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/mixer-dark.png"><img src="docs/screenshots/mixer-light.png" width="360" alt="WPods mixer page"></picture></p>
+
+- Hear your AirPods mic, another microphone or any other output in your AirPods, on top of Windows audio. Handy for checking how you sound, or for listening to a second device.
+- Tick a device to add it and set its own volume.
+- "Play ticked devices" turns them all off at once and keeps your picks for next time.
+
+### Hotkeys
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hotkeys-dark.png"><img src="docs/screenshots/hotkeys-light.png" width="360" alt="WPods hotkeys page"></picture></p>
+
+- Set your own keys in WPods' Windows settings page > Hotkeys. They work in any app, even when WPods is in the tray.
+- **Noise control:** next mode (the same modes as press and hold) or a key per mode. Press a mode's key again to go back to the mode you had before.
+- **Mic mode:** next mode (the modes you turned on) or a key per mode.
+- **Turn on / Turn off:** Mixer, Low audio latency, Hands-Free mode, Conversation awareness, Hearing Aid and Media Assist. Give both the same key to switch with one press.
+- **Show or hide WPods.**
+- Ready to use: **Win+Alt+N** switches noise control, **Win+Alt+V** switches mic modes and **Win+Alt+L** turns low audio latency on and off. Change or remove them any time.
+- Click a key to change it, press Esc to cancel, and Backspace or the trash button to remove it. WPods warns you when two actions clash on one key, or when another app already uses it.
+- A small notification shows each change. Mic modes and on/off switches also play a short sound. If you don't like it - turn the sounds off on the Hotkeys page.
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/notification-dark.png"><img src="docs/screenshots/notification-light.png" width="300" alt="WPods hotkey notification"></picture></p>
 
 ### Tray and nearby popup
 
