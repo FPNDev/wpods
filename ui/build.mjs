@@ -30,6 +30,7 @@ const result = await build({
   entryPoints: {
     main: path.join(src, 'main.tsx'),
     popup: path.join(src, 'popup/popup.tsx'),
+    osd: path.join(src, 'osd/osd.tsx'),
     app: path.join(src, 'styles/index.css'),
   },
   outdir: out,
@@ -45,7 +46,7 @@ const result = await build({
   logLevel: 'warning',
   plugins: [jsxDomPlugin({ i18nModule: path.join(src, 'i18n.ts') })],
 });
-for (const page of ['index.html', 'popup.html']) {
+for (const page of ['index.html', 'popup.html', 'osd.html']) {
   await copyFile(path.join(src, 'shell', page), path.join(out, page));
 }
 

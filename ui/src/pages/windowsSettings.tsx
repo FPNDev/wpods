@@ -26,6 +26,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
   let toLanguage!: HTMLButtonElement;
   let toMicModes!: HTMLButtonElement;
   let toMixer!: HTMLButtonElement;
+  let toHotkeys!: HTMLButtonElement;
   const handsFree = createSwitchRow({
     id: 'hfpTitle',
     title: 'windows.handsFree',
@@ -143,6 +144,22 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
               <Icon name="chevron-right" />
             </span>
           </button>
+          <button
+            type="button"
+            class="wp-row wp-row--nav"
+            ref={toHotkeys}
+            onclick={() => {
+              ctx.go('hotkeys');
+            }}
+          >
+            <span class="wp-row__text">
+              <span class="wp-row__title" l:text="hotkeys.title" />
+              <span class="wp-row__desc" l:text="hotkeys.desc" />
+            </span>
+            <span class="wp-row__end">
+              <Icon name="chevron-right" />
+            </span>
+          </button>
           {startup.row}
           <div class="wp-row wp-row--stack">
             <div class="wp-row__head">
@@ -252,6 +269,8 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
           ? toMicModes
           : from === 'mixer'
             ? toMixer
-            : null,
+            : from === 'hotkeys'
+              ? toHotkeys
+              : null,
   };
 };

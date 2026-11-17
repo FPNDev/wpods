@@ -134,6 +134,7 @@ internal sealed partial class TrayApp : ApplicationContext
         _micSeen = _micStatus;
         _appIcon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!)!;
         _host = new HostWindow(OnColorsChanged, OnDisplayChanged, OnHotKey);
+        StartHotkeys();
         _hideTimer.Tick += OnHideTimer;
         _popupTimer.Tick += OnPopupTimer;
         _tray = new NotifyIcon();
@@ -425,6 +426,7 @@ internal sealed partial class TrayApp : ApplicationContext
             _micStatus = _mic.Status;
         }
         DeviceState? state = session?.State;
+        TrackModes(session);
         if (state is not null && (dirty & Dirty.Status) != 0)
         {
             if (state.Status != _sessionStatus)
@@ -903,6 +905,7 @@ internal sealed partial class TrayApp : ApplicationContext
         Log.Info("ui", "exit requested");
         _exiting = true;
         DestroyPopup();
+        DestroyOsd();
         DestroyMain();
         await _mic.StopStreamAsync();
         // After the detach: the Mixer letting go of the mic earlier would START it again in low latency mode.
@@ -912,6 +915,7 @@ internal sealed partial class TrayApp : ApplicationContext
         _nearby.Dispose();
         _service.Dispose();
         _serviceDownTimer.Dispose();
+        _osdTimer.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _trayIcon?.Dispose();

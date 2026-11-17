@@ -68,7 +68,9 @@ export const createToast = (
         }
       }}
     >
-      <Icon name="error" class="wp-toast__icon wp-icon--lg" />
+      <span class="wp-badge wp-badge--danger">
+        <Icon name="warning" />
+      </span>
       <span class="wp-toast__msg" ref={msg} />
       <button
         type="button"

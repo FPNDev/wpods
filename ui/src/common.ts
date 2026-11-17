@@ -1,5 +1,5 @@
 import { setLabels } from './i18n';
-import type { HostToMain, HostToPopup } from './protocol';
+import type { HostToMain, HostToOsd, HostToPopup } from './protocol';
 import { setThemePrefs } from './theme';
 
 const setVisible = (visible: boolean): void => {
@@ -7,7 +7,7 @@ const setVisible = (visible: boolean): void => {
 };
 
 /** `relabel` receives a "labels" message to re-render once the language's hyphenation patterns have loaded. */
-export const applyCommon = <T extends HostToMain | HostToPopup>(
+export const applyCommon = <T extends HostToMain | HostToPopup | HostToOsd>(
   msg: T,
   relabel: (msg: T) => void,
 ): void => {

@@ -7,6 +7,7 @@ using System.Text.Json;
 using WPods.Audio;
 using WPods.Core;
 using WPods.Nearby;
+using Shortcut = WPods.Core.Shortcut;
 
 namespace WPods.Ui;
 
@@ -130,6 +131,28 @@ internal sealed partial class TrayApp
             case "setMixerVolume" or "previewMixerVolume" when m.Id is not null && m.Value.ValueKind == JsonValueKind.Number
                 && m.Value.TryGetInt32(out int percent) && percent is >= 0 and <= 100:
                 _mixer.SetVolume(m.Id, percent, save: m.Type == "setMixerVolume");
+                break;
+            case "setMixerEnabled" when m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                _mixer.SetEnabled(m.Value.GetBoolean());
+                SendMixer();
+                break;
+            case "setHotkey" when Hotkeys.IsAction(m.Name) && TryParseShortcut(m.Value, out Shortcut? shortcut):
+                SetHotkey(m.Name!, shortcut);
+                break;
+            case "recordHotkey" when m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+            {
+                bool recording = m.Value.GetBoolean();
+                _hotkeys.Pause(recording);
+                if (!recording)
+                {
+                    // Registering again tells which hotkeys another app took meanwhile.
+                    SendHotkeys();
+                }
+                break;
+            }
+            case "setHotkeySounds" when m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
+                SaveHotkeys(_settings.Hotkeys with { Sounds = m.Value.GetBoolean() });
+                SendHotkeys();
                 break;
             case "setMixerFilter" when m.Name is "disconnected" or "disabled" && m.Value.ValueKind is JsonValueKind.True or JsonValueKind.False:
             {
@@ -479,7 +502,11 @@ internal sealed partial class TrayApp
         }
     }
 
-    private async void RunCommand(Func<AapSession, CancellationToken, ValueTask<bool>> command, Dirty field)
+    private async void RunCommand(Func<AapSession, CancellationToken, ValueTask<bool>> command, Dirty field) =>
+        await RunCommandAsync(command, field, toast: true);
+
+    // False when not applied; the page then gets the current value back, and the noResponse toast when `toast`.
+    private async Task<bool> RunCommandAsync(Func<AapSession, CancellationToken, ValueTask<bool>> command, Dirty field, bool toast)
     {
         AapSession? session = _connections.Session;
         bool ok = false;
@@ -498,69 +525,94 @@ internal sealed partial class TrayApp
         }
         if (ok)
         {
-            return;
+            return true;
         }
         Log.Warn("ui", $"device command not applied (session={(session is null ? "none" : Mac.Format(session.Address))})");
         if (_connections.Session is { } current && MainLive)
         {
             SendStateDeltas(field, current.State, force: true);
         }
-        SendToast("noResponse", session?.Address ?? 0);
+        if (toast)
+        {
+            SendToast("noResponse", session?.Address ?? 0);
+        }
+        return false;
     }
 
     // ---- Host settings and app prefs ----
 
     private async void SetHostSetting(ulong address, string? name, JsonElement value)
     {
-        bool attached = _connections.Session?.Address == address;
-        HostSettings current = _settings.Get(address);
-        HostSettings? next = name switch
+        Func<HostSettings, HostSettings>? change = name switch
         {
-            "disableHandsFree" when value.ValueKind is JsonValueKind.True or JsonValueKind.False => current with { DisableHandsFree = value.GetBoolean() },
-            "lowLatency" when value.ValueKind is JsonValueKind.True or JsonValueKind.False => current with { LowLatency = value.GetBoolean() },
+            "disableHandsFree" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var off => s => s with { DisableHandsFree = off },
+            "lowLatency" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var on => s => s with { LowLatency = on },
             // The pipeline loads the new effective mode's model (HostSettingsChanged).
-            "micMode" when value.ValueKind == JsonValueKind.String && MessageWriter.TryParse(value.GetString(), out MicMode mode) => current with { MicMode = mode },
-            "duckPercent" when value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int duck) && duck is >= 10 and <= 90 => current with { DuckPercent = duck },
+            "micMode" when value.ValueKind == JsonValueKind.String && MessageWriter.TryParse(value.GetString(), out MicMode mode) => s => s with { MicMode = mode },
+            "duckPercent" when value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int duck) && duck is >= 10 and <= 90 => s => s with { DuckPercent = duck },
             _ => null,
         };
-        bool handsFree = next is not null && next.DisableHandsFree != current.DisableHandsFree;
-        // Only the attached pair is editable, and Hands-Free one change at a time; otherwise the saved value goes back.
-        if (next is not null && attached && !(handsFree && _handsFreeApplying.ContainsKey(address)))
+        if (change is not null)
+        {
+            await ApplyHostSettingsAsync(address, change, toast: true);
+        }
+        SendHostSettings(address);
+    }
+
+    /// <summary>
+    /// Only the attached pair is editable, and Hands-Free one change at a time; false otherwise, or when Windows refused
+    /// the change (the saved value goes back). <paramref name="change"/> applies to the settings current at the time of
+    /// writing, so a change made meanwhile is kept. The caller sends the host settings to the page.
+    /// </summary>
+    private async Task<bool> ApplyHostSettingsAsync(ulong address, Func<HostSettings, HostSettings> change, bool toast)
+    {
+        HostSettings current = _settings.Get(address);
+        HostSettings next = change(current);
+        bool handsFree = next.DisableHandsFree != current.DisableHandsFree;
+        if (_connections.Session?.Address != address || (handsFree && _handsFreeApplying.ContainsKey(address)))
+        {
+            return false;
+        }
+        if (handsFree)
+        {
+            SetHandsFreeApplying(address, true);
+        }
+        int lowLatencyFailures = Volatile.Read(ref _lowLatencyFailures);
+        try
+        {
+            // Disabling Hands-Free while it is in use leaves the A2DP stream paused for good: drop it first.
+            if (next.DisableHandsFree && !current.DisableHandsFree && _mic.HandsFreeInUse)
+            {
+                await DropHandsFreeAsync(address);
+                current = _settings.Get(address);
+                next = change(current);
+            }
+            await _connections.SetHostSettingsAsync(address, next);
+            // The keep-alive raises Failed synchronously inside the call when Windows refuses the stream.
+            if (next.LowLatency && !current.LowLatency && Volatile.Read(ref _lowLatencyFailures) != lowLatencyFailures)
+            {
+                await _connections.SetHostSettingsAsync(address, current);
+                return false;
+            }
+            return true;
+        }
+        catch (Exception e) when (e is Win32Exception or InvalidOperationException)
+        {
+            Log.Warn("ui", $"host setting change failed: {e.Message}");
+            if (toast)
+            {
+                SendToast("handsFreeFailed", address);
+            }
+            await RevertHandsFreeAsync(address, current);
+            return false;
+        }
+        finally
         {
             if (handsFree)
             {
-                SetHandsFreeApplying(address, true);
-            }
-            int lowLatencyFailures = Volatile.Read(ref _lowLatencyFailures);
-            try
-            {
-                // Disabling Hands-Free while it is in use leaves the A2DP stream paused for good: drop it first.
-                if (next.DisableHandsFree && !current.DisableHandsFree && _mic.HandsFreeInUse)
-                {
-                    await DropHandsFreeAsync(address);
-                }
-                await _connections.SetHostSettingsAsync(address, next);
-                // The keep-alive raises Failed synchronously inside the call when Windows refuses the stream.
-                if (next.LowLatency && !current.LowLatency && Volatile.Read(ref _lowLatencyFailures) != lowLatencyFailures)
-                {
-                    await _connections.SetHostSettingsAsync(address, current);
-                }
-            }
-            catch (Exception e) when (e is Win32Exception or InvalidOperationException)
-            {
-                Log.Warn("ui", $"host setting {name} failed: {e.Message}");
-                SendToast("handsFreeFailed", address);
-                await RevertHandsFreeAsync(address, current);
-            }
-            finally
-            {
-                if (handsFree)
-                {
-                    SetHandsFreeApplying(address, false);
-                }
+                SetHandsFreeApplying(address, false);
             }
         }
-        SendHostSettings(address);
     }
 
     // Counts Hands-Free changes in flight; the page shows a loader while any runs.
@@ -755,6 +807,7 @@ internal sealed partial class TrayApp
         string json = _writer.End();
         PostMain(json);
         _popup?.Pane.Post(json);
+        _osd?.Pane.Post(json);
     }
 
     private static void Launch(string target)

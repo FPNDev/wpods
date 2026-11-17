@@ -55,6 +55,16 @@ export const createMixer = (ctx: Ctx): Page => {
       post({ type: 'setMixerFilter', name, value: show });
       ctx.update('mixer');
     };
+  const enabled = createSwitchRow({
+    id: 'mixerEnabledTitle',
+    title: 'mixer.enabled',
+    desc: 'mixer.enabledDesc',
+    onChange: (value) => {
+      store.mixer.enabled = value;
+      post({ type: 'setMixerEnabled', value });
+      ctx.update('mixer');
+    },
+  });
   const showDisconnected = createSwitchRow({
     id: 'mixerDisconnectedTitle',
     title: 'mixer.showDisconnected',
@@ -123,6 +133,9 @@ export const createMixer = (ctx: Ctx): Page => {
     <div class="wp-page">
       {Note({ label: 'mixer.note' })}
       <section class="wp-group">
+        <div class="wp-list">{enabled.row}</div>
+      </section>
+      <section class="wp-group">
         <div class="wp-list">
           {showDisconnected.row}
           {showDisabled.row}
@@ -159,6 +172,10 @@ export const createMixer = (ctx: Ctx): Page => {
 
   const render = (): void => {
     const m = store.mixer;
+    setChecked(enabled.input, m.enabled);
+    // Off: the picks stay editable but look inactive, since nothing plays.
+    setClass(inputGroup, 'wp-mixer--off', !m.enabled);
+    setClass(outputGroup, 'wp-mixer--off', !m.enabled);
     setChecked(showDisconnected.input, !m.hideDisconnected);
     setChecked(showDisabled.input, !m.hideDisabled);
     const inputs: HTMLElement[] = [];

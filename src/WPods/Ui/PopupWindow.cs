@@ -1,8 +1,8 @@
 namespace WPods.Ui;
 
 /// <summary>
-/// The nearby popup: a topmost tool window that never activates on show or click (only Win+Shift+A activates it),
-/// no frame, DWM round corners and shadow. The host sizes and places it.
+/// The nearby popup and the hotkey notification: a topmost tool window that never activates on show or click (only
+/// Win+Shift+A activates the popup), no frame, DWM round corners and shadow. The host sizes and places it.
 /// </summary>
 internal sealed class PopupWindow : Form
 {

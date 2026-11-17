@@ -66,9 +66,12 @@ public sealed unsafe partial class Mixer : IDisposable
             Log.Warn("mixer", $"engine not available: init error 0x{hr:X8}");
         }
         MixerConfig config = _settings.Mixer;
-        foreach (string id in config.Sources)
+        if (config.Enabled)
         {
-            SetSource(id, config.Volume(id));
+            foreach (string id in config.Sources)
+            {
+                SetSource(id, config.Volume(id));
+            }
         }
         connections.Attached += OnAttached;
         connections.Detached += OnDetached;
@@ -109,7 +112,10 @@ public sealed unsafe partial class Mixer : IDisposable
             if (on)
             {
                 sources.Add(id);
-                SetSource(id, config.Volume(id));
+                if (config.Enabled)
+                {
+                    SetSource(id, config.Volume(id));
+                }
             }
             else
             {
@@ -132,7 +138,7 @@ public sealed unsafe partial class Mixer : IDisposable
             {
                 return;
             }
-            if (config.Sources.Contains(id))
+            if (config.Enabled && config.Sources.Contains(id))
             {
                 SetSource(id, percent);
             }
@@ -140,6 +146,33 @@ public sealed unsafe partial class Mixer : IDisposable
             {
                 Save(config with { Volumes = new Dictionary<string, int>(config.Volumes) { [id] = percent } });
             }
+        }
+    }
+
+    /// <summary>Plays the picked endpoints or stops them all; the picks and volumes stay either way.</summary>
+    public void SetEnabled(bool on)
+    {
+        lock (_lock)
+        {
+            MixerConfig config = _settings.Mixer;
+            if (_disposed || config.Enabled == on)
+            {
+                return;
+            }
+            foreach (string id in config.Sources)
+            {
+                if (on)
+                {
+                    SetSource(id, config.Volume(id));
+                }
+                else
+                {
+                    RemoveSource(id);
+                }
+            }
+            Save(config with { Enabled = on });
+            Log.Info("mixer", on ? "turned on" : "turned off");
+            UpdateDirectLocked();
         }
     }
 
@@ -194,9 +227,12 @@ public sealed unsafe partial class Mixer : IDisposable
         UpdateDirectLocked();
     }
 
-    // The mic pipeline streams the AirPods mic while the mixer plays WPods' mic (picked, with a pair attached).
-    private void UpdateDirectLocked() =>
-        _mic.SetDirectListener(!_disposed && _target != 0 && _settings.Mixer.Sources.Overlaps(_ownMicIds));
+    // The mic pipeline streams the AirPods mic while the mixer plays WPods' mic (on, picked, with a pair attached).
+    private void UpdateDirectLocked()
+    {
+        MixerConfig config = _settings.Mixer;
+        _mic.SetDirectListener(!_disposed && _target != 0 && config.Enabled && config.Sources.Overlaps(_ownMicIds));
+    }
 
     // Mic thread: each processed block, for the direct source (ignored by the engine while it has none).
     private void PushMic(ReadOnlySpan<short> pcm, long position)
@@ -347,7 +383,7 @@ public sealed unsafe partial class Mixer : IDisposable
         }
         if (sources.Count != config.Sources.Count || volumes.Count != config.Volumes.Count)
         {
-            Save(new MixerConfig(sources, volumes));
+            Save(config with { Sources = sources, Volumes = volumes });
         }
     }
 

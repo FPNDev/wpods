@@ -1,3 +1,5 @@
+import type { IconName } from './icons';
+
 export type DeviceId = string;
 export type Battery = { pct: number; charging: boolean } | null;
 export type Batteries = {
@@ -180,11 +182,54 @@ export type MixerDevice = {
   // 0..100, kept while not picked.
   volume: number;
 };
-// Devices: inputs first, then outputs; in each, active ones first, then by name.
+// Devices: inputs first, then outputs; in each, active ones first, then by name. Off: nothing plays, picks stay.
 export type Mixer = {
   devices: MixerDevice[];
+  enabled: boolean;
   hideDisconnected: boolean;
   hideDisabled: boolean;
+};
+
+export type HotkeyAction =
+  | 'noise.cycle'
+  | 'noise.off'
+  | 'noise.transparency'
+  | 'noise.adaptive'
+  | 'noise.noiseCancellation'
+  | 'mic.cycle'
+  | 'mic.standard'
+  | 'mic.voiceIsolation'
+  | 'mic.wideSpectrum'
+  | 'mixer.on'
+  | 'mixer.off'
+  | 'lowLatency.on'
+  | 'lowLatency.off'
+  | 'handsFree.on'
+  | 'handsFree.off'
+  | 'conversation.on'
+  | 'conversation.off'
+  | 'hearingAid.on'
+  | 'hearingAid.off'
+  | 'mediaAssist.on'
+  | 'mediaAssist.off'
+  | 'window.toggle';
+export type HotkeyStatus = 'ok' | 'toggle' | 'conflict' | 'taken' | 'reserved';
+// vk: Windows virtual-key code; mods: Alt 1, Ctrl 2, Shift 4, Win 8. `char` labels layout-dependent punctuation keys.
+export type Shortcut = { vk: number; mods: number };
+export type HotkeyItem = Shortcut & {
+  action: HotkeyAction;
+  char: string | null;
+  status: HotkeyStatus;
+  with: HotkeyAction[];
+};
+export type Hotkeys = { sounds: boolean; items: HotkeyItem[] };
+
+export type OsdTone = 'on' | 'off' | 'mode' | 'fail' | 'pending';
+export type OsdItem = {
+  icon: IconName;
+  title: string;
+  detail: string;
+  tone: OsdTone;
 };
 
 type CommonMessage =
@@ -211,6 +256,7 @@ type MainInit = { type: 'init' } & Labels &
     micCatalog: MicCatalog;
     micConfig: MicConfig;
     mixer: Mixer;
+    hotkeys: Hotkeys;
   };
 
 export type HostToMain =
@@ -235,6 +281,7 @@ export type HostToMain =
   | { type: 'micConfig'; config: MicConfig }
   | { type: 'micStage'; slot: MicSlot; id: string | null; state: StageLoad }
   | { type: 'mixer'; mixer: Mixer }
+  | { type: 'hotkeys'; hotkeys: Hotkeys }
   | { type: 'update'; update: UpdateInfo }
   | { type: 'adapter'; unsupported: boolean }
   | { type: 'restart'; pending: boolean }
@@ -257,9 +304,15 @@ export type MainToHost =
         | 'setHearingAid'
         | 'setAccent'
         | 'setStartup'
-        | 'setAutoUpdate';
+        | 'setAutoUpdate'
+        | 'setMixerEnabled'
+        | 'setHotkeySounds'
+        // true while a hotkey is being recorded: the host lets go of every hotkey meanwhile.
+        | 'recordHotkey';
       value: boolean;
     }
+  // null clears the hotkey.
+  | { type: 'setHotkey'; name: HotkeyAction; value: Shortcut | null }
   | { type: 'setMediaAssist'; name: 'calls' | 'media'; value: boolean }
   | { type: 'setMicSide'; side: MicSide }
   | { type: 'setPressSpeed'; value: PressSpeed }
@@ -307,3 +360,17 @@ export type PopupToHost =
   | { type: 'popupCancel' }
   | { type: 'popupDismiss'; ids: DeviceId[] }
   | { type: 'popupSize'; height: number };
+
+export type HostToOsd =
+  | CommonMessage
+  | ({ type: 'init' } & Labels & Prefs)
+  | { type: 'osd'; seq: number; items: OsdItem[] }
+  // The window has the reported size; the page answers osdReady once it painted.
+  | { type: 'osdPlaced' };
+
+// osdHidden carries the seq of the notification that faded out.
+export type OsdToHost =
+  | { type: 'ready'; page: 'osd' }
+  | { type: 'osdSize'; width: number; height: number }
+  | { type: 'osdReady' }
+  | { type: 'osdHidden'; value: number };

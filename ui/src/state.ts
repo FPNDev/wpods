@@ -6,6 +6,9 @@ import type {
   Device,
   DeviceId,
   HostToMain,
+  HotkeyAction,
+  HotkeyItem,
+  Hotkeys,
   Language,
   MicCatalog,
   MicConfig,
@@ -31,7 +34,8 @@ export type Section =
   | 'langs'
   | 'firstRun'
   | 'update'
-  | 'mixer';
+  | 'mixer'
+  | 'hotkeys';
 type Entry = Device & { capSet: Set<Capability> };
 
 const BATTERY_PARTS = {
@@ -57,6 +61,7 @@ const ALL_SECTIONS: Section[] = [
   'firstRun',
   'update',
   'mixer',
+  'hotkeys',
 ];
 
 export const store = {
@@ -98,7 +103,14 @@ export const store = {
     enhancement: null,
   } as MicConfig,
   micEnabled: new Set<MicMode>(),
-  mixer: { devices: [], hideDisconnected: false, hideDisabled: false } as Mixer,
+  mixer: {
+    devices: [],
+    enabled: true,
+    hideDisconnected: false,
+    hideDisabled: false,
+  } as Mixer,
+  hotkeySounds: true,
+  hotkeys: new Map<HotkeyAction, HotkeyItem>(),
   micLoading: { mode: null, enhancement: null } as Record<
     MicSlot,
     string | null
@@ -158,6 +170,15 @@ export const applyMicConfig = (config: MicConfig): void => {
   store.micConfig = config;
   store.micEnabled = new Set(config.modes);
   mark('mic');
+};
+
+const applyHotkeys = (hotkeys: Hotkeys): void => {
+  store.hotkeySounds = hotkeys.sounds;
+  store.hotkeys.clear();
+  for (const item of hotkeys.items) {
+    store.hotkeys.set(item.action, item);
+  }
+  mark('hotkeys');
 };
 
 export const current = (): Entry | null =>
@@ -264,6 +285,7 @@ export const apply = (msg: HostToMain): void => {
       store.micCatalog = msg.micCatalog;
       applyMicConfig(msg.micConfig);
       store.mixer = msg.mixer;
+      applyHotkeys(msg.hotkeys);
       store.micLoading.mode = null;
       store.micLoading.enhancement = null;
       store.mic = msg.mic;
@@ -353,6 +375,9 @@ export const apply = (msg: HostToMain): void => {
     case 'mixer':
       store.mixer = msg.mixer;
       mark('mixer');
+      break;
+    case 'hotkeys':
+      applyHotkeys(msg.hotkeys);
       break;
     case 'update':
       store.update = msg.update;

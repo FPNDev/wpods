@@ -1,4 +1,4 @@
-import type { MainToHost, PopupToHost } from './protocol';
+import type { MainToHost, OsdToHost, PopupToHost } from './protocol';
 
 type WebView = {
   postMessage(message: unknown): void;
@@ -17,7 +17,7 @@ declare global {
 
 const webview = window.chrome?.webview;
 
-export const post = (message: MainToHost | PopupToHost): void => {
+export const post = (message: MainToHost | PopupToHost | OsdToHost): void => {
   webview?.postMessage(message);
 };
 

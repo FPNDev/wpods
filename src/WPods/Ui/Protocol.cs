@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using WPods.Audio;
 using WPods.Core;
 using WPods.Nearby;
+using Shortcut = WPods.Core.Shortcut;
 
 namespace WPods.Ui;
 
@@ -23,6 +24,7 @@ internal sealed class PageMessage
     public JsonElement Value { get; set; }
     public string[]? Ids { get; set; }
     public string[]? Modes { get; set; }
+    public double Width { get; set; }
     public double Height { get; set; }
 }
 
@@ -294,8 +296,48 @@ internal sealed class MessageWriter
             w.WriteEndObject();
         }
         w.WriteEndArray();
+        w.WriteBoolean("enabled", config.Enabled);
         w.WriteBoolean("hideDisconnected", prefs.MixerHideDisconnected);
         w.WriteBoolean("hideDisabled", prefs.MixerHideDisabled);
+        w.WriteEndObject();
+    }
+
+    /// <summary>
+    /// "hotkeys": each bound action with its shortcut, its status and the other actions on the same shortcut. "char" is
+    /// the key's character in the current keyboard layout for punctuation keys, whose label depends on the layout.
+    /// </summary>
+    public static void WriteHotkeys(Utf8JsonWriter w, Hotkeys hotkeys, bool sounds)
+    {
+        w.WriteStartObject("hotkeys");
+        w.WriteBoolean("sounds", sounds);
+        w.WriteStartArray("items");
+        foreach ((string action, Shortcut shortcut) in hotkeys.Bindings)
+        {
+            w.WriteStartObject();
+            w.WriteString("action", action);
+            w.WriteNumber("vk", shortcut.Vk);
+            w.WriteNumber("mods", shortcut.Mods);
+            uint ch = shortcut.Vk is (>= 0xBA and <= 0xC0) or (>= 0xDB and <= 0xDF) or 0xE2
+                ? NativeUi.MapVirtualKey((uint)shortcut.Vk, 2) & 0xFFFF
+                : 0;
+            if (ch != 0)
+            {
+                w.WriteString("char", char.ToUpper((char)ch, System.Globalization.CultureInfo.CurrentCulture).ToString());
+            }
+            else
+            {
+                w.WriteNull("char");
+            }
+            w.WriteString("status", Camel(hotkeys.StatusOf(action)));
+            w.WriteStartArray("with");
+            foreach (string other in hotkeys.SharedWith(action))
+            {
+                w.WriteStringValue(other);
+            }
+            w.WriteEndArray();
+            w.WriteEndObject();
+        }
+        w.WriteEndArray();
         w.WriteEndObject();
     }
 

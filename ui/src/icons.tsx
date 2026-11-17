@@ -98,6 +98,65 @@ const ICONS = {
     circle(8, 8, 5.75),
     ['path', { d: 'M8 2.25a5.75 5.75 0 0 1 0 11.5z', ...FILL }],
   ],
+  cycle: [
+    'M12.9 6.1A5.25 5.25 0 0 0 3.3 5.4',
+    'M2.9 2.75v2.9h2.9',
+    'M3.1 9.9a5.25 5.25 0 0 0 9.6.7',
+    'M13.1 13.25v-2.9h-2.9',
+  ],
+  'mic-standard': [
+    rect(5.75, 1.75, 4.5, 8, 2.25),
+    'M3.25 7.75a4.75 4.75 0 0 0 9.5 0M8 12.5v1.75',
+  ],
+  'mic-voice': ['M8 3.5v9', 'M5.5 5.75v4.5', 'M10.5 5.75v4.5', 'M3 7.5v1', 'M13 7.5v1'],
+  'mic-wide': ['M2.5 5v6', 'M5.25 3.25v9.5', 'M8 5v6', 'M10.75 3.25v9.5', 'M13.5 5v6'],
+  mixer: [
+    'M4 2.5v11M8 2.5v11M12 2.5v11',
+    circle(4, 10, 1.75, FILL),
+    circle(8, 5.5, 1.75, FILL),
+    circle(12, 8.75, 1.75, FILL),
+  ],
+  latency: [circle(8, 9, 5.25), 'M8 9V6.25M6.5 1.75h3M12.1 4.6l1.15-1.15'],
+  'hands-free': [
+    'M5.6 2.25H3.9a1.6 1.6 0 0 0-1.6 1.75c.45 5.1 4.6 9.25 9.7 9.7a1.6 1.6 0 0 0 1.75-1.6v-1.7l-2.8-1.15-1.5 1.5a8.1 8.1 0 0 1-3.6-3.6l1.5-1.5z',
+  ],
+  conversation: [
+    'M2.25 4.25a1.5 1.5 0 0 1 1.5-1.5h8.5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7.25L4.5 13v-2.25h-.75a1.5 1.5 0 0 1-1.5-1.5z',
+  ],
+  ear: [
+    'M4.25 6.25a3.75 3.75 0 1 1 7.5 0c0 2.25-2.25 3-2.25 5a2.25 2.25 0 0 1-4 1.4',
+    'M6.5 6.5a1.5 1.5 0 1 1 2.5 1.1',
+  ],
+  'media-assist': [
+    'M5.25 12V3.5l7-1.5V10.5',
+    circle(3.75, 12, 1.75),
+    circle(10.75, 10.5, 1.75),
+  ],
+  window: [rect(1.75, 2.75, 12.5, 10.5, 1.5), 'M1.75 5.75h12.5'],
+  keyboard: [
+    rect(1.75, 3.75, 12.5, 8.5, 1.5),
+    'M4.5 6.5h.5M7.25 6.5h.5M10 6.5h.5M5 9.5h6',
+  ],
+  trash: [
+    'M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5',
+    'M4 4.25l.6 8.6a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8.6M6.75 6.75v4.5M9.25 6.75v4.5',
+  ],
+  win: [
+    rect(2.25, 2.25, 5.25, 5.25, 0.75),
+    rect(8.5, 2.25, 5.25, 5.25, 0.75),
+    rect(2.25, 8.5, 5.25, 5.25, 0.75),
+    rect(8.5, 8.5, 5.25, 5.25, 0.75),
+  ],
+  shift: ['M8 2.5L2.75 8.25H5.5v5h5v-5h2.75z'],
+  enter: ['M13 3.25v5a1.5 1.5 0 0 1-1.5 1.5H3.5M6.25 7L3.5 9.75l2.75 2.75'],
+  backspace: [
+    'M5.5 3.75h7.25a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H5.5L1.75 8z',
+    'M7.5 6.25l3.25 3.5M10.75 6.25L7.5 9.75',
+  ],
+  'arrow-up': ['M8 13V3M4 7l4-4 4 4'],
+  'arrow-down': ['M8 3v10M4 9l4 4 4-4'],
+  'arrow-left': ['M13 8H3M7 4L3 8l4 4'],
+  'arrow-right': ['M3 8h10M9 4l4 4-4 4'],
 } satisfies Record<string, Shape[]>;
 export type IconName = keyof typeof ICONS;
 
@@ -242,7 +301,7 @@ const svg = (cls: string, viewBox: string, shapes: Shape[]): SVGSVGElement => {
 
 export const Icon = (p: { name: IconName; class?: string }): SVGSVGElement =>
   svg(
-    `wp-icon${p.name === 'bolt' || p.name === 'heart' ? ' wp-icon--fill' : ''}${p.class ? ` ${p.class}` : ''}`,
+    `wp-icon${p.name === 'bolt' || p.name === 'heart' || p.name === 'win' ? ' wp-icon--fill' : ''}${p.class ? ` ${p.class}` : ''}`,
     '0 0 16 16',
     ICONS[p.name],
   );

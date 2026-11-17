@@ -14,6 +14,7 @@ export type PageName =
   | 'enhancement'
   | 'micModes'
   | 'mixer'
+  | 'hotkeys'
   | 'legal';
 
 export type Page = {

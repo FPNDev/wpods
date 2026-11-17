@@ -12,6 +12,7 @@ import { createEnhancement } from './pages/enhancement';
 import { createFirstRun } from './pages/firstRun';
 import { createHearing } from './pages/hearing';
 import { createHome } from './pages/home';
+import { createHotkeys } from './pages/hotkeys';
 import { createLanguage } from './pages/language';
 import { createLegal } from './pages/legal';
 import { createMicModes } from './pages/micModes';
@@ -52,6 +53,7 @@ const ROUTES: Record<PageName, Route> = {
   },
   micModes: { create: createMicModes, title: 'mic.modes', parent: 'windows' },
   mixer: { create: createMixer, title: 'mixer.title', parent: 'windows' },
+  hotkeys: { create: createHotkeys, title: 'hotkeys.title', parent: 'windows' },
   legal: { create: createLegal, title: 'legal.title', parent: 'home' },
 };
 
@@ -78,7 +80,6 @@ const back = (): void => {
   if (!shown) {
     return;
   }
-  built.get(shown)?.page.leave?.();
   requested = ROUTES[shown].parent ?? 'home';
   navDir = -1;
   ctx.update('page');
@@ -217,6 +218,10 @@ const renderPage = (): void => {
     return;
   }
   const left = shown;
+  // Not only Back leaves a page: it is also replaced when the app state changes (no devices, restart needed).
+  if (left) {
+    built.get(left)?.page.leave?.();
+  }
   const b = pageOf(top);
   const el = b.page.el;
   el.classList.remove('wp-page-enter', 'wp-page-back');

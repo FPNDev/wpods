@@ -31,12 +31,16 @@ internal static unsafe partial class NativeUi
 
     public const int SmCxSmIcon = 49;
 
+    public const uint ModAlt = 0x0001;
+    public const uint ModCtrl = 0x0002;
     public const uint ModShift = 0x0004;
     public const uint ModWin = 0x0008;
     public const uint ModNoRepeat = 0x4000;
 
     public const int DwmwaUseImmersiveDarkMode = 20;
     public const int DwmwaWindowCornerPreference = 33;
+    /// <summary>A cloaked window stays shown (its content keeps painting) but DWM draws nothing of it, frame included.</summary>
+    public const int DwmwaCloak = 13;
     public const int DwmwcpRound = 2;
 
     private const uint SwpNoZOrder = 0x0004;
@@ -88,6 +92,10 @@ internal static unsafe partial class NativeUi
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool UnregisterHotKey(nint hwnd, int id);
+
+    /// <summary>MAPVK_VK_TO_CHAR (2): the unshifted character of a key in the current layout, 0 if none.</summary>
+    [LibraryImport("user32.dll", EntryPoint = "MapVirtualKeyW")]
+    public static partial uint MapVirtualKey(uint code, uint mapType);
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

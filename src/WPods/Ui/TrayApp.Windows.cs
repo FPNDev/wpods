@@ -130,6 +130,8 @@ internal sealed partial class TrayApp
             _mainPosition = window.Location;
         }
         Log.Info("ui", "main window: hide");
+        // A hotkey being recorded on the page ends with it.
+        _hotkeys.Pause(false);
         PostVisibility(window.Pane, false);
         _mainShown = false;
         window.Hide();
@@ -170,6 +172,7 @@ internal sealed partial class TrayApp
             _mainPosition = window.Location;
         }
         Log.Info("ui", "main window: destroy");
+        _hotkeys.Pause(false);
         _main = null;
         _mainShown = false;
         _mainInitSent = false;
@@ -197,7 +200,7 @@ internal sealed partial class TrayApp
         _ui.Post(static s =>
         {
             var (app, failed) = ((TrayApp, WebPane))s!;
-            Log.Warn("ui", $"WebView2 process failed ({(app._main?.Pane == failed ? "main" : app._popup?.Pane == failed ? "popup" : "stale pane")})");
+            Log.Warn("ui", $"WebView2 process failed ({(app._main?.Pane == failed ? "main" : app._popup?.Pane == failed ? "popup" : app._osd?.Pane == failed ? "osd" : "stale pane")})");
             if (app._main?.Pane == failed)
             {
                 bool shown = app._mainShown;
@@ -211,6 +214,11 @@ internal sealed partial class TrayApp
             {
                 app.DestroyPopup();
                 app.UpdatePopup();
+            }
+            else if (app._osd?.Pane == failed)
+            {
+                // The next hotkey creates it again.
+                app.DestroyOsd();
             }
         }, (this, pane));
     }
@@ -271,6 +279,7 @@ internal sealed partial class TrayApp
         MessageWriter.WriteMicCatalog(w);
         MessageWriter.WriteMicConfig(w, "micConfig", _settings.Mic);
         MessageWriter.WriteMixer(w, _mixer.Devices, _settings, _prefs);
+        MessageWriter.WriteHotkeys(w, _hotkeys, _settings.Hotkeys.Sounds);
         w.WriteBoolean("visible", _mainShown);
         PostMain(_writer.End());
         _mainInitSent = true;
@@ -291,6 +300,7 @@ internal sealed partial class TrayApp
         SendUpdate();
         SendAdapter();
         SendRestart();
+        SendHotkeys();
         Utf8JsonWriter w = _writer.Begin("accent");
         MessageWriter.WriteAccent(w, _accent);
         PostMain(_writer.End());
@@ -556,7 +566,7 @@ internal sealed partial class TrayApp
     }
 
     // Win+Shift+A: the hotkey grants this process the foreground, so the popup may take it.
-    private void OnHotKey()
+    private void FocusPopup()
     {
         if (_popup is not { } window || !_popupShown)
         {
@@ -575,19 +585,18 @@ internal sealed partial class TrayApp
         Log.Info("ui", $"theme {_prefs.Theme}, dark={Dark}");
         _main?.SetTheme(MainBackground, Dark);
         _popup?.SetTheme(PopupBackground, Dark);
+        _osd?.SetTheme(PopupBackground, Dark);
     }
 
-    /// <summary>Only the popup needs this; the main page applied the change itself.</summary>
+    /// <summary>Only the popup and the notification need this; the main page applied the change itself.</summary>
     private void SendPrefsToPopup()
     {
-        if (_popup is null)
-        {
-            return;
-        }
         Utf8JsonWriter w = _writer.Begin("prefs");
         w.WriteString("theme", _prefs.Theme);
         w.WriteBoolean("useAccent", _prefs.UseAccent);
-        _popup.Pane.Post(_writer.End());
+        string json = _writer.End();
+        _popup?.Pane.Post(json);
+        _osd?.Pane.Post(json);
     }
 
     // Windows app/taskbar mode or accent colour changed.
@@ -610,6 +619,7 @@ internal sealed partial class TrayApp
             string json = _writer.End();
             PostMain(json);
             _popup?.Pane.Post(json);
+            _osd?.Pane.Post(json);
         }
         UpdateTray();
     }
@@ -619,5 +629,6 @@ internal sealed partial class TrayApp
         _trayDpi = NativeUi.PrimaryMonitor().Dpi;
         UpdateTray();
         PlacePopup();
+        PlaceOsd();
     }
 }

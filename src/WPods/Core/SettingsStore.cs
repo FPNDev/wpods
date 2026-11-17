@@ -62,7 +62,22 @@ public sealed record MixerConfig(IReadOnlySet<string> Sources, IReadOnlyDictiona
 
     public static readonly MixerConfig Default = new(new HashSet<string>(), new Dictionary<string, int>());
 
+    /// <summary>Off: nothing plays, the picks and volumes stay.</summary>
+    public bool Enabled { get; init; } = true;
+
     public int Volume(string id) => Volumes.GetValueOrDefault(id, DefaultVolume);
+}
+
+/// <summary>A global shortcut: Win32 virtual-key code and MOD_* flags (Alt 1, Ctrl 2, Shift 4, Win 8).</summary>
+public readonly record struct Shortcut(int Vk, int Mods);
+
+/// <summary>
+/// App-wide hotkeys (settings.json "hotkeys"): the shortcut per action id, null until the user first changes one (the
+/// defaults apply), and whether a hotkey's change plays a sound.
+/// </summary>
+public sealed record HotkeyConfig(IReadOnlyDictionary<string, Shortcut>? Bindings, bool Sounds)
+{
+    public static readonly HotkeyConfig Default = new(null, true);
 }
 
 /// <summary>
@@ -155,6 +170,7 @@ public sealed class SettingsStore
     private UiPrefs _ui = UiPrefs.Default;
     private MicConfig _mic = MicConfig.Default;
     private MixerConfig _mixer = MixerConfig.Default;
+    private HotkeyConfig _hotkeys = HotkeyConfig.Default;
 
     public SettingsStore()
         : this(
@@ -287,6 +303,27 @@ public sealed class SettingsStore
         lock (_lock)
         {
             _mixer = config;
+            SaveSettings();
+        }
+    }
+
+    public HotkeyConfig Hotkeys
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _hotkeys;
+            }
+        }
+    }
+
+    /// <summary>Stores a caller-validated config; it is kept in memory even when saving throws.</summary>
+    public void SetHotkeys(HotkeyConfig config)
+    {
+        lock (_lock)
+        {
+            _hotkeys = config;
             SaveSettings();
         }
     }
@@ -479,6 +516,7 @@ public sealed class SettingsStore
             _ui = ui with { Theme = ui.Theme ?? UiPrefs.Default.Theme, Language = ui.Language ?? UiPrefs.Default.Language };
             _mic = file.Mic is { } mic ? LoadMic(mic) : MicConfig.Default;
             _mixer = file.Mixer is { } mixer ? LoadMixer(mixer) : MixerConfig.Default;
+            _hotkeys = file.Hotkeys is { } hotkeys ? LoadHotkeys(hotkeys) : HotkeyConfig.Default;
             if (file.LastUsed is { } last && Mac.TryParse(last, out ulong lastUsed))
             {
                 _lastUsed = lastUsed;
@@ -548,6 +586,7 @@ public sealed class SettingsStore
             _ui = UiPrefs.Default;
             _mic = MicConfig.Default;
             _mixer = MixerConfig.Default;
+            _hotkeys = HotkeyConfig.Default;
             _devices.Clear();
             _models.Clear();
             _capabilities.Clear();
@@ -639,10 +678,43 @@ public sealed class SettingsStore
         {
             volumes[id] = Math.Clamp(volume, 0, 100);
         }
-        return new MixerConfig(sources, volumes);
+        return new MixerConfig(sources, volumes) { Enabled = file.Enabled ?? true };
     }
 
-    private static MixerFile SaveMixer(MixerConfig config) => new() { Sources = [.. config.Sources], Volumes = new(config.Volumes) };
+    private static MixerFile SaveMixer(MixerConfig config) =>
+        new() { Sources = [.. config.Sources], Volumes = new(config.Volumes), Enabled = config.Enabled };
+
+    // Entries with a null or out-of-range shortcut are dropped; action ids are checked where hotkeys register.
+    private static HotkeyConfig LoadHotkeys(HotkeyFile file)
+    {
+        Dictionary<string, Shortcut>? bindings = null;
+        if (file.Bindings is not null)
+        {
+            bindings = [];
+            foreach ((string action, ShortcutFile? shortcut) in file.Bindings)
+            {
+                if (shortcut is { Vk: > 0 and < 0xFF, Mods: >= 0 and <= 0xF })
+                {
+                    bindings[action] = new Shortcut(shortcut.Vk, shortcut.Mods);
+                }
+            }
+        }
+        return new HotkeyConfig(bindings, file.Sounds ?? true);
+    }
+
+    private static HotkeyFile SaveHotkeys(HotkeyConfig config)
+    {
+        Dictionary<string, ShortcutFile?>? bindings = null;
+        if (config.Bindings is not null)
+        {
+            bindings = [];
+            foreach ((string action, Shortcut shortcut) in config.Bindings)
+            {
+                bindings[action] = new ShortcutFile { Vk = shortcut.Vk, Mods = shortcut.Mods };
+            }
+        }
+        return new HotkeyFile { Bindings = bindings, Sounds = config.Sounds };
+    }
 
     // One-time import of %UserProfile%\.wpods\device_settings.jsonl (left in place).
     private void Migrate(string legacyFile)
@@ -681,7 +753,7 @@ public sealed class SettingsStore
 
     private void SaveSettings()
     {
-        var file = new SettingsFile { LastUsed = _lastUsed == 0 ? null : Mac.Format(_lastUsed), Ui = _ui, Mic = SaveMic(_mic), Mixer = SaveMixer(_mixer) };
+        var file = new SettingsFile { LastUsed = _lastUsed == 0 ? null : Mac.Format(_lastUsed), Ui = _ui, Mic = SaveMic(_mic), Mixer = SaveMixer(_mixer), Hotkeys = SaveHotkeys(_hotkeys) };
         SaveMap(_devices, file.Devices);
         SaveMap(_models, file.Models);
         SaveMap(_capabilities, file.Capabilities);
@@ -780,6 +852,8 @@ internal sealed class SettingsFile
     public MicFile? Mic { get; set; }
     /// <summary>Missing means <see cref="MixerConfig.Default"/>.</summary>
     public MixerFile? Mixer { get; set; }
+    /// <summary>Missing means <see cref="HotkeyConfig.Default"/>.</summary>
+    public HotkeyFile? Hotkeys { get; set; }
     public Dictionary<string, HostSettings> Devices { get; set; } = [];
     public Dictionary<string, DeviceModel> Models { get; set; } = [];
     public Dictionary<string, DeviceCapabilities> Capabilities { get; set; } = [];
@@ -811,6 +885,21 @@ internal sealed class MixerFile
 {
     public List<string?>? Sources { get; set; }
     public Dictionary<string, int>? Volumes { get; set; }
+    /// <summary>Missing means on.</summary>
+    public bool? Enabled { get; set; }
+}
+
+/// <summary>settings.json "hotkeys": bindings missing until the user first changes one.</summary>
+internal sealed class HotkeyFile
+{
+    public Dictionary<string, ShortcutFile?>? Bindings { get; set; }
+    public bool? Sounds { get; set; }
+}
+
+internal sealed class ShortcutFile
+{
+    public int Vk { get; set; }
+    public int Mods { get; set; }
 }
 
 internal sealed class LegacyRecord
