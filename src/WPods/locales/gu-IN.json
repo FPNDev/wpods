@@ -33,7 +33,7 @@
     "restart.confirm": "પહેલાં તમારું કામ સાચવો. હમણાં પુનઃપ્રારંભ કરીએ?",
     "restart.confirmRestart": "પુનઃપ્રારંભ કરો",
     "restart.cancel": "રદ કરો",
-    "legal.firstRunTitle":"આ Apple ની ઍપ નથી",
+    "legal.firstRunTitle": "આ Apple ની ઍપ નથી",
     "legal.firstRunBody": "WPods એક સ્વતંત્ર, ઓપન-સોર્સ પ્રોજેક્ટ છે. તે Apple દ્વારા બનાવાયેલ, પ્રાયોજિત, અનુમોદિત કે સમર્થિત નથી. AirPods અને તેમની સુવિધાઓનાં નામ Apple Inc. નાં છે; WPods તેમનો ઉપયોગ ફક્ત એ જણાવવા માટે કરે છે કે તે શેની સાથે કામ કરે છે. WPods કોઈ વૉરંટી વિના આવે છે: તમે તેનો ઉપયોગ તમારા પોતાના જોખમે કરો છો.",
     "legal.adapterTitle": "Bluetooth એડેપ્ટર",
     "legal.adapterBody": "WPods ની બેકગ્રાઉન્ડ સેવા તમારા Bluetooth એડેપ્ટરનું નિયંત્રણ લે છે અને Vadym Hrynchyshyn ના usbip-win2 દ્વારા તેને વર્ચ્યુઅલ એડેપ્ટર તરીકે Windows ને પાછું આપે છે, જેથી તમારાં બધાં Bluetooth ઉપકરણો કામ કરતાં રહે. તમે WPods અનઇન્સ્ટોલ કરો, અથવા આ વારંવાર નિષ્ફળ જાય, ત્યારે એડેપ્ટર Windows ના પોતાના ડ્રાઇવર પર પાછું જાય છે.",

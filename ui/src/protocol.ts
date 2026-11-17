@@ -336,7 +336,11 @@ export type MainToHost =
   // preview: live while dragging, not saved; set: on release, saved.
   | { type: 'previewMixerVolume' | 'setMixerVolume'; id: string; value: number }
   // value = show.
-  | { type: 'setMixerFilter'; name: 'disconnected' | 'disabled'; value: boolean }
+  | {
+      type: 'setMixerFilter';
+      name: 'disconnected' | 'disabled';
+      value: boolean;
+    }
   | { type: 'setTheme'; theme: Theme }
   | { type: 'setLanguage'; code: string }
   | { type: 'openLegal'; name: 'license' | 'notices' }

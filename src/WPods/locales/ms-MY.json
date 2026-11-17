@@ -33,7 +33,7 @@
     "restart.confirm": "Simpan kerja anda dahulu. Mulakan semula sekarang?",
     "restart.confirmRestart": "Mulakan semula",
     "restart.cancel": "Batal",
-    "legal.firstRunTitle":"Bukan apl Apple",
+    "legal.firstRunTitle": "Bukan apl Apple",
     "legal.firstRunBody": "WPods ialah projek sumber terbuka yang bebas. Ia tidak dibuat, ditaja, direstui atau disokong oleh Apple. AirPods dan nama ciri-cirinya adalah milik Apple Inc.; WPods menggunakannya hanya untuk menyatakan apa yang serasi dengannya. WPods disediakan tanpa sebarang waranti: anda menggunakannya atas risiko anda sendiri.",
     "legal.adapterTitle": "Penyesuai Bluetooth",
     "legal.adapterBody": "Perkhidmatan latar belakang WPods mengambil alih penyesuai Bluetooth anda dan menyerahkannya semula kepada Windows sebagai penyesuai maya melalui usbip-win2 oleh Vadym Hrynchyshyn, jadi semua peranti Bluetooth anda terus berfungsi. Apabila anda menyahpasang WPods, atau jika proses ini terus gagal, penyesuai kembali kepada pemacu Windows sendiri.",

@@ -33,7 +33,7 @@
     "restart.confirm": "כדאי לשמור קודם את העבודה. להפעיל מחדש עכשיו?",
     "restart.confirmRestart": "הפעלה מחדש",
     "restart.cancel": "ביטול",
-    "legal.firstRunTitle":"לא יישום של Apple",
+    "legal.firstRunTitle": "לא יישום של Apple",
     "legal.firstRunBody": "WPods הוא פרויקט עצמאי בקוד פתוח. הוא לא נוצר, לא ממומן, לא מאושר ולא נתמך על ידי Apple. AirPods ושמות המאפיינים שלהן שייכים ל-Apple Inc.; WPods משתמש בהם רק כדי לציין עם מה הוא עובד. WPods מסופק ללא כל אחריות: השימוש בו הוא על אחריותך.",
     "legal.adapterTitle": "מתאם Bluetooth",
     "legal.adapterBody": "שירות הרקע של WPods משתלט על מתאם ה-Bluetooth שלך ומחזיר אותו ל-Windows כמתאם וירטואלי באמצעות usbip-win2 מאת Vadym Hrynchyshyn, כך שכל התקני ה-Bluetooth שלך ממשיכים לעבוד. כשמסירים את WPods, או אם הפעולה נכשלת שוב ושוב, המתאם חוזר למנהל ההתקן של Windows עצמה.",

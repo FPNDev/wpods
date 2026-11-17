@@ -33,7 +33,7 @@
     "restart.confirm": "先に作業内容を保存してください。今すぐ再起動しますか?",
     "restart.confirmRestart": "再起動",
     "restart.cancel": "キャンセル",
-    "legal.firstRunTitle":"Appleのアプリではありません",
+    "legal.firstRunTitle": "Appleのアプリではありません",
     "legal.firstRunBody": "WPodsは独立したオープンソースプロジェクトです。Appleが製作、後援、推奨、サポートするものではありません。AirPodsおよびその機能の名称はApple Inc.に帰属し、WPodsは何に対応しているかを示す目的でのみこれらを使用しています。WPodsは無保証です。ご自身の責任でご使用ください。",
     "legal.adapterTitle": "Bluetoothアダプター",
     "legal.adapterBody": "WPodsのバックグラウンド サービスがBluetoothアダプターを引き継ぎ、usbip-win2（作者: Vadym Hrynchyshyn）を使って仮想アダプターとしてWindowsに戻すため、ほかのBluetoothデバイスもすべてそのまま使えます。WPodsをアンインストールしたとき、またはこの処理が繰り返し失敗したときは、アダプターはWindows標準のドライバーに戻ります。",

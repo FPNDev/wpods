@@ -33,7 +33,7 @@
     "restart.confirm": "پہلے اپنا کام محفوظ کریں۔ کیا ابھی ری اسٹارٹ کریں؟",
     "restart.confirmRestart": "ری اسٹارٹ کریں",
     "restart.cancel": "منسوخ کریں",
-    "legal.firstRunTitle":"Apple کی ایپ نہیں",
+    "legal.firstRunTitle": "Apple کی ایپ نہیں",
     "legal.firstRunBody": "WPods ایک آزاد، اوپن سورس پروجیکٹ ہے۔ اسے نہ Apple نے بنایا ہے، نہ Apple اس کی سرپرستی، توثیق یا معاونت کرتا ہے۔ AirPods اور ان کی خصوصیات کے نام Apple Inc. کی ملکیت ہیں؛ WPods انہیں صرف یہ بتانے کے لیے استعمال کرتا ہے کہ یہ کس کے ساتھ کام کرتا ہے۔ WPods کسی وارنٹی کے بغیر آتا ہے: آپ اسے اپنی ذمہ داری پر استعمال کرتے ہیں۔",
     "legal.adapterTitle": "Bluetooth اڈاپٹر",
     "legal.adapterBody": "WPods کی بیک گراؤنڈ سروس آپ کے Bluetooth اڈاپٹر کا کنٹرول سنبھال لیتی ہے اور Vadym Hrynchyshyn کے usbip-win2 کے ذریعے اسے ورچوئل اڈاپٹر کے طور پر Windows کو واپس دے دیتی ہے، اس لیے آپ کے سبھی Bluetooth آلات کام کرتے رہتے ہیں۔ جب آپ WPods ان انسٹال کرتے ہیں، یا اگر یہ بار بار ناکام ہو، تو اڈاپٹر Windows کے اپنے ڈرائیور پر واپس چلا جاتا ہے۔",

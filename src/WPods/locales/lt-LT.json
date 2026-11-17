@@ -33,7 +33,7 @@
     "restart.confirm": "Pirmiausia išsaugokite savo darbą. Paleisti iš naujo dabar?",
     "restart.confirmRestart": "Paleisti iš naujo",
     "restart.cancel": "Atšaukti",
-    "legal.firstRunTitle":"Tai ne „Apple“ programa",
+    "legal.firstRunTitle": "Tai ne „Apple“ programa",
     "legal.firstRunBody": "„WPods“ yra nepriklausomas atvirojo kodo projektas. Jo nekuria, neremia, nepatvirtina ir nepalaiko „Apple“. „AirPods“ ir jų funkcijų pavadinimai priklauso „Apple Inc.“; „WPods“ juos naudoja tik tam, kad nurodytų, su kuo veikia. „WPods“ teikiamas be jokių garantijų: jį naudojate savo rizika.",
     "legal.adapterTitle": "„Bluetooth“ adapteris",
     "legal.adapterBody": "„WPods“ foninė paslauga perima jūsų „Bluetooth“ adapterį ir per „usbip-win2“ (autorius Vadym Hrynchyshyn) grąžina jį „Windows“ kaip virtualų adapterį, todėl visi jūsų „Bluetooth“ įrenginiai toliau veikia. Kai pašalinate „WPods“ arba jei tai nuolat nepavyksta, adapteris grąžinamas pačios „Windows“ tvarkyklei.",

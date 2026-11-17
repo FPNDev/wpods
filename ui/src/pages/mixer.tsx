@@ -32,7 +32,10 @@ const filtered = (d: MixerDevice): boolean => {
 // Moves rows only when the order changed, so the focused row keeps its focus.
 const place = (list: HTMLElement, nodes: HTMLElement[]): void => {
   const children = list.children;
-  if (children.length !== nodes.length || !nodes.every((node, i) => children[i] === node)) {
+  if (
+    children.length !== nodes.length ||
+    !nodes.every((node, i) => children[i] === node)
+  ) {
     list.replaceChildren(...nodes);
   }
 };

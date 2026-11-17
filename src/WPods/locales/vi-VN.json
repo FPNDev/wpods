@@ -33,7 +33,7 @@
     "restart.confirm": "Hãy lưu công việc của bạn trước. Khởi động lại ngay bây giờ?",
     "restart.confirmRestart": "Khởi động lại",
     "restart.cancel": "Hủy",
-    "legal.firstRunTitle":"Không phải ứng dụng của Apple",
+    "legal.firstRunTitle": "Không phải ứng dụng của Apple",
     "legal.firstRunBody": "WPods là một dự án độc lập, mã nguồn mở. Ứng dụng này không do Apple tạo ra, tài trợ, chứng thực hay hỗ trợ. AirPods và tên các tính năng của AirPods thuộc về Apple Inc.; WPods chỉ dùng các tên này để cho biết ứng dụng hoạt động với sản phẩm nào. WPods không đi kèm bất kỳ bảo đảm nào: bạn tự chịu rủi ro khi sử dụng ứng dụng.",
     "legal.adapterTitle": "Bộ điều hợp Bluetooth",
     "legal.adapterBody": "Dịch vụ chạy nền của WPods tiếp quản bộ điều hợp Bluetooth của bạn rồi trả lại cho Windows dưới dạng bộ điều hợp ảo thông qua usbip-win2 của Vadym Hrynchyshyn, nên mọi thiết bị Bluetooth của bạn vẫn hoạt động bình thường. Khi bạn gỡ cài đặt WPods, hoặc nếu việc này liên tục thất bại, bộ điều hợp sẽ quay về trình điều khiển riêng của Windows.",

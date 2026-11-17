@@ -24,7 +24,9 @@ const LEAVE_MS = 160;
 const READY_MAX_MS = 250;
 
 let card!: HTMLDivElement;
-const root = (<div class="wp-osd" role="status" hidden ref={card} />) as HTMLDivElement;
+const root = (
+  <div class="wp-osd" role="status" hidden ref={card} />
+) as HTMLDivElement;
 document.body.append(root);
 
 const lines: Line[] = [];
@@ -51,7 +53,10 @@ const createLine = (): Line => {
 
 const renderLine = (line: Line, item: OsdItem): void => {
   const tone = item.tone;
-  if (line.icon !== item.icon || (line.tone === 'pending') !== (tone === 'pending')) {
+  if (
+    line.icon !== item.icon ||
+    (line.tone === 'pending') !== (tone === 'pending')
+  ) {
     line.badge.replaceChildren(Icon({ name: item.icon }));
     if (tone === 'pending') {
       line.badge.append(<Spinner class="wp-badge__spin" />);

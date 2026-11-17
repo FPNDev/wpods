@@ -33,7 +33,7 @@
     "restart.confirm": "Najprije spremite svoj rad. Ponovno pokrenuti sada?",
     "restart.confirmRestart": "Ponovno pokreni",
     "restart.cancel": "Odustani",
-    "legal.firstRunTitle":"Ovo nije Appleova aplikacija",
+    "legal.firstRunTitle": "Ovo nije Appleova aplikacija",
     "legal.firstRunBody": "WPods je neovisan projekt otvorenog koda. Apple ga nije izradio, sponzorirao ni odobrio niti ga podržava. AirPods i nazivi njihovih značajki pripadaju tvrtki Apple Inc.; WPods ih koristi samo kako bi naveo s čime radi. WPods se isporučuje bez jamstva: koristite ga na vlastitu odgovornost.",
     "legal.adapterTitle": "Bluetooth adapter",
     "legal.adapterBody": "Pozadinska usluga aplikacije WPods preuzima vaš Bluetooth adapter i vraća ga sustavu Windows kao virtualni adapter putem usbip-win2 (autor: Vadym Hrynchyshyn), tako da svi vaši Bluetooth uređaji i dalje rade. Kada deinstalirate WPods ili ako to više puta ne uspije, adapter se vraća vlastitom upravljačkom programu sustava Windows.",

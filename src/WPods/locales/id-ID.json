@@ -33,7 +33,7 @@
     "restart.confirm": "Simpan pekerjaan Anda terlebih dahulu. Mulai ulang sekarang?",
     "restart.confirmRestart": "Mulai ulang",
     "restart.cancel": "Batal",
-    "legal.firstRunTitle":"Bukan aplikasi Apple",
+    "legal.firstRunTitle": "Bukan aplikasi Apple",
     "legal.firstRunBody": "WPods adalah proyek independen dan sumber terbuka. WPods tidak dibuat, disponsori, direkomendasikan, atau didukung oleh Apple. AirPods dan nama fitur-fiturnya adalah milik Apple Inc.; WPods menggunakannya hanya untuk menyebutkan produk yang didukungnya. WPods disediakan tanpa jaminan: Anda menggunakannya dengan risiko Anda sendiri.",
     "legal.adapterTitle": "Adaptor Bluetooth",
     "legal.adapterBody": "Layanan latar belakang WPods mengambil alih adaptor Bluetooth Anda dan menyerahkannya kembali ke Windows sebagai adaptor virtual melalui usbip-win2 karya Vadym Hrynchyshyn, sehingga semua perangkat Bluetooth Anda tetap berfungsi. Saat Anda mencopot pemasangan WPods, atau jika proses ini terus gagal, adaptor kembali ke driver bawaan Windows.",

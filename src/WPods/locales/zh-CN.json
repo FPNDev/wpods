@@ -33,7 +33,7 @@
     "restart.confirm": "请先保存你的工作。要立即重启吗？",
     "restart.confirmRestart": "重启",
     "restart.cancel": "取消",
-    "legal.firstRunTitle":"非 Apple 官方应用",
+    "legal.firstRunTitle": "非 Apple 官方应用",
     "legal.firstRunBody": "WPods 是一个独立的开源项目，并非由 Apple 制作、赞助、认可或提供支持。AirPods 及其功能名称归 Apple Inc. 所有；WPods 使用这些名称仅为说明它适用于哪些产品。WPods 不提供任何担保：使用本软件的风险由你自行承担。",
     "legal.adapterTitle": "蓝牙适配器",
     "legal.adapterBody": "WPods 的后台服务会接管你的蓝牙适配器，并通过 usbip-win2（作者 Vadym Hrynchyshyn）将其作为虚拟适配器交还给 Windows，因此你的所有蓝牙设备都能照常使用。卸载 WPods 时，或者此过程反复失败时，适配器会恢复使用 Windows 自带的驱动程序。",

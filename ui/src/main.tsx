@@ -251,8 +251,10 @@ const renderPage = (): void => {
 // content (the box itself stretches to the window, so its children are measured).
 const fitFirstRun = (page: HTMLElement): void => {
   const box = page.firstElementChild as HTMLElement;
-  const top = (box.firstElementChild as HTMLElement).getBoundingClientRect().top;
-  const bottom = (box.lastElementChild as HTMLElement).getBoundingClientRect().bottom;
+  const top = (box.firstElementChild as HTMLElement).getBoundingClientRect()
+    .top;
+  const bottom = (box.lastElementChild as HTMLElement).getBoundingClientRect()
+    .bottom;
   const bodyStyle = getComputedStyle(body);
   const boxStyle = getComputedStyle(box);
   const height = Math.ceil(

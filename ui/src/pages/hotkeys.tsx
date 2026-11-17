@@ -163,7 +163,9 @@ const clash = (a: string, b: string): boolean =>
 const actionName = (action: HotkeyAction): string => {
   const n = NAMES.get(action);
 
-  return n ? t('hotkeys.actionName', { group: t(n.group), action: t(n.row) }) : action;
+  return n
+    ? t('hotkeys.actionName', { group: t(n.group), action: t(n.row) })
+    : action;
 };
 
 const modsOf = (e: KeyboardEvent): number =>

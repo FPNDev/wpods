@@ -24,7 +24,13 @@ export const createRestartNeeded = (): Page => {
       <div class="wp-empty">
         <h1 class="wp-empty__title" l:text="restart.title" />
         <p class="wp-empty__body" l:text="restart.body" ref={body} />
-        <p class="wp-empty__body" role="alert" hidden l:text="restart.confirm" ref={question} />
+        <p
+          class="wp-empty__body"
+          role="alert"
+          hidden
+          l:text="restart.confirm"
+          ref={question}
+        />
         <div class="wp-empty__actions" ref={actions}>
           <button
             type="button"

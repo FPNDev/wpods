@@ -33,7 +33,7 @@
     "restart.confirm": "Gem dit arbejde først. Vil du genstarte nu?",
     "restart.confirmRestart": "Genstart",
     "restart.cancel": "Annuller",
-    "legal.firstRunTitle":"Ikke en app fra Apple",
+    "legal.firstRunTitle": "Ikke en app fra Apple",
     "legal.firstRunBody": "WPods er et uafhængigt open source-projekt. Det er ikke lavet, sponsoreret, anbefalet eller understøttet af Apple. AirPods og navnene på deres funktioner tilhører Apple Inc.; WPods bruger dem kun til at angive, hvad WPods fungerer med. WPods leveres uden nogen garanti: Du bruger appen på egen risiko.",
     "legal.adapterTitle": "Bluetooth-adapter",
     "legal.adapterBody": "WPods' baggrundstjeneste overtager din Bluetooth-adapter og giver den tilbage til Windows som en virtuel adapter via usbip-win2 af Vadym Hrynchyshyn, så alle dine Bluetooth-enheder bliver ved med at virke. Når du afinstallerer WPods, eller hvis det bliver ved med at mislykkes, går adapteren tilbage til Windows' egen driver.",

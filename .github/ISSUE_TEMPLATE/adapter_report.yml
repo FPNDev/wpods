@@ -1,6 +1,6 @@
 name: Bluetooth adapter report
 description: Tell us how WPods works with your Bluetooth adapter, good or bad.
-labels: ["adapter"]
+labels: ['adapter']
 body:
   - type: markdown
     attributes:
@@ -20,7 +20,7 @@ body:
     attributes:
       label: PC or motherboard model
       description: Optional. Helps when the adapter is built in.
-      placeholder: "Lenovo ThinkPad T14 Gen 3"
+      placeholder: 'Lenovo ThinkPad T14 Gen 3'
   - type: dropdown
     id: result
     attributes:
@@ -41,14 +41,14 @@ body:
     attributes:
       label: WPods and Windows version
       description: WPods version from its Windows settings page; Windows version from `winver`.
-      placeholder: "WPods 0.3.0, Windows 11 24H2 (OS Build 26100.2605)"
+      placeholder: 'WPods 0.3.0, Windows 11 24H2 (OS Build 26100.2605)'
     validations:
       required: true
   - type: input
     id: airpods
     attributes:
       label: AirPods model
-      placeholder: "AirPods 4 (ANC)"
+      placeholder: 'AirPods 4 (ANC)'
   - type: textarea
     id: logs
     attributes:

@@ -33,7 +33,7 @@
     "restart.confirm": "احفظ عملك أولاً. هل تريد إعادة التشغيل الآن؟",
     "restart.confirmRestart": "إعادة التشغيل",
     "restart.cancel": "إلغاء",
-    "legal.firstRunTitle":"ليس تطبيقًا من Apple",
+    "legal.firstRunTitle": "ليس تطبيقًا من Apple",
     "legal.firstRunBody": "WPods مشروع مستقل مفتوح المصدر، لم تصنعه Apple ولا ترعاه ولا تؤيده ولا تدعمه. إن AirPods وأسماء ميزاتها ملك لشركة Apple Inc.، ولا يستخدمها WPods إلا لبيان ما يعمل معه. يُقدَّم WPods دون أي ضمان: أنت تستخدمه على مسؤوليتك الخاصة.",
     "legal.adapterTitle": "محوّل Bluetooth",
     "legal.adapterBody": "تتولى خدمة WPods التي تعمل في الخلفية التحكم في محوّل Bluetooth لديك، ثم تعيده إلى Windows كمحوّل افتراضي عبر usbip-win2 من تطوير Vadym Hrynchyshyn، فتستمر جميع أجهزة Bluetooth لديك في العمل. وعند إلغاء تثبيت WPods، أو إذا تكرر فشل ذلك، يعود المحوّل إلى برنامج التشغيل الخاص بـ Windows.",

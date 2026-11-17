@@ -33,7 +33,7 @@
     "restart.confirm": "먼저 작업 내용을 저장하세요. 지금 다시 시작할까요?",
     "restart.confirmRestart": "다시 시작",
     "restart.cancel": "취소",
-    "legal.firstRunTitle":"Apple 앱이 아닙니다",
+    "legal.firstRunTitle": "Apple 앱이 아닙니다",
     "legal.firstRunBody": "WPods은 독립적인 오픈 소스 프로젝트이며, Apple이 제작, 후원, 승인 또는 지원하지 않습니다. AirPods 및 해당 기능의 이름은 Apple Inc.의 소유이며, WPods은 호환 대상을 밝히기 위해서만 이 이름을 사용합니다. WPods은 어떠한 보증도 없이 제공되며, WPods 사용에 따른 위험은 사용자 본인이 부담합니다.",
     "legal.adapterTitle": "Bluetooth 어댑터",
     "legal.adapterBody": "WPods 백그라운드 서비스가 Bluetooth 어댑터를 넘겨받은 뒤, Vadym Hrynchyshyn이 만든 usbip-win2를 통해 가상 어댑터로 Windows에 다시 제공하므로 모든 Bluetooth 기기를 그대로 사용할 수 있습니다. WPods을 제거하거나 이 과정이 계속 실패하면 어댑터는 Windows 기본 드라이버로 돌아갑니다.",
