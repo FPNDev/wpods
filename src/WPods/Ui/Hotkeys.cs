@@ -35,11 +35,14 @@ internal sealed class Hotkeys
 
     private const int FirstId = 100;
 
-    // Win+Alt+N and Win+Alt+V: Win combinations are rarely used by apps, so they seldom take over an app's own keys.
+    // Win+Alt combinations are rarely used by apps, so they seldom take over an app's own keys. Low latency gets one
+    // key for both Turn on and Turn off, so it toggles.
     private static readonly Dictionary<string, Shortcut> Defaults = new()
     {
         ["noise.cycle"] = new(0x4E, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
         ["mic.cycle"] = new(0x56, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
+        ["lowLatency.on"] = new(0x4C, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
+        ["lowLatency.off"] = new(0x4C, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
     };
 
     private static readonly Shortcut PopupShortcut = new(0x41, (int)(NativeUi.ModWin | NativeUi.ModShift));
