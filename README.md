@@ -3,13 +3,13 @@
 
 <h1 align="center">WPods</h1>
 
-<p align="center">A free, open-source app that brings your AirPods' features to Windows 11.</p>
+<p align="center">A free, open-source app that brings your AirPods' features to Windows 10 and 11.</p>
 
 <div align="center">
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/FPNDev/wpods)](https://github.com/FPNDev/wpods/releases/latest)
-![Windows 11 x64](https://img.shields.io/badge/Windows%2011-x64-0078D4)
+![Windows 10/11 x64](https://img.shields.io/badge/Windows%2010%2F11-x64-0078D4)
 
 </div>
 
@@ -184,27 +184,27 @@ Supports AirPods (1st, 2nd and 3rd gen), AirPods 4 and 4 (ANC), AirPods 5, AirPo
 
 There are other projects for AirPods on Windows and beyond. Here is how they line up.
 
-| Feature                                    | WPods        | [NTPods](https://github.com/arctumn/ntpods) (arctumn) | [NTPods](https://github.com/Ripthulhu/ntpods) (Ripthulhu fork) | [LibrePods](https://github.com/kavishdevar/librepods) | [MagicPods](https://magicpods.app/)  |
-| ------------------------------------------ | ------------ | ----------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------ |
-| Platforms                                  | Windows 11   | Windows 10/11                                         | Windows 11                                                     | Android, Linux                                        | Windows (+ Linux via Steam)          |
-| Price                                      | Free         | Free                                                  | Free                                                           | Free                                                  | Paid (trial)                         |
-| Open source                                | Yes, GPL-3.0 | Yes, GPL-3.0                                          | Yes, GPL-3.0                                                   | Yes, GPL-3.0                                          | No                                   |
-| Needs Test Mode                            | **No**       | Yes                                                   | Only for optional drivers                                      | No (Android: root on most devices)                    | Only for MagicAAP driver             |
-| Battery incl. case                         | Yes          | Yes                                                   | Yes                                                            | Yes                                                   | Yes                                  |
-| Ear detection                              | Yes          | Yes                                                   | Partial                                                        | Yes                                                   | Yes                                  |
-| Noise control incl. Adaptive               | Yes          | Yes                                                   | Yes                                                            | Yes                                                   | Yes (with MagicAAP)                  |
-| Conversation awareness                     | Yes          | Yes                                                   | Yes                                                            | Yes                                                   | Yes (with MagicAAP)                  |
-| Personalized Volume                        | Yes          | Yes                                                   | Yes                                                            | Yes (Android)                                         | Yes (with MagicAAP)                  |
-| Hearing Aid                                | Yes\*        | Experimental                                          | Experimental                                                   | Partial (Android, needs root)                         | No                                   |
-| Heart rate                                 | Yes (Pro 3)  | Yes (Pro 3)                                           | Yes                                                            | Experimental (Android)                                | No                                   |
-| Press-and-hold customization               | Yes          | No                                                    | Yes                                                            | Yes (Android)                                         | Yes (with MagicAAP)                  |
-| Stereo audio while mic is on               | Yes          | Yes                                                   | Yes                                                            | Experimental                                          | No                                   |
-| Mic noise-suppression modes (choose model) | Yes          | No                                                    | No                                                             | No                                                    | No                                   |
-| Voice enhancement                          | Yes          | No                                                    | No                                                             | No                                                    | No                                   |
-| Low-latency mode                           | Yes          | No                                                    | Yes                                                            | No                                                    | Yes                                  |
-| Nearby popup                               | Yes          | Yes                                                   | Yes                                                            | Yes (Android)                                         | Yes                                  |
-| Head gestures                              | No           | No                                                    | No                                                             | Yes (Android)                                         | No                                   |
-| Non-Apple earbuds                          | No           | Partial (Beats)                                       | Partial (Powerbeats Pro 2)                                     | No                                                    | Yes (Beats, Galaxy Buds, Sony, more) |
+| Feature                                    | WPods         | [NTPods](https://github.com/arctumn/ntpods) (arctumn) | [NTPods](https://github.com/Ripthulhu/ntpods) (Ripthulhu fork) | [LibrePods](https://github.com/kavishdevar/librepods) | [MagicPods](https://magicpods.app/)  |
+| ------------------------------------------ | ------------- | ----------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------ |
+| Platforms                                  | Windows 10/11 | Windows 10/11                                         | Windows 11                                                     | Android, Linux                                        | Windows (+ Linux via Steam)          |
+| Price                                      | Free          | Free                                                  | Free                                                           | Free                                                  | Paid (trial)                         |
+| Open source                                | Yes, GPL-3.0  | Yes, GPL-3.0                                          | Yes, GPL-3.0                                                   | Yes, GPL-3.0                                          | No                                   |
+| Needs Test Mode                            | **No**        | Yes                                                   | Only for optional drivers                                      | No (Android: root on most devices)                    | Only for MagicAAP driver             |
+| Battery incl. case                         | Yes           | Yes                                                   | Yes                                                            | Yes                                                   | Yes                                  |
+| Ear detection                              | Yes           | Yes                                                   | Partial                                                        | Yes                                                   | Yes                                  |
+| Noise control incl. Adaptive               | Yes           | Yes                                                   | Yes                                                            | Yes                                                   | Yes (with MagicAAP)                  |
+| Conversation awareness                     | Yes           | Yes                                                   | Yes                                                            | Yes                                                   | Yes (with MagicAAP)                  |
+| Personalized Volume                        | Yes           | Yes                                                   | Yes                                                            | Yes (Android)                                         | Yes (with MagicAAP)                  |
+| Hearing Aid                                | Yes\*         | Experimental                                          | Experimental                                                   | Partial (Android, needs root)                         | No                                   |
+| Heart rate                                 | Yes (Pro 3)   | Yes (Pro 3)                                           | Yes                                                            | Experimental (Android)                                | No                                   |
+| Press-and-hold customization               | Yes           | No                                                    | Yes                                                            | Yes (Android)                                         | Yes (with MagicAAP)                  |
+| Stereo audio while mic is on               | Yes           | Yes                                                   | Yes                                                            | Experimental                                          | No                                   |
+| Mic noise-suppression modes (choose model) | Yes           | No                                                    | No                                                             | No                                                    | No                                   |
+| Voice enhancement                          | Yes           | No                                                    | No                                                             | No                                                    | No                                   |
+| Low-latency mode                           | Yes           | No                                                    | Yes                                                            | No                                                    | Yes                                  |
+| Nearby popup                               | Yes           | Yes                                                   | Yes                                                            | Yes (Android)                                         | Yes                                  |
+| Head gestures                              | No            | No                                                    | No                                                             | Yes (Android)                                         | No                                   |
+| Non-Apple earbuds                          | No            | Partial (Beats)                                       | Partial (Powerbeats Pro 2)                                     | No                                                    | Yes (Beats, Galaxy Buds, Sony, more) |
 
 \* Tested on AirPods Pro 2 only so far. Needs hearing set up on an iPhone or iPad first. WPods turns Hearing Aid and Media Assist on and off; it doesn't change the hearing settings themselves. Tried it on other AirPods? Please [open an issue](https://github.com/FPNDev/wpods/issues).
 
@@ -214,7 +214,7 @@ Based on each project's README, website and source code as of 2026-10-26. If som
 
 ### Requirements
 
-- Windows 11, x64.
+- Windows 10 (version 2004 or later) or Windows 11, x64.
 - Administrator rights to install.
 - Internet during setup, if .NET 10 Desktop Runtime or Microsoft Edge WebView2 Runtime are missing. Setup downloads them and runs them only if they are signed by Microsoft.
 
