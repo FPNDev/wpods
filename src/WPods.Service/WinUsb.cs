@@ -57,15 +57,15 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
 
     /// <summary>
     /// Opened on one function of a combined device: descriptors show only its interfaces, renumbered from 0 in WinUSB
-    /// order, as a plain Bluetooth device (class E0/01/01).
+    /// order, as a composite device with the function's interface association, or else as a plain Bluetooth device.
     /// </summary>
     public bool IsFunction { get; private set; }
 
     // Function only: real interface number of each virtual one (index = virtual number = WinUSB interface order).
     private byte[] _realInterfaces = [];
 
-    /// <summary>The device's interface number for a virtual one (the same for a whole device).</summary>
-    public int RealInterface(int number) => IsFunction && number < _realInterfaces.Length ? _realInterfaces[number] : number;
+    // The device's interface number for a virtual one (the same for a whole device).
+    private int RealInterface(int number) => IsFunction && number < _realInterfaces.Length ? _realInterfaces[number] : number;
 
     /// <summary>
     /// String index of the serial given to an adapter without one. Not 0xEE: Windows reads that index on first
@@ -168,12 +168,22 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
         byte[] c = ConfigDescriptor;
         var o = new List<byte>(c.AsSpan(0, Math.Min(9, c.Length)).ToArray());
         int current = -1;
+        bool composite = false;
         for (int at = c[0]; at + 2 <= c.Length && c[at] > 0; at += c[at])
         {
             byte type = c[at + 1];
             if (type == 0x0B)
             {
-                continue; // interface association: the virtual device is a single function
+                // Interface association: this function's own is kept, so Windows enumerates the virtual device as the
+                // real one (composite, function &MI_00) and loads the same vendor driver.
+                if (_realInterfaces.Length > 1 && c[at + 2] == _realInterfaces[0])
+                {
+                    byte[] iad = c.AsSpan(at, Math.Min(c[at], c.Length - at)).ToArray();
+                    iad[2] = 0;
+                    o.AddRange(iad);
+                    composite = true;
+                }
+                continue;
             }
             if (type == 0x04)
             {
@@ -195,12 +205,20 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
         config[4] = (byte)_realInterfaces.Length;
         config[7] &= unchecked((byte)~0x20); // no remote wakeup over USB/IP
         ConfigDescriptor = config;
-        DeviceDescriptor[4] = 0xE0; // wireless controller / RF / Bluetooth programming interface
-        DeviceDescriptor[5] = 0x01;
+        if (composite)
+        {
+            DeviceDescriptor[4] = 0xEF; // miscellaneous / common class / interface association
+            DeviceDescriptor[5] = 0x02;
+        }
+        else
+        {
+            DeviceDescriptor[4] = 0xE0; // wireless controller / RF / Bluetooth programming interface
+            DeviceDescriptor[5] = 0x01;
+        }
         DeviceDescriptor[6] = 0x01;
         DeviceDescriptor[17] = 1;
         IsFunction = true;
-        Log.Info("usb", $"function of a combined device: interfaces {string.Join(",", _realInterfaces)} shown as 0..{_realInterfaces.Length - 1}");
+        Log.Info("usb", $"function of a combined device: interfaces {string.Join(",", _realInterfaces)} shown as 0..{_realInterfaces.Length - 1}{(composite ? ", composite" : "")}");
     }
 
     /// <summary>Win32 errors that mean the device is gone (unplugged, re-enumerated, or taken by another driver).</summary>
@@ -251,11 +269,27 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
         return 0;
     }
 
+    /// <summary>
+    /// Sends a control request through the handle of the interface it is for (WinUSB requires that): the interface in
+    /// wIndex (a virtual number, made the device's own) or the one with the endpoint in wIndex; else the first one.
+    /// </summary>
     public int Control(ulong setup, byte[] buffer, out uint got)
     {
+        nint iface = FirstInterface;
+        byte target = (byte)(setup >> 32);
+        switch (setup & 0x1F)
+        {
+            case 1 when target < _interfaces.Count:
+                iface = _interfaces[target];
+                setup = (setup & ~0x000000FF00000000UL) | ((ulong)RealInterface(target) << 32);
+                break;
+            case 2 when _pipes.TryGetValue(target, out nint owner):
+                iface = owner;
+                break;
+        }
         fixed (byte* b = buffer)
         {
-            return WinUsb_ControlTransfer(FirstInterface, setup, b, (uint)buffer.Length, out got, 0) ? 0 : Marshal.GetLastPInvokeError();
+            return WinUsb_ControlTransfer(iface, setup, b, (uint)buffer.Length, out got, 0) ? 0 : Marshal.GetLastPInvokeError();
         }
     }
 

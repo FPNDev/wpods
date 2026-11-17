@@ -59,6 +59,9 @@ internal sealed class RadioLink : IDisposable
     private long _configuredAt;
     private const long SetupMs = 30_000;
 
+    // MediaTek register requests could not go out in Linux form; control pipe worker only.
+    private bool _uhwFallback;
+
     /// <summary>
     /// Windows' driver reset the virtual adapter, so the real one must be reset too. Raised on the control pipe worker
     /// before the request is answered: handlers must return at once.
@@ -571,12 +574,33 @@ internal sealed class RadioLink : IDisposable
             return (0, (uint)part.Length, part);
         }
         ulong setup = BinaryPrimitives.ReadUInt64LittleEndian(sp);
-        if (_device.IsFunction && (rt & 0x1F) == 0x01)
-        {
-            // Interface requests: the virtual interface number becomes the device's own.
-            setup = (setup & ~0x000000FF00000000UL) | ((ulong)_device.RealInterface(index & 0xFF) << 32);
-        }
         byte[] buffer = u.In ? new byte[u.Length] : u.Data[8..];
+        if (u.Length == 4 && rt == (u.In ? 0xC2 : 0x42) && req == (u.In ? 0x01 : 0x02)
+            && !_device.TryGetPipeInterface((byte)index, out _))
+        {
+            // MediaTek register read/write over the USB hardware path ("UHW", register address in wValue:wIndex), which
+            // WinUSB cannot send to an endpoint that does not exist. MediaTek's Linux driver sends it as 0xDE/0x5E.
+            if (!_uhwFallback)
+            {
+                int le = _device.Control((setup & ~0xFFUL) | (u.In ? 0xDEUL : 0x5EUL), buffer, out uint lg);
+                if (le == 0)
+                {
+                    return (0, lg, u.In ? buffer[..(int)lg] : []);
+                }
+                if (WinUsbDevice.IsDeviceLost(le))
+                {
+                    NoteError(le);
+                    return (UsbIp.Errno(le), 0, []);
+                }
+                _uhwFallback = true;
+                Log.Warn("radio", $"MediaTek register request as 0x{(u.In ? 0xDE : 0x5E):X2} failed, Win32 error {le}: writes are dropped, reads use 0x63");
+            }
+            if (!u.In)
+            {
+                return (0, u.Length, []);
+            }
+            setup = (setup & ~0xFFFFUL) | 0x63C0; // plain register read, same address
+        }
         int e = _device.Control(setup, buffer, out uint got);
         if (e != 0 && rt == 0x80 && req == 0x06 && value == 0x0300 && _device.Serial is not null)
         {
