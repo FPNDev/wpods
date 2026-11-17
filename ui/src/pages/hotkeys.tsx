@@ -156,6 +156,10 @@ for (const g of GROUPS) {
 const settingOf = (action: HotkeyAction): string =>
   action.slice(0, action.indexOf('.'));
 
+// Same setting, or noise control with a mic mode (the AirPods' chime would hide the mic mode's sound).
+const clash = (a: string, b: string): boolean =>
+  a === b || (a === 'noise' && b === 'mic') || (a === 'mic' && b === 'noise');
+
 const actionName = (action: HotkeyAction): string => {
   const n = NAMES.get(action);
 
@@ -480,7 +484,7 @@ export const createHotkeys = (ctx: Ctx): Page => {
     const same: HotkeyAction[] = [];
     const others: HotkeyAction[] = [];
     for (const a of item.with) {
-      (settingOf(a) === setting ? same : others).push(a);
+      (clash(settingOf(a), setting) ? same : others).push(a);
     }
     switch (item.status) {
       case 'conflict':

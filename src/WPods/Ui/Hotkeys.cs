@@ -19,7 +19,7 @@ internal enum HotkeyStatus
 
 /// <summary>
 /// The hotkey actions and the registration of their shortcuts on the host window. An action id is "setting.verb";
-/// actions on different settings may share a shortcut and all run.
+/// actions on different settings may share a shortcut and all run, except noise control with a mic mode.
 /// </summary>
 internal sealed class Hotkeys
 {
@@ -110,9 +110,15 @@ internal sealed class Hotkeys
         }
         foreach ((Shortcut _, List<string> actions) in _actionsByShortcut)
         {
-            foreach (List<string> group in GroupBySetting(actions))
+            List<List<string>> groups = GroupBySetting(actions);
+            // Noise control and a mic mode on one shortcut clash too: the AirPods' chime would hide the mic mode's sound.
+            bool noiseAndMic = groups.Exists(g => SettingOf(g[0]) == "noise") && groups.Exists(g => SettingOf(g[0]) == "mic");
+            foreach (List<string> group in groups)
             {
-                HotkeyStatus status = group.Count == 1 ? HotkeyStatus.Ok : IsTogglePair(group) ? HotkeyStatus.Toggle : HotkeyStatus.Conflict;
+                HotkeyStatus status = noiseAndMic && SettingOf(group[0]) is "noise" or "mic" ? HotkeyStatus.Conflict
+                    : group.Count == 1 ? HotkeyStatus.Ok
+                    : IsTogglePair(group) ? HotkeyStatus.Toggle
+                    : HotkeyStatus.Conflict;
                 foreach (string action in group)
                 {
                     _status[action] = status;
