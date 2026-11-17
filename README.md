@@ -141,7 +141,10 @@ For the app:
 
 ### Hotkeys
 
+<details>
+<summary>See the full hotkeys screen</summary>
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hotkeys-dark.png"><img src="docs/screenshots/hotkeys-light.png" width="360" alt="WPods hotkeys page"></picture></p>
+</details>
 
 - Set your own keys in WPods' Windows settings page > Hotkeys. They work in any app, even when WPods is in the tray.
 - **Noise control:** next mode (the same modes as press and hold) or a key per mode. Press a mode's key again to go back to the mode you had before.
