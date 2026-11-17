@@ -166,7 +166,7 @@ For the app:
 
 ### First run
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/first-run-dark.png"><img src="docs/screenshots/first-run-light.png" width="360" alt="WPods welcome screen"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/first-run-dark.png?v=0.4.0"><img src="docs/screenshots/first-run-light.png?v=0.4.0" width="360" alt="WPods welcome screen"></picture></p>
 
 On first launch, WPods shows a short welcome with the terms and a note that it isn't made by Apple. You can find the legal page in the app at any time.
 
