@@ -48,7 +48,7 @@
 - **Voice enhancement.** Make your voice clearer and more even for calls.
 - **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid and Media Assist, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
 - **Nearby popup, like on iPhone.** When your AirPods are near and connected to another device, WPods shows them with their battery. One click to connect. Works with several pairs.
-- **Hotkeys that work anywhere.** Switch noise control and mic modes, or turn the mixer, low latency, Hearing Aid and more on and off, without leaving your game or call. A small notification and a soft sound confirm each change.
+- **Hotkeys that work anywhere.** Switch noise control and mic modes, or turn the mixer, low latency, Hearing Aid and more on and off, without leaving your game or call.
 - **Mixer.** Hear your own mic or any other audio device in your AirPods, each at its own volume, on top of everything else.
 - **Low audio latency mode** for games and calls. It keeps your AirPods' sound and mic awake, so game sounds don't arrive late and your voice comes through the moment you start talking.
 - **One installer does it all.** It installs .NET and WebView2 if missing, plus WPods' background service and usbip-win2. Works with Secure Boot on.
