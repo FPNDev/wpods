@@ -1,4 +1,4 @@
-<!-- release: v0.4.1 -->
+<!-- release: v0.4.2 -->
 <p align="center"><img src="docs/logo.png" width="128" alt="WPods logo"></p>
 
 <h1 align="center">WPods</h1>
