@@ -218,10 +218,12 @@ Based on each project's README, website and source code as of 2026-10-26. If som
 - Administrator rights to install.
 - Internet during setup, if .NET 10 Desktop Runtime or Microsoft Edge WebView2 Runtime are missing. Setup downloads them and runs them only if they are signed by Microsoft.
 
-### Tested on
+### Tested adapters
 
-- **AirPods:** AirPods Pro 2 and AirPods Pro 3.
-- **Bluetooth adapter:** Intel Wi-Fi 6E AX211 Bluetooth (USB ID 8087:0033).
+- **Intel Wi-Fi 6E AX211** (USB ID 8087:0033) - AirPods Pro 2 & 3 - tested by the maintainer
+- **Intel Wireless-AC 9460/9560** (USB ID 8087:0AAA) - AirPods Pro 2 - tested by [@KarlTaok](https://github.com/KarlTaok) ([report](https://github.com/FPNDev/wpods/issues/2))
+
+Thanks to everyone who provided adapter reports!
 
 Other AirPods models and other Bluetooth adapters (Realtek, MediaTek, Qualcomm, Broadcom and others) are supported but haven't been tested yet. On some PCs the Bluetooth adapter is one part of a combined USB device. WPods supports these too, but they haven't been tested yet either.
 
