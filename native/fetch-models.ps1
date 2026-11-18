@@ -8,7 +8,7 @@ $ProgressPreference = 'SilentlyContinue'
 . "$PSScriptRoot\common.ps1"
 
 $OrtVersion = '1.31.0'
-$OrtUrl = "https://github.com/microsoft/onnxruntime/releases/download/v$OrtVersion/onnxruntime-win-x64-$OrtVersion.zip"
+$OrtUrl = "https://registry.npmmirror.com/-/binary/onnxruntime/v$OrtVersion/onnxruntime-win-x64-$OrtVersion.zip"
 $OrtSha256 = '3958D8A44984160692C1B4FFD0DE3CB48F8C39F9D34BB31E433DB06E30B82195'
 
 $DpdfNet = 'https://huggingface.co/Ceva-IP/DPDFNet/resolve/dd6818d00f50c836fed43a6243ebe49116de5964/onnx'
