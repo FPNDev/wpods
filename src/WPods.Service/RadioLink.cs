@@ -59,8 +59,8 @@ internal sealed class RadioLink : IDisposable
     private long _configuredAt;
     private const long SetupMs = 30_000;
 
-    // MediaTek register requests could not go out in Linux form; control pipe worker only.
-    private bool _uhwFallback;
+    // MediaTek register requests were answered in place (logged once); control pipe worker only.
+    private bool _uhwLogged;
 
     /// <summary>
     /// Windows' driver reset the virtual adapter, so the real one must be reset too. Raised on the control pipe worker
@@ -96,26 +96,32 @@ internal sealed class RadioLink : IDisposable
 
     public void Dispose() => _client.Dispose();
 
-    // Interface 0 of a Bluetooth USB adapter: interrupt IN = HCI events, bulk IN/OUT = ACL data.
+    // The HCI interface is the first whose default setting has an interrupt IN (HCI events, the first one) and bulk IN
+    // and OUT pipes (ACL data): interface 0, or 2 on Apple adapters with keyboard and mouse interfaces first.
     private static (byte Events, byte AclIn, byte AclOut) FindHciPipes(byte[] c)
     {
-        byte events = 0x81;
-        byte aclIn = 0x82;
-        byte aclOut = 0x02;
-        bool inInterface0 = false;
+        byte events = 0;
+        byte aclIn = 0;
+        byte aclOut = 0;
+        bool inDefault = false;
         for (int at = 0; at + 2 <= c.Length && c[at] > 0; at += c[at])
         {
             if (c[at + 1] == 4 && at + 4 <= c.Length)
             {
-                inInterface0 = c[at + 2] == 0 && c[at + 3] == 0;
+                if (events != 0 && aclIn != 0 && aclOut != 0)
+                {
+                    break;
+                }
+                inDefault = c[at + 3] == 0;
+                events = aclIn = aclOut = 0;
             }
-            else if (c[at + 1] == 5 && inInterface0 && at + 4 <= c.Length)
+            else if (c[at + 1] == 5 && inDefault && at + 4 <= c.Length)
             {
                 byte address = c[at + 2];
                 int type = c[at + 3] & 3;
                 if (type == 3 && (address & 0x80) != 0)
                 {
-                    events = address;
+                    events = events == 0 ? address : events;
                 }
                 else if (type == 2 && (address & 0x80) != 0)
                 {
@@ -127,7 +133,7 @@ internal sealed class RadioLink : IDisposable
                 }
             }
         }
-        return (events, aclIn, aclOut);
+        return events != 0 && aclIn != 0 && aclOut != 0 ? (events, aclIn, aclOut) : ((byte)0x81, (byte)0x82, (byte)0x02);
     }
 
     private void Loop()
@@ -561,14 +567,14 @@ internal sealed class RadioLink : IDisposable
             return (0, 0, []);
         }
         if (rt == 0x80 && req == 0x06 && ((value >> 8) == 1 || ((value >> 8) == 2 && _device.IsFunction)
-            || (value == (0x0300 | WinUsbDevice.SerialIndex) && _device.Serial is not null)))
+            || value == (0x0300 | WinUsbDevice.SerialIndex)))
         {
             // Device descriptor (with our serial index), a combined device's function configuration, our serial string.
             byte[] d = (value >> 8) switch
             {
                 1 => _device.DeviceDescriptor,
                 2 => _device.ConfigDescriptor,
-                _ => UsbIp.StringDescriptor(_device.Serial!),
+                _ => UsbIp.StringDescriptor(_device.Serial),
             };
             byte[] part = d[..Math.Min(d.Length, (int)u.Length)];
             return (0, (uint)part.Length, part);
@@ -578,31 +584,22 @@ internal sealed class RadioLink : IDisposable
         if (u.Length == 4 && rt == (u.In ? 0xC2 : 0x42) && req == (u.In ? 0x01 : 0x02)
             && !_device.TryGetPipeInterface((byte)index, out _))
         {
-            // MediaTek register read/write over the USB hardware path ("UHW", register address in wValue:wIndex), which
-            // WinUSB cannot send to an endpoint that does not exist. MediaTek's Linux driver sends it as 0xDE/0x5E.
-            if (!_uhwFallback)
+            // MediaTek register read/write over the USB hardware path (address in wValue:wIndex), sent to an endpoint
+            // that does not exist, which WinUSB refuses for most addresses: writes are dropped, reads use the plain
+            // register read of the same address.
+            if (!_uhwLogged)
             {
-                int le = _device.Control((setup & ~0xFFUL) | (u.In ? 0xDEUL : 0x5EUL), buffer, out uint lg);
-                if (le == 0)
-                {
-                    return (0, lg, u.In ? buffer[..(int)lg] : []);
-                }
-                if (WinUsbDevice.IsDeviceLost(le))
-                {
-                    NoteError(le);
-                    return (UsbIp.Errno(le), 0, []);
-                }
-                _uhwFallback = true;
-                Log.Warn("radio", $"MediaTek register request as 0x{(u.In ? 0xDE : 0x5E):X2} failed, Win32 error {le}: writes are dropped, reads use 0x63");
+                _uhwLogged = true;
+                Log.Info("radio", "MediaTek register requests: writes are dropped, reads use 0x63");
             }
             if (!u.In)
             {
                 return (0, u.Length, []);
             }
-            setup = (setup & ~0xFFFFUL) | 0x63C0; // plain register read, same address
+            setup = (setup & ~0xFFFFUL) | 0x63C0;
         }
         int e = _device.Control(setup, buffer, out uint got);
-        if (e != 0 && rt == 0x80 && req == 0x06 && value == 0x0300 && _device.Serial is not null)
+        if (e != 0 && rt == 0x80 && req == 0x06 && value == 0x0300)
         {
             // An adapter without any strings has no language list either; ours (English) makes the serial readable.
             byte[] part = UsbIp.EnglishLanguages[..Math.Min(4, (int)u.Length)];

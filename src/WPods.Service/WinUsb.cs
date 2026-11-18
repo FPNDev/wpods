@@ -57,27 +57,25 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
 
     /// <summary>
     /// Opened on one function of a combined device: descriptors show only its interfaces, renumbered from 0 in WinUSB
-    /// order, as a composite device with the function's interface association, or else as a plain Bluetooth device.
+    /// order, as a composite device with one Bluetooth function when it has several, else as a plain Bluetooth device.
     /// </summary>
     public bool IsFunction { get; private set; }
 
     // Function only: real interface number of each virtual one (index = virtual number = WinUSB interface order).
     private byte[] _realInterfaces = [];
 
-    // The device's interface number for a virtual one (the same for a whole device).
-    private int RealInterface(int number) => IsFunction && number < _realInterfaces.Length ? _realInterfaces[number] : number;
-
     /// <summary>
-    /// String index of the serial given to an adapter without one. Not 0xEE: Windows reads that index on first
-    /// enumeration for a Microsoft OS descriptor, and anything else there fails the enumeration.
+    /// String index of the virtual adapter's serial. Not 0xEE: Windows reads that index on first enumeration for a
+    /// Microsoft OS descriptor, and anything else there fails the enumeration.
     /// </summary>
     public const byte SerialIndex = 0xE0;
 
     /// <summary>
-    /// Serial shown when the real adapter has none (else null). Windows then names the adapter by it, not by its
-    /// usbip-win2 port, so its devices, audio endpoints and their settings keep their IDs on any port.
+    /// The virtual adapter's serial, never the real one's: many models give every unit the same serial, and the real
+    /// adapter stays present with it. Windows names the adapter by it, not by its usbip-win2 port, so its devices,
+    /// audio endpoints and their settings keep their IDs on any port.
     /// </summary>
-    public string? Serial { get; private set; }
+    public string Serial { get; private set; } = "";
 
     public static WinUsbDevice Open(string path, bool function, string serial)
     {
@@ -137,11 +135,8 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
             {
                 BinaryPrimitives.WriteUInt16LittleEndian(dev.DeviceDescriptor.AsSpan(2), 0x0200);
             }
-            if (dev.DeviceDescriptor[16] == 0)
-            {
-                dev.DeviceDescriptor[16] = SerialIndex;
-                dev.Serial = serial;
-            }
+            dev.DeviceDescriptor[16] = SerialIndex;
+            dev.Serial = serial;
             dev.MapPipes();
             return dev;
         }
@@ -167,22 +162,20 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
         _realInterfaces = [.. numbers];
         byte[] c = ConfigDescriptor;
         var o = new List<byte>(c.AsSpan(0, Math.Min(9, c.Length)).ToArray());
+        // usbccgp leaves the interface association out of a function's configuration: one of several interfaces gets a
+        // Bluetooth one back, so Windows enumerates it as composite with function MI_00 (as MediaTek's INF expects),
+        // and a renumbered one (Apple's MI_02) gets Windows' own driver.
+        bool composite = _realInterfaces.Length > 1;
+        if (composite)
+        {
+            o.AddRange([8, 0x0B, 0, (byte)_realInterfaces.Length, 0xE0, 0x01, 0x01, 0]);
+        }
         int current = -1;
-        bool composite = false;
         for (int at = c[0]; at + 2 <= c.Length && c[at] > 0; at += c[at])
         {
             byte type = c[at + 1];
             if (type == 0x0B)
             {
-                // Interface association: this function's own is kept, so Windows enumerates the virtual device as the
-                // real one (composite, function &MI_00) and loads the same vendor driver.
-                if (_realInterfaces.Length > 1 && c[at + 2] == _realInterfaces[0])
-                {
-                    byte[] iad = c.AsSpan(at, Math.Min(c[at], c.Length - at)).ToArray();
-                    iad[2] = 0;
-                    o.AddRange(iad);
-                    composite = true;
-                }
                 continue;
             }
             if (type == 0x04)
@@ -270,23 +263,13 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
     }
 
     /// <summary>
-    /// Sends a control request through the handle of the interface it is for (WinUSB requires that): the interface in
-    /// wIndex (a virtual number, made the device's own) or the one with the endpoint in wIndex; else the first one.
+    /// Sends a control request; one for an interface goes through that interface's handle, as WinUSB puts the handle's
+    /// interface number (the device's own) into wIndex.
     /// </summary>
     public int Control(ulong setup, byte[] buffer, out uint got)
     {
-        nint iface = FirstInterface;
         byte target = (byte)(setup >> 32);
-        switch (setup & 0x1F)
-        {
-            case 1 when target < _interfaces.Count:
-                iface = _interfaces[target];
-                setup = (setup & ~0x000000FF00000000UL) | ((ulong)RealInterface(target) << 32);
-                break;
-            case 2 when _pipes.TryGetValue(target, out nint owner):
-                iface = owner;
-                break;
-        }
+        nint iface = (setup & 0x1F) == 1 && target < _interfaces.Count ? _interfaces[target] : FirstInterface;
         fixed (byte* b = buffer)
         {
             return WinUsb_ControlTransfer(iface, setup, b, (uint)buffer.Length, out got, 0) ? 0 : Marshal.GetLastPInvokeError();

@@ -15,6 +15,8 @@ internal sealed class Engine
     // After a wake: how long the adapter is watched for lost state, and how long a command may wait for its answer.
     private static readonly TimeSpan ResumeWatch = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan UnansweredLimit = TimeSpan.FromSeconds(3);
+    // Bluetooth company ID of Realtek Semiconductor.
+    private const ushort RealtekManufacturer = 0x005D;
 
     private readonly HciProxy _hci = new();
     private readonly CancellationTokenSource _stop = new();
@@ -324,7 +326,7 @@ internal sealed class Engine
     }
 
     /// <summary>
-    /// After a wake, re-plugs the virtual adapter only if the adapter lost its firmware (Realtek can on suspend):
+    /// After a wake, re-plugs the virtual adapter: always for a Realtek one, else only if the adapter lost its firmware:
     /// commands go unanswered, or it reports a hardware error or another firmware version.
     /// </summary>
     public void OnResume()
@@ -336,6 +338,15 @@ internal sealed class Engine
         if (Volatile.Read(ref _link) is not { } watched)
         {
             Log.Info("engine", "resumed from sleep: no session running");
+            return;
+        }
+        if (_hci.Manufacturer == RealtekManufacturer)
+        {
+            // Realtek controllers drop their firmware in sleep unless armed for remote wake, which WinUSB does not do,
+            // and still answer from ROM: Realtek's driver loads it again on a fresh virtual adapter.
+            Log.Info("engine", "resumed from sleep: Realtek adapter, plugging the virtual adapter in again");
+            _resumeRestart = true;
+            watched.Dispose();
             return;
         }
         Log.Info("engine", $"resumed from sleep: watching the adapter for {ResumeWatch.TotalSeconds:F0} s");
@@ -657,22 +668,19 @@ internal sealed class Engine
         int port;
         try
         {
-            if (device.Serial is { } serial)
+            // Forget hidden audio nodes of virtual adapters with another serial; this one's carry the audio endpoints
+            // and their settings.
+            int stale = 0;
+            foreach (string other in RadioDriver.OtherInstances(id))
             {
-                // Forget hidden audio nodes of virtual adapters with another serial; this one's carry the audio
-                // endpoints and their settings.
-                int stale = 0;
-                foreach (string other in RadioDriver.OtherInstances(id))
+                if (!other.EndsWith(@"\" + device.Serial, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (!other.EndsWith(@"\" + serial, StringComparison.OrdinalIgnoreCase))
-                    {
-                        stale += RadioDriver.ForgetHiddenSubtree(other, includeRoot: false, audioOnly: true);
-                    }
+                    stale += RadioDriver.ForgetHiddenSubtree(other, includeRoot: false, audioOnly: true);
                 }
-                if (stale > 0)
-                {
-                    Log.Info("radio", $"forgot {stale} hidden audio device nodes of older virtual adapters");
-                }
+            }
+            if (stale > 0)
+            {
+                Log.Info("radio", $"forgot {stale} hidden audio device nodes of older virtual adapters");
             }
             _server ??= new UsbIpServer();
             bus = NextBusId();

@@ -98,6 +98,18 @@ internal sealed class HciProxy
         }
     }
 
+    /// <summary>The controller's Bluetooth company ID from its last Read_Local_Version answer; null before one.</summary>
+    public ushort? Manufacturer
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _localVersion is { } v ? BinaryPrimitives.ReadUInt16LittleEndian(v.AsSpan(4)) : null;
+            }
+        }
+    }
+
     /// <summary>How long Windows' last HCI command has waited for its answer (0 when answered).</summary>
     public long UnansweredMs
     {
@@ -114,6 +126,8 @@ internal sealed class HciProxy
         lock (_gate)
         {
             _send = send;
+            // The next session may run another adapter.
+            _localVersion = null;
             ResetLocked(send is null ? "radio detached" : "radio attached", dropQueued: true);
         }
         // A command sent to the previous radio will never be answered.
