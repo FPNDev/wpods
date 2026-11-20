@@ -1,7 +1,8 @@
 # One-time update step for AirPods without the stereo mic stream (AirPods 1-3, Pro 1, Max 1), run by Setup between
 # stopping and starting the service when it updates a WPods older than 0.4.3: turns their saved "Disable Hands-Free
-# mode" off (it was the old default) and removes the WPods mic WPods made for them. Touches only those pairs'
-# entries in WPods' own settings and registry values, and only non-present devnodes with their WPods mic serial.
+# mode" off (it was the old default), moves a default (Standard) mic mode to Wide Spectrum for their HD voice mic, and
+# removes the WPods mic WPods made for them. Touches only those pairs' entries in WPods' own settings and registry
+# values, and only non-present devnodes with their WPods mic serial.
 param(
     [Parameter(Mandatory)][string]$PreviousVersion
 )
@@ -59,29 +60,32 @@ if ($pairs.Count -eq 0) {
 }
 Write-Host ('AirPods without the stereo mic: ' + (($pairs.GetEnumerator() | ForEach-Object { "$($_.Key) ($($_.Value))" }) -join ', '))
 
-# 1. Saved "Disable Hands-Free mode" on -> off. A text edit of that one value keeps everything else as it is; the
-#    record's first property is disableHandsFree (HostSettings), so the pattern matches only the "devices" entry.
+# 1. Saved "Disable Hands-Free mode" on -> off, mic mode Standard (or its legacy names) -> Wide Spectrum. Text edits
+#    of those values keep everything else as it is; the record's first property is disableHandsFree (HostSettings) and
+#    it holds no nested object, so the patterns match only the "devices" entry.
 $utf8 = New-Object System.Text.UTF8Encoding $false
+$defaultMode = '^(standard|voiceiso1|voiceiso2)$'
 foreach ($file in $settingsFiles) {
     try {
         $text = [IO.File]::ReadAllText($file)
         $changed = $text
         foreach ($address in $pairs.Keys) {
             $changed = $changed -replace ('("' + $address + '"\s*:\s*\{\s*"disableHandsFree"\s*:\s*)true\b'), '${1}false'
+            $changed = $changed -replace ('(?i)("' + $address + '"\s*:\s*\{[^{}]*?"micMode"\s*:\s*)"(standard|voiceiso1|voiceiso2)"'), '${1}"WideSpectrum"'
         }
         if ($changed -eq $text) {
             continue
         }
         $devices = ($changed | ConvertFrom-Json).devices
         foreach ($address in $pairs.Keys) {
-            if ($devices.$address -and $devices.$address.disableHandsFree) {
+            if ($devices.$address -and ($devices.$address.disableHandsFree -or $devices.$address.micMode -match $defaultMode)) {
                 throw "edit check failed for $address"
             }
         }
         $temp = "$file.tmp"
         [IO.File]::WriteAllText($temp, $changed, $utf8)
         [IO.File]::Replace($temp, $file, "$file.bak-0.4.3")
-        Write-Host "Hands-Free mode back on by default in $file (backup: $file.bak-0.4.3)"
+        Write-Host "Hands-Free mode back on and Wide Spectrum by default in $file (backup: $file.bak-0.4.3)"
     } catch {
         Write-Host "left $file unchanged: $_"
         Remove-Item -LiteralPath "$file.tmp" -ErrorAction Ignore

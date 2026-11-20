@@ -54,12 +54,6 @@ internal sealed class Engine
     public Engine()
     {
         _hci.HdVoiceOn = HdVoiceOn;
-        _hci.VoiceCodecOrder = HdVoiceCodecs;
-        _hci.ErroneousDataReporting = static () =>
-        {
-            using RegistryKey? key = Registry.LocalMachine.OpenSubKey(RadioDriver.StateKey);
-            return key?.GetValue("HdVoiceErroneousData") is 1;
-        };
         _status = new StatusPipeServer(this);
         _micPipe = new MicPipeServer(this);
         _aapPipe = new AapPipeServer(_hci);
@@ -465,21 +459,6 @@ internal sealed class Engine
         return key?.GetValue($"{address:X12}") is 1;
     }
 
-    // Test switch (REG_SZ HdVoiceCodecs, e.g. "128,129"): the HFP codecs HD voice tries, in order.
-    private static int[] HdVoiceCodecs()
-    {
-        using RegistryKey? key = Registry.LocalMachine.OpenSubKey(RadioDriver.StateKey);
-        string? list = key?.GetValue("HdVoiceCodecs") as string;
-        var codecs = new List<int>();
-        foreach (string id in list?.Split(',') ?? [])
-        {
-            if (int.TryParse(id, out int codec))
-            {
-                codecs.Add(codec);
-            }
-        }
-        return [.. codecs];
-    }
 
     public void SetHdVoice(ulong address, bool on)
     {

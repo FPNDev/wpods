@@ -376,7 +376,8 @@ public sealed class ConnectionManager : IAsyncDisposable
         }
     }
 
-    // A pair without the stereo mic stream keeps Hands-Free by default: it is its only mic.
+    // A pair without the stereo mic stream keeps Hands-Free by default (its only mic without HD voice), and its HD voice
+    // mic starts in Wide Spectrum.
     private void SeedHostSettings(ulong address, string? modelNumber)
     {
         if (Models.HasStereoMic(modelNumber))
@@ -385,7 +386,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         }
         try
         {
-            Settings.SetIfMissing(address, HostSettings.Default with { DisableHandsFree = false });
+            Settings.SetIfMissing(address, HostSettings.Default with { DisableHandsFree = false, MicMode = MicMode.WideSpectrum });
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

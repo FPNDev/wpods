@@ -56,10 +56,11 @@ internal sealed partial class HciProxy
     private static readonly VoiceAttempt[] VoiceAttempts =
     [
         new(127, 0x1F40, 0xFFFF, 0x0003, 0xFF, 0x003F),
-        new(128, 0x1F40, 0xFFFF, 0x0003, 0xFF, 0x003F),
-        new(128, 0x3E80, 0xFFFF, 0x0003, 0xFF, 0x003F),
-        new(129, 0x1F40, 0xFFFF, 0x0003, 0xFF, 0x003F),
-        new(129, 0x3E80, 0xFFFF, 0x0003, 0xFF, 0x003F),
+        // AAC-ELD (128, 129) is off until its 180-byte packets come through an adapter and its framing is known.
+        // new(128, 0x1F40, 0xFFFF, 0x0003, 0xFF, 0x003F),
+        // new(128, 0x3E80, 0xFFFF, 0x0003, 0xFF, 0x003F),
+        // new(129, 0x1F40, 0xFFFF, 0x0003, 0xFF, 0x003F),
+        // new(129, 0x3E80, 0xFFFF, 0x0003, 0xFF, 0x003F),
         new(256, 0x1F40, 0xFFFF, 0x0003, 0xFF, 0x003F),
         new(2, 0x1F40, 0x000D, 0x0003, 0x02, 0x0380),
         new(2, 0x1F40, 0x0008, 0x0003, 0x02, 0x03C8),
@@ -81,14 +82,6 @@ internal sealed partial class HciProxy
     /// <summary>HD voice is on for the pair (set by the engine).</summary>
     public Func<ulong, bool> HdVoiceOn { get; set; } = static _ => false;
 
-    /// <summary>Codecs to try instead of the default order; empty for the default (set by the engine).</summary>
-    public Func<int[]> VoiceCodecOrder { get; set; } = static () => [];
-
-    /// <summary>Test switch: turn on the controller's erroneous data reporting before the first voice link.</summary>
-    public Func<bool> ErroneousDataReporting { get; set; } = static () => false;
-
-    private bool _erroneousDataSent;
-
     /// <summary>Our voice link came up (its info) or went down (null). Raised under the proxy lock; return at once.</summary>
     public event Action<VoiceLinkInfo?>? VoiceLinkChanged;
 
@@ -101,7 +94,6 @@ internal sealed partial class HciProxy
         lock (_gate)
         {
             _sendCommand = send;
-            _erroneousDataSent = false;
             Volatile.Write(ref _ownOpcode, 0);
         }
     }
@@ -306,28 +298,18 @@ internal sealed partial class HciProxy
             ch.SendVoiceState(2, 0, 0, 0, 0);
             return;
         }
+        // CVSD is mandatory for every Hands-Free device, the others only when the AirPods listed them.
         var attempts = new List<VoiceAttempt>();
-        // Test switch: HdVoiceCodecs (e.g. "128,129") tries only those codecs, in that order.
-        int[] order = VoiceCodecOrder() is { Length: > 0 } wanted ? wanted : [.. VoiceAttempts.Select(a => a.Codec).Distinct()];
-        foreach (int codec in order)
+        foreach (VoiceAttempt a in VoiceAttempts)
         {
-            foreach (VoiceAttempt a in VoiceAttempts)
+            if (a.Codec == 1 || ag.Codecs.Contains(a.Codec))
             {
-                if (a.Codec == codec && (codec == 1 || ag.Codecs.Contains(codec)))
-                {
-                    attempts.Add(a);
-                }
+                attempts.Add(a);
             }
         }
         var v = new VoiceLink(ch, attempts);
         link.Voice = v;
         _voiceLink = link;
-        if (!_erroneousDataSent && ErroneousDataReporting())
-        {
-            // Test switch: SCO packets then carry the controller's packet status (lost, partly lost), logged per link.
-            _erroneousDataSent = true;
-            SendOwnCommandLocked([0x5B, 0x0C, 0x01, 0x01]);
-        }
         Log.Info("hfp", $"{link.Address:X12}: starting the voice link, trying codecs {string.Join(",", attempts.Select(a => a.Codec).Distinct())}");
         if (HoldA2dpLocked(link))
         {
@@ -571,10 +553,6 @@ internal sealed partial class HciProxy
 
     private void OnOwnStatusLocked(int opcode, byte status)
     {
-        if (opcode == 0x0C5B)
-        {
-            Log.Info("hfp", $"erroneous data reporting on: status 0x{status:X2}");
-        }
         if (_voiceLink is not { Voice: { } v } link || status == 0)
         {
             return;

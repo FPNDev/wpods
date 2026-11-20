@@ -48,8 +48,6 @@ internal sealed class ServiceStatus : IDisposable
     private const int MaxBackoffShift = 6; // 1 s up to 64 s
     private const string GuardKey = @"SOFTWARE\WPods\Service";
     private const string GuardValue = "GuardTripped";
-    // Hidden test switch: HD voice is offered for models with the stereo mic stream too.
-    private static readonly bool HdVoiceAnyModel = Flag("HdVoiceAnyModel");
 
     private readonly Lock _lock = new();
     // HD voice per pair as last set; sent again after every connect, as the pipe may have been closed meanwhile.
@@ -82,8 +80,8 @@ internal sealed class ServiceStatus : IDisposable
 
     public void UpdateNow() => Send([ServicePipes.UpdateNowMessage], "update now");
 
-    /// <summary>HD voice is offered for models without the stereo mic stream, or for any model with the test switch.</summary>
-    public static bool HdVoiceAllowed(string? modelNumber) => !Models.HasStereoMic(modelNumber) || HdVoiceAnyModel;
+    /// <summary>HD voice is offered for models without the stereo mic stream.</summary>
+    public static bool HdVoiceAllowed(string? modelNumber) => !Models.HasStereoMic(modelNumber);
 
     /// <summary>Tells the service to run Hands-Free itself for the pair (on) or not; it keeps the choice.</summary>
     public void SetHdVoice(ulong address, bool on)

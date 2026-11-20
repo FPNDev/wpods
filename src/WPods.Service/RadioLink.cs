@@ -904,6 +904,8 @@ internal sealed class RadioLink : IDisposable
     private int _voicePacketHave;
     private int _voiceRemaining;
     private int _voiceFailures;
+    // CVSD: the OUT stream's lead of silence goes with its first write (set under _isoLock).
+    private bool _voiceLeadDue;
     // Per voice link: SCO packets by packet status flag (0 good, 1 possibly invalid, 2 no data, 3 partly lost) and bytes.
     private readonly long[] _voiceStatus = new long[4];
     private long _voiceBytes;
@@ -1003,24 +1005,26 @@ internal sealed class RadioLink : IDisposable
         _voiceFailures = 0;
         Array.Clear(_voiceStatus);
         _voiceBytes = 0;
+        _voiceLeadDue = !info.Transparent;
         Log.Info("radio", $"voice link 0x{info.Handle:X3}: interface {index} alt {alt}, pipes 0x{inPipe:X2}/0x{outPipe:X2}");
         for (int i = 0; i < (info.Transparent ? TransparentUrbs : CvsdUrbs); i++)
         {
             _voiceIn.Submit(new Urb { Pipe = inPipe, In = true, Internal = true, Packets = info.Transparent ? TransparentFrames : CvsdFrames });
         }
-        if (!info.Transparent)
+    }
+
+    // CVSD's PCM fills every frame: the OUT stream's first write starts with CvsdLeadPackets of silence, so each later
+    // completion's packets join it before it runs dry.
+    private void AddCvsdLead(List<byte> downlink, int handle)
+    {
+        var lead = new byte[CvsdLeadPackets * (3 + CvsdPacketBytes)];
+        for (int at = 0; at < lead.Length; at += 3 + CvsdPacketBytes)
         {
-            // CVSD's PCM fills every frame: the OUT stream starts CvsdLeadPackets of silence ahead, so each completion's
-            // packets join it before it runs dry.
-            byte[] lead = new byte[CvsdLeadPackets * (3 + CvsdPacketBytes)];
-            for (int at = 0; at < lead.Length; at += 3 + CvsdPacketBytes)
-            {
-                lead[at] = (byte)info.Handle;
-                lead[at + 1] = (byte)(info.Handle >> 8);
-                lead[at + 2] = CvsdPacketBytes;
-            }
-            _voiceOut.Submit(new Urb { Pipe = outPipe, In = false, Internal = true, Data = lead, Packets = CvsdLeadPackets });
+            lead[at] = (byte)handle;
+            lead[at + 1] = (byte)(handle >> 8);
+            lead[at + 2] = CvsdPacketBytes;
         }
+        downlink.InsertRange(0, lead);
     }
 
     // Call audio is the interface after the HCI one: 1, or 3 on Apple adapters with keyboard and mouse first.
@@ -1146,6 +1150,12 @@ internal sealed class RadioLink : IDisposable
             }
             if (count > 0 && _voiceOut is { } outPipe)
             {
+                if (_voiceLeadDue)
+                {
+                    _voiceLeadDue = false;
+                    AddCvsdLead(downlink, voice.Handle);
+                    count += CvsdLeadPackets;
+                }
                 outPipe.Submit(new Urb { Pipe = (byte)(u.Pipe & 0x7F), In = false, Internal = true, Data = [.. downlink], Packets = count });
             }
             inPipe.Submit(new Urb { Pipe = u.Pipe, In = true, Internal = true, Packets = u.Packets });

@@ -254,7 +254,11 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     setHidden(handsFreeSpin, !applying);
     setHidden(hdVoice.row, !hdVoiceOffered);
     renderHost(hdVoice, d.host.hdVoice, locked || applying);
-    setHidden(handsFreeNoteRow, !caps.has('noStereoMic') || hdVoiceOn);
+    // Only while Hands-Free mode is off and nothing else carries the mic.
+    setHidden(
+      handsFreeNoteRow,
+      !caps.has('noStereoMic') || hdVoiceOn || !d.host.disableHandsFree,
+    );
     renderHost(latency, d.host.lowLatency, locked);
     setHidden(latencyNote, !d.host.lowLatency);
     setChecked(startup.input, store.startup);
