@@ -772,7 +772,6 @@ public sealed class SettingsStore
                 _devices[address] = new HostSettings
                 {
                     DisableHandsFree = record.DisableHandsFreeMode ?? true,
-                    LowLatency = record.LowLatencyMode ?? false,
                     LowLatencyMic = record.LowLatencyMode ?? false,
                     MicMode = record.MicMode == "noiseCancelling" ? MicMode.VoiceIsolation : MicMode.Standard,
                 };
