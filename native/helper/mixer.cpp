@@ -384,6 +384,22 @@ bool container_of(IPropertyStore* properties, GUID& containerId)
     return found;
 }
 
+// The endpoint's KS filter (its device interface path, lowercase), or empty when it has none (not present).
+std::wstring filter_of(IMMDevice* endpoint)
+{
+    winrt::com_ptr<IDeviceTopology> topology;
+    winrt::com_ptr<IConnector> connector;
+    wchar_t* filterId = nullptr;
+    if (FAILED(endpoint->Activate(__uuidof(IDeviceTopology), CLSCTX_ALL, nullptr, topology.put_void())) ||
+        FAILED(topology->GetConnector(0, connector.put())) || FAILED(connector->GetDeviceIdConnectedTo(&filterId))) {
+        return {};
+    }
+    std::wstring filter = filterId;
+    CoTaskMemFree(filterId);
+    _wcslwr_s(filter.data(), filter.size() + 1);
+    return filter;
+}
+
 // The paired device's ACTIVE endpoint of this flow whose KS filter is Hands-Free (BTHHFENUM) or A2DP (BTHENUM), or
 // null.
 winrt::com_ptr<IMMDevice> find_pair_endpoint(IMMDeviceEnumerator* enumerator, uint64_t address, EDataFlow flow, bool handsFree)
@@ -404,16 +420,7 @@ winrt::com_ptr<IMMDevice> find_pair_endpoint(IMMDeviceEnumerator* enumerator, ui
             !container_of(properties.get(), endpointContainer) || endpointContainer != containerId) {
             continue;
         }
-        winrt::com_ptr<IDeviceTopology> topology;
-        winrt::com_ptr<IConnector> connector;
-        wchar_t* filterId = nullptr;
-        if (FAILED(endpoint->Activate(__uuidof(IDeviceTopology), CLSCTX_ALL, nullptr, topology.put_void())) ||
-            FAILED(topology->GetConnector(0, connector.put())) || FAILED(connector->GetDeviceIdConnectedTo(&filterId))) {
-            continue;
-        }
-        std::wstring filter = filterId;
-        CoTaskMemFree(filterId);
-        _wcslwr_s(filter.data(), filter.size() + 1);
+        std::wstring const filter = filter_of(endpoint.get());
         // "bthenum" is no substring of "bthhfenum".
         if (filter.find(handsFree ? L"\\\\?\\bthhfenum" : L"\\\\?\\bthenum") != std::wstring::npos) {
             return endpoint;
@@ -455,10 +462,15 @@ bool has_hardware_id(DEVINST node, wchar_t const* hardwareId)
     return false;
 }
 
-// True when the endpoint's devnode (SWD\MMDEVAPI\<endpoint ID>) has the WPods virtual mic's devnode among its
-// ancestors. A non-present devnode has no Parent, only LastKnownParent.
-bool is_own_mic(wchar_t const* endpointId)
+// True when the endpoint is the WPods virtual mic's: its KS filter is on the mic's USB device, known as soon as
+// Windows lists a new endpoint; else (not present) its devnode (SWD\MMDEVAPI\<endpoint ID>) has the mic's devnode
+// among its ancestors, a non-present devnode having only a LastKnownParent.
+bool is_own_mic(IMMDevice* endpoint, wchar_t const* endpointId)
 {
+    std::wstring const filter = filter_of(endpoint);
+    if (!filter.empty()) {
+        return filter.find(L"\\\\?\\usb#vid_1209&pid_0001") != std::wstring::npos;
+    }
     std::wstring instance = std::wstring(L"SWD\\MMDEVAPI\\") + endpointId;
     DEVINST node;
     if (CM_Locate_DevNodeW(&node, instance.data(), CM_LOCATE_DEVNODE_PHANTOM) != CR_SUCCESS) {
@@ -1222,7 +1234,7 @@ private:
         // The WPods mic skips Windows: its PCM comes straight from the app. One direct source at a time (the app
         // feeds one mic); another WPods mic endpoint is captured as usual.
         bool const directOpen = std::any_of(m_sources.begin(), m_sources.end(), [](auto const& source) { return source->pulls(); });
-        if (!directOpen && is_own_mic(entry->id.c_str())) {
+        if (!directOpen && is_own_mic(device.get(), entry->id.c_str())) {
             void* const jitter = mic_jitter();
             wpn_jitter_reset(jitter);
             auto source = std::make_unique<Source>(entry);
@@ -1687,7 +1699,7 @@ int32_t __stdcall wpn_mixer_enum_devices(const uint64_t* pairs, uint32_t pairCou
             PROPVARIANT name;
             PropVariantInit(&name);
             bool const named = SUCCEEDED(properties->GetValue(PKEY_Device_FriendlyName, &name)) && name.vt == VT_LPWSTR;
-            uint32_t const flags = is_own_mic(id.get()) ? 1u : 0u;
+            uint32_t const flags = is_own_mic(endpoint.get(), id.get()) ? 1u : 0u;
             cb(ctx, id.get(), named ? name.pwszVal : L"", flow == eRender ? 0 : 1, state, pair, flags);
             PropVariantClear(&name);
         }
