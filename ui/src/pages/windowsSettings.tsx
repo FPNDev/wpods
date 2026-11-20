@@ -74,7 +74,10 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     stack: true,
     onChange: hostToggle('lowLatencyMic'),
   });
-  const latencyMicNote = Note({ label: 'windows.latencyNote', warning: true });
+  const latencyMicNote = Note({
+    label: 'windows.latencyMicNote',
+    warning: true,
+  });
   latencyMicNote.hidden = true;
   const latencyMicHdNote = Note({
     label: 'windows.latencyMicHdNote',

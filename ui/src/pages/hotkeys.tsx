@@ -73,6 +73,13 @@ const toggle = (
 
 const GROUPS: GroupDef[] = [
   {
+    title: 'hotkeys.connection',
+    rows: [
+      { action: 'connection.on', title: 'home.connect' },
+      { action: 'connection.off', title: 'home.disconnect' },
+    ],
+  },
+  {
     title: 'nc.title',
     cap: 'listeningMode',
     foot: 'hotkeys.againFoot',
@@ -139,13 +146,6 @@ const GROUPS: GroupDef[] = [
     cap: 'mediaAssist',
     foot: 'hotkeys.mediaAssistFoot',
   }),
-  {
-    title: 'hotkeys.connection',
-    rows: [
-      { action: 'connection.on', title: 'home.connect' },
-      { action: 'connection.off', title: 'home.disconnect' },
-    ],
-  },
   {
     title: 'app.name',
     rows: [
