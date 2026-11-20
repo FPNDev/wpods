@@ -1,4 +1,4 @@
-# Builds minimal LGPL FFmpeg DLLs (avcodec with only the aac decoder, avutil, swresample), x64, MSVC.
+# Builds minimal LGPL FFmpeg DLLs (avcodec with only the aac and sbc decoders and the sbc encoder, avutil, swresample), x64, MSVC.
 # Hybrid CRT (static vcruntime + system UCRT): DLLs import only Windows/UCRT DLLs and each other.
 # Needs MSYS2 at C:\msys64 (pinned make, diffutils, nasm packages are installed by this script).
 # Output: .build\native\bin\{avcodec,avutil,swresample}-*.dll (headers + import libs: .build\native\ffmpeg)

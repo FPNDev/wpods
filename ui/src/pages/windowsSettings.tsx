@@ -6,13 +6,13 @@ import { post } from '../host';
 import { t } from '../i18n';
 import { Icon, Spinner } from '../icons';
 import type { Theme } from '../protocol';
-import { current, live, store, updateText } from '../state';
+import { capsOf, current, live, store, updateText } from '../state';
 import { getTheme, getUseAccent, setThemePrefs } from '../theme';
 import type { Ctx, Page } from './page';
 
 export const createWindowsSettings = (ctx: Ctx): Page => {
   const hostToggle =
-    (name: 'disableHandsFree' | 'lowLatency') =>
+    (name: 'disableHandsFree' | 'lowLatency' | 'hdVoice') =>
     (value: boolean): void => {
       const d = current();
       if (d) {
@@ -46,6 +46,17 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     </span>
   ) as HTMLSpanElement;
   handsFree.row.append(handsFreeSpin);
+  const hdVoice = createSwitchRow({
+    id: 'hdVoiceTitle',
+    title: 'windows.hdVoice',
+    desc: 'windows.hdVoiceDesc',
+    onChange: hostToggle('hdVoice'),
+  });
+  const handsFreeNoteRow = (
+    <div class="wp-row" hidden>
+      {Note({ label: 'windows.handsFreeNoStereoMic', warning: true })}
+    </div>
+  ) as HTMLDivElement;
   const latency = createSwitchRow({
     id: 'latencyTitle',
     title: 'windows.latency',
@@ -106,7 +117,9 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
         <h2 class="wp-group__title" ref={forDevice} />
         <div class="wp-list">
           {handsFree.row}
+          {handsFreeNoteRow}
           {latency.row}
+          {hdVoice.row}
         </div>
       </section>
       <section class="wp-group">
@@ -227,10 +240,21 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     }
     const locked = !live(d);
     setText(forDevice, t('windows.forDevice', { name: d.name }));
-    renderHost(handsFree, d.host.disableHandsFree, locked);
+    const caps = capsOf(d);
+    const hdVoiceOffered = caps.has('hdVoice');
+    // HD voice keeps Windows' Hands-Free off.
+    const hdVoiceOn = hdVoiceOffered && d.host.hdVoice;
     const applying = store.handsFreeApplying.has(d.id);
+    renderHost(
+      handsFree,
+      hdVoiceOn || d.host.disableHandsFree,
+      locked || hdVoiceOn,
+    );
     setHidden(handsFreeSwitch, applying);
     setHidden(handsFreeSpin, !applying);
+    setHidden(hdVoice.row, !hdVoiceOffered);
+    renderHost(hdVoice, d.host.hdVoice, locked || applying);
+    setHidden(handsFreeNoteRow, !caps.has('noStereoMic') || hdVoiceOn);
     renderHost(latency, d.host.lowLatency, locked);
     setHidden(latencyNote, !d.host.lowLatency);
     setChecked(startup.input, store.startup);

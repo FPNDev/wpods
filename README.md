@@ -43,7 +43,8 @@
 ## Why WPods
 
 - **Free and open source.** GPL-3.0, no drivers of its own. No trial, no subscription.
-- **Stereo sound while the mic is on.** Your AirPods mic shows up in Windows as `Headset (A2DP, <AirPods name>)`, for example "Headset (A2DP, AirPods Pro)". Music and game audio stay stereo instead of dropping to the low-quality hands-free mode.
+- **Stereo sound while the mic is on.** Your AirPods mic shows up in Windows as `Headset (A2DP, <AirPods name>)`, for example "Headset (A2DP, AirPods Pro)". Music and game audio stay stereo instead of dropping to the low-quality hands-free mode. Works on AirPods 4, AirPods 4 (ANC), AirPods 5, AirPods Pro 2 and Pro 3, and AirPods Max 2; older models send their mic only in hands-free mode (see [Supported AirPods](#supported-airpods)).
+- **HD voice for older AirPods (experimental).** AirPods without the stereo mic get their mic through WPods, in the best voice codec the AirPods and your Bluetooth adapter manage, with mic modes and voice enhancement. Sound turns mono while an app uses the mic. Turn it on per pair in Windows settings.
 - **Mic modes you can tune.** Standard, Voice Isolation and Wide Spectrum, each with a choice of noise-suppression models that run locally on your PC. Over a dozen models, plus Raw (no processing). Every model shows how heavy it is.
 - **Voice enhancement.** Make your voice clearer and more even for calls.
 - **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid and Media Assist, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
@@ -119,8 +120,9 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 
 For each pair (while connected):
 
-- **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. If you leave Hands-Free mode on, an app that uses the Hands-Free mic takes over the AirPods mic, and `Headset (A2DP, <AirPods name>)` goes quiet until that app stops using it.
+- **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. If you leave Hands-Free mode on, an app that uses the Hands-Free mic takes over the AirPods mic, and `Headset (A2DP, <AirPods name>)` goes quiet until that app stops using it. On AirPods without the stereo mic, Hands-Free mode stays on by default, as it is their only mic.
 - **Low audio latency** gives less delay for games and calls. Your AirPods' sound and mic stay awake, so nothing has to wake up first: sounds play right away and your mic is live the moment an app opens it. It may use more battery.
+- **HD voice (experimental)**, for AirPods without the stereo mic: WPods takes over Hands-Free for the pair and brings its mic to `Headset (HD, <AirPods name>)` in the best voice codec the AirPods and your Bluetooth adapter manage (at least Windows' own Hands-Free quality), with mic modes and voice enhancement. Sound turns mono while an app uses the mic. Off by default.
 
 For the app:
 
@@ -179,6 +181,7 @@ Supports AirPods (1st, 2nd and 3rd gen), AirPods 4 and 4 (ANC), AirPods 5, AirPo
 - Hearing Aid and Media Assist work on AirPods Pro 2 and AirPods Pro 3.
 - AirPods (1st gen) and AirPods (2nd gen) also support the microphone side setting.
 - AirPods Max use head detection.
+- The stereo mic (`Headset (A2DP, <AirPods name>)`), mic modes and voice enhancement work on AirPods 4, AirPods 4 (ANC), AirPods 5, AirPods Pro 2, Pro 3 and AirPods Max 2. AirPods (1st, 2nd and 3rd gen), AirPods Pro (1st gen) and AirPods Max (1st gen) can't send their mic in stereo: it works through Windows' Hands-Free mode, or through WPods with HD voice (experimental), and sound turns mono while an app uses it.
 
 ## How WPods compares
 

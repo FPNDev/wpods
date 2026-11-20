@@ -193,9 +193,11 @@ internal sealed class MessageWriter
         w.WriteEndObject();
     }
 
-    /// <summary>"caps" of the attached pair: its effective capabilities plus "singleBattery" for AirPods Max.</summary>
-    public static void WriteCaps(Utf8JsonWriter w, DeviceState s) =>
-        WriteCaps(w, s.Capabilities, Models.FromModelNumber(s.ModelNumber)?.SingleBattery == true);
+    /// <summary>
+    /// "caps" of the attached pair: its effective capabilities plus "singleBattery" for AirPods Max, "noStereoMic" for
+    /// models without the stereo mic stream and "hdVoice" where HD voice is offered.
+    /// </summary>
+    public static void WriteCaps(Utf8JsonWriter w, DeviceState s) => WriteCaps(w, s.Capabilities, s.ModelNumber);
 
     /// <summary>
     /// "checking": true from attach until the initial report window ends (or the handshake got no answer).
@@ -216,6 +218,7 @@ internal sealed class MessageWriter
         w.WriteBoolean("lowLatency", host.LowLatency);
         w.WriteString("micMode", Camel(host.MicMode));
         w.WriteNumber("duckPercent", host.DuckPercent);
+        w.WriteBoolean("hdVoice", host.HdVoice);
         w.WriteEndObject();
     }
 
@@ -354,7 +357,7 @@ internal sealed class MessageWriter
         w.WriteString("name", d.Name);
         w.WriteString("model", model.Name);
         w.WriteString("art", model.Art);
-        WriteCaps(w, d.Capabilities, model.SingleBattery);
+        WriteCaps(w, d.Capabilities, d.ModelNumber);
         w.WriteString("conn", conn);
         w.WriteBoolean("hasKeys", d.HasKeys);
         if (batteries is { } b)
@@ -397,7 +400,7 @@ internal sealed class MessageWriter
         return true;
     }
 
-    private static void WriteCaps(Utf8JsonWriter w, DeviceCapabilities capabilities, bool singleBattery)
+    private static void WriteCaps(Utf8JsonWriter w, DeviceCapabilities capabilities, string? modelNumber)
     {
         w.WriteStartArray("caps");
         foreach (DeviceCapabilities capability in Capabilities)
@@ -407,9 +410,17 @@ internal sealed class MessageWriter
                 w.WriteStringValue(Camel(capability));
             }
         }
-        if (singleBattery)
+        if (Models.FromModelNumber(modelNumber)?.SingleBattery == true)
         {
             w.WriteStringValue("singleBattery");
+        }
+        if (!Models.HasStereoMic(modelNumber))
+        {
+            w.WriteStringValue("noStereoMic");
+        }
+        if (ServiceStatus.HdVoiceAllowed(modelNumber))
+        {
+            w.WriteStringValue("hdVoice");
         }
         w.WriteEndArray();
     }

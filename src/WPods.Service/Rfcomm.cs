@@ -15,9 +15,10 @@ internal static class Rfcomm
     /// <summary>Multiplexer message type of Parameter Negotiation (first byte of a DLC 0 UIH frame, >> 2).</summary>
     public const byte PnType = 0x20;
     private const byte PollFinal = 0x10;
-    // Credits PN gives the AirPods for the DLC: enough for their AT commands until the decline closes it.
+    // Credits PN gives the AirPods for the DLC; a Hands-Free session gives more back as their frames arrive.
     private const byte InitialCredits = 7;
-    private const int MaxFrame = 127;
+    /// <summary>N1 offered in PN: the longest information field a frame may carry.</summary>
+    public const int MaxFrame = 127;
 
     /// <summary>SABM or DISC with P set.</summary>
     public static byte[] Command(byte dlci, byte control) => Frame((byte)((dlci << 2) | 0x03), (byte)(control | PollFinal), [], fcsLength: 3);
@@ -27,6 +28,29 @@ internal static class Rfcomm
 
     /// <summary>UIH frame; its FCS covers address and control only.</summary>
     public static byte[] Data(byte dlci, ReadOnlySpan<byte> info) => Frame((byte)((dlci << 2) | 0x03), Uih, info, fcsLength: 2);
+
+    /// <summary>UIH frame with P/F set: a credit byte before the data gives the peer that many more frames.</summary>
+    public static byte[] DataWithCredits(byte dlci, byte credits, ReadOnlySpan<byte> info)
+    {
+        byte[] plain = Frame((byte)((dlci << 2) | 0x03), Uih | PollFinal, info, fcsLength: 2);
+        int header = plain.Length - info.Length - 1;
+        var frame = new byte[plain.Length + 1];
+        plain.AsSpan(0, header).CopyTo(frame);
+        frame[header] = credits;
+        info.CopyTo(frame.AsSpan(header + 1));
+        frame[^1] = plain[^1];
+        return frame;
+    }
+
+    /// <summary>Credits a UIH frame with P/F set gives (0 for any other frame).</summary>
+    public static byte Credits(ReadOnlySpan<byte> frame)
+    {
+        if (frame.Length < 4 || (frame[1] & ~PollFinal) != Uih || (frame[1] & PollFinal) == 0)
+        {
+            return 0;
+        }
+        return frame[(frame[2] & 1) != 0 ? 3 : 4];
+    }
 
     /// <summary>Modem Status command on DLC 0 for <paramref name="dlci"/>: RTC, RTR and DV set.</summary>
     public static byte[] ModemStatus(byte dlci) => Data(0, [0xE3, 0x05, (byte)((dlci << 2) | 0x03), 0x8D]);

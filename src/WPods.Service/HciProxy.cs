@@ -6,11 +6,11 @@ namespace WPods.Service;
 
 /// <summary>
 /// HCI proxy between Windows' Bluetooth stack and the controller. Hides the service's own AAP channels (PSM 0x1001,
-/// local CIDs from 0x7F40, signaling ids from 0xC0), its Hands-Free decline (RFCOMM, same ranges) and their
-/// completed-packet counts from Windows; outbound ACL from both sides shares the controller buffers, and ours never goes
-/// between fragments of a Windows L2CAP PDU.
+/// local CIDs from 0x7F40, signaling ids from 0xC0), its Hands-Free decline or HD voice session (RFCOMM, same ranges),
+/// its voice link and their completed-packet counts from Windows; outbound ACL from both sides shares the controller
+/// buffers, and ours never goes between fragments of a Windows L2CAP PDU.
 /// </summary>
-internal sealed class HciProxy
+internal sealed partial class HciProxy
 {
     private const ushort AapPsm = 0x1001;
     private const ushort FirstCid = 0x7F40;
@@ -376,7 +376,12 @@ internal sealed class HciProxy
                     ushort cid = BinaryPrimitives.ReadUInt16LittleEndian(head[6..]);
                     link.InboundOurs = (link.Aap is { } ch && cid == ch.LocalCid) || (link.Decline is { } decline && cid == decline.LocalCid)
                         || (cid == 0x0001 && SignalingIsOursLocked(link, head[8..]))
-                        || (cid == 0x0001 && (link.Aap is not null || link.Decline is not null || link.Ids.Count > 0) && HasSeveralCommands(head));
+                        || (cid == 0x0001 && (link.Aap is not null || link.Decline is not null || link.Ids.Count > 0) && HasSeveralCommands(head))
+                        || IsOwnAvdtpAnswer(link, cid, head[8..]);
+                    if (cid == 0x0001 && !link.InboundOurs)
+                    {
+                        NoteInboundSignalingLocked(link, head[8..]);
+                    }
                     if (cid == 0x0001 && !link.InboundOurs && link.Ids.Count > 0 && head.Length >= 10)
                     {
                         Log.Info("aap", $"{link.Address:X12}: signaling 0x{head[8]:X2} id 0x{head[9]:X2} for Windows while ours wait ({link.Ids.Count})");
@@ -809,6 +814,10 @@ internal sealed class HciProxy
     {
         lock (_gate)
         {
+            if (ch.Link.Voice?.Owner == ch || ch.Link.VoiceWanted == ch)
+            {
+                StopVoiceLocked(ch.Link, "the app closed its channel");
+            }
             if (ch.Link.Aap != ch)
             {
                 return;
@@ -873,6 +882,10 @@ internal sealed class HciProxy
     private byte[]? OnEventLocked(byte[] e)
     {
         LogEvent(e);
+        if (OnVoiceEventLocked(e) is null)
+        {
+            return null;
+        }
         if (e[0] is 0x0E or 0x0F)
         {
             Volatile.Write(ref _commandSentAt, 0);
@@ -965,6 +978,7 @@ internal sealed class HciProxy
                         {
                             Log.Info("hci", $"ACL link 0x{handle:X3} to {link.Address:X12} closed, reason 0x{e[5]:X2}");
                         }
+                        EndVoiceOnLinkLossLocked(link);
                         EndChannelLocked(link, Protocol.ErrorNotConnected);
                     }
                     break;
@@ -1090,6 +1104,12 @@ internal sealed class HciProxy
             Log.Info("hci", $"link state reset: {why}");
         }
         _links.Clear();
+        // Our voice link went with the controller's state; nothing is sent to the radio for it.
+        if (_voiceLink is { } voiceLink)
+        {
+            EndVoiceOnLinkLossLocked(voiceLink);
+        }
+        Volatile.Write(ref _ownOpcode, 0);
         _outstanding = 0;
         _aclHeadHave = 0;
         _aclRoute = Route.Undecided;
@@ -1302,6 +1322,10 @@ internal sealed class HciProxy
         {
             OnDeclineFrameLocked(link, decline, pdu.AsSpan(4));
         }
+        else if (link.Avdtp is { } avdtp && cid == avdtp.SignalLocal)
+        {
+            OnOwnAvdtpAnswerLocked(link, pdu.AsSpan(4));
+        }
         else
         {
             Log.Info("aap", $"dropped PDU cid 0x{cid:X4} ({pdu.Length - 4} bytes): no open channel");
@@ -1417,6 +1441,7 @@ internal sealed class HciProxy
             case 0x06 when link.Decline is { } decline && BinaryPrimitives.ReadUInt16LittleEndian(d) == decline.LocalCid:
                 SendCommandLocked(link, 0x07, id, Cids(decline.LocalCid, decline.RemoteCid));
                 Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: channel closed by the AirPods");
+                StopVoiceLocked(link, "Hands-Free closed by the AirPods");
                 link.Decline = null;
                 break;
             case 0x06 when ch is not null:
@@ -1501,8 +1526,11 @@ internal sealed class HciProxy
             Log.Info("hfp", $"{link.Address:X12}: Hands-Free is off in Windows, but no cached Hands-Free channel: not declined");
             return;
         }
-        link.Decline = new HandsFreeDecline(NextCidLocked(), channel);
-        Log.Info("hfp", $"{link.Address:X12}: Hands-Free is off in Windows: declining it on RFCOMM channel {channel} once encrypted");
+        bool hd = HdVoiceOn(link.Address);
+        link.Decline = new HandsFreeDecline(NextCidLocked(), channel) { Gateway = hd ? new HandsFreeAg() : null };
+        Log.Info("hfp", hd
+            ? $"{link.Address:X12}: HD voice: running Hands-Free on RFCOMM channel {channel} once encrypted"
+            : $"{link.Address:X12}: Hands-Free is off in Windows: declining it on RFCOMM channel {channel} once encrypted");
     }
 
     private void ConnectDeclineLocked(Link link, HandsFreeDecline decline)
@@ -1524,6 +1552,11 @@ internal sealed class HciProxy
         {
             Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: the AirPods refused the RFCOMM channel, result {result}");
             link.Decline = null;
+            if (decline.Gateway is not null)
+            {
+                // Refused while the AirPods open their own RFCOMM channel (refused in turn): ours again in a moment.
+                RetryGatewayLocked(link);
+            }
             return;
         }
         decline.RemoteCid = remoteCid;
@@ -1540,15 +1573,22 @@ internal sealed class HciProxy
     }
 
     // Multiplexer up, PN, Hands-Free DLC up, Modem Status, then the AirPods' first AT command (AT+BRSF) gets ERROR and
-    // everything is closed again; without one within SilentTimeout it is closed all the same.
+    // everything is closed again (also without one within SilentTimeout); with HD voice our gateway answers instead.
     private void OnDeclineFrameLocked(Link link, HandsFreeDecline decline, ReadOnlySpan<byte> frame)
     {
         if (!Rfcomm.TryParse(frame, out byte dlci, out byte control, out ReadOnlySpan<byte> info))
         {
             return;
         }
-        // Frame kind and size only, never the content.
-        Log.Info("hfp", $"{link.Address:X12}: RFCOMM in: DLC {dlci}, control 0x{control:X2}, {info.Length} bytes, step {decline.Step}");
+        // Frame kind and size only, never the content (our Hands-Free gateway logs its AT commands).
+        if (decline.Gateway is null || dlci != decline.Dlci || control != Rfcomm.Uih)
+        {
+            Log.Info("hfp", $"{link.Address:X12}: RFCOMM in: DLC {dlci}, control 0x{control:X2}, {info.Length} bytes, step {decline.Step}");
+        }
+        if (dlci == decline.Dlci)
+        {
+            decline.RemoteCredits += Rfcomm.Credits(frame);
+        }
         switch (control)
         {
             case Rfcomm.Ua when dlci == 0 && decline.Step == DeclineStep.Mux:
@@ -1556,13 +1596,21 @@ internal sealed class HciProxy
                 SendL2capLocked(link, decline.RemoteCid, Rfcomm.ParameterNegotiation(decline.Dlci));
                 break;
             case Rfcomm.Uih when dlci == 0 && decline.Step == DeclineStep.Pn && info.Length >= 1 && info[0] >> 2 == Rfcomm.PnType && (info[0] & 0x02) == 0:
+                // The PN answer's last byte: the credits the AirPods give us.
+                decline.RemoteCredits = info.Length >= 10 ? info[9] : 0;
                 decline.Step = DeclineStep.Dlc;
                 SendL2capLocked(link, decline.RemoteCid, Rfcomm.Command(decline.Dlci, Rfcomm.Sabm));
                 break;
             case Rfcomm.Ua when dlci == decline.Dlci && decline.Step == DeclineStep.Dlc:
                 decline.Step = DeclineStep.Open;
                 SendL2capLocked(link, decline.RemoteCid, Rfcomm.ModemStatus(decline.Dlci));
-                _ = CutDeclineShortAsync(link, decline, SilentTimeout);
+                if (decline.Gateway is null)
+                {
+                    _ = CutDeclineShortAsync(link, decline, SilentTimeout);
+                }
+                break;
+            case Rfcomm.Uih when dlci == decline.Dlci && decline.Step == DeclineStep.Open && info.Length > 0 && decline.Gateway is { } gateway:
+                OnGatewayDataLocked(link, decline, gateway, info);
                 break;
             case Rfcomm.Ua or Rfcomm.Dm when dlci == decline.Dlci && decline.Step is DeclineStep.Dlc or DeclineStep.ClosingDlc:
                 decline.Step = DeclineStep.ClosingMux;
@@ -1607,6 +1655,7 @@ internal sealed class HciProxy
         {
             return;
         }
+        StopVoiceLocked(link, "Hands-Free closing");
         Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: closing the RFCOMM channel");
         decline.Step = DeclineStep.Closing;
         if (decline.RemoteCid == 0)
@@ -1622,7 +1671,8 @@ internal sealed class HciProxy
         await Task.Delay(delay).ConfigureAwait(false);
         lock (_gate)
         {
-            if (link.Decline == decline && decline.Step != DeclineStep.Closing && _links.TryGetValue(link.Handle, out Link? current) && current == link)
+            if (link.Decline == decline && decline.Step != DeclineStep.Closing && !(decline.Gateway is not null && decline.Step == DeclineStep.Open)
+                && _links.TryGetValue(link.Handle, out Link? current) && current == link)
             {
                 Log.Warn("hfp", $"{link.Address:X12}: Hands-Free decline not done after {delay.TotalMilliseconds:0} ms (step {decline.Step}): closing it");
                 CloseDeclineLocked(link, decline);
@@ -1790,6 +1840,19 @@ internal sealed class HciProxy
         /// <summary>Windows' cached SDP records of the device list AAP (PSM 0x1001): AirPods.</summary>
         public bool AapDevice;
         public HandsFreeDecline? Decline;
+        /// <summary>HD voice: our voice link on this link, and an app channel waiting for Hands-Free to connect.</summary>
+        public VoiceLink? Voice;
+        public AapChannel? VoiceWanted;
+        /// <summary>HD voice: our Hands-Free connection attempts the AirPods refused on this link.</summary>
+        public int GatewayRetries;
+        /// <summary>Windows' A2DP stream on this link (AVDTP channels, state), once its channels were seen.</summary>
+        public HciProxy.AvdtpState? Avdtp;
+        /// <summary>Windows' L2CAP requests for AVDTP (id -> its CID) and the AirPods' AVDTP channel requests (their CIDs).</summary>
+        public readonly Dictionary<byte, ushort> AvdtpRequests = [];
+        public readonly HashSet<ushort> AvdtpIncoming = [];
+        /// <summary>The A2DP stream is held for our voice link; the rest of a dropped media PDU is dropped too.</summary>
+        public bool A2dpHeld;
+        public bool DroppingPdu;
         public byte NextId = 0xC0;
         public readonly Dictionary<byte, Request> Ids = [];
     }
@@ -1810,6 +1873,11 @@ internal sealed class HciProxy
         public bool RemoteConfigured;
         public bool LocalConfigured;
         public DeclineStep Step;
+        /// <summary>HD voice: the session stays up as our Hands-Free gateway instead of being declined.</summary>
+        public HandsFreeAg? Gateway;
+        /// <summary>Frames the AirPods allow us to send (RFCOMM credits), and their frames not yet given credits back.</summary>
+        public int RemoteCredits;
+        public int Received;
     }
 
     internal enum DeclineStep
@@ -1885,6 +1953,150 @@ internal sealed class AapChannel
     /// <summary>Queues the call audio (Hands-Free) state of the channel's link for the app.</summary>
     public void SendCallAudio(bool on) => Post([Protocol.AapCallAudio, on ? (byte)1 : (byte)0]);
 
+    // HD voice uplink queued for the app is capped like the AAP mic audio.
+    private const int MaxQueuedVoice = 16;
+    private int _queuedVoice;
+    private long _droppedVoice;
+    // HD voice downlink from the app, and the silent unit sent when it runs dry. At most ~60 ms wait (oldest dropped),
+    // so a sender running ahead of the link never adds delay.
+    private const int DownlinkPackets = 8;
+    private const int CvsdMaxDownlink = 60 * 16;
+    private int _maxDownlink = DownlinkPackets * 60;
+    private readonly Lock _downlinkLock = new();
+    private readonly List<byte> _downlink = [];
+    private byte[]? _silence;
+    private long _silentFills;
+    private long _overflowBytes;
+    // HFP codec of the voice link while it is up.
+    private int _codec;
+    private byte _sequence;
+    private int _h2;
+    private static readonly byte[] H2Sequence = [0x08, 0x38, 0xC8, 0xF8];
+
+    public void SendVoiceState(byte state, int codec, int slots, int rxLength, int txLength)
+    {
+        var m = new byte[1 + 1 + 2 + 1 + 2 + 2];
+        m[0] = Protocol.VoiceState;
+        m[1] = state;
+        BinaryPrimitives.WriteUInt16LittleEndian(m.AsSpan(2), (ushort)codec);
+        m[4] = (byte)slots;
+        BinaryPrimitives.WriteUInt16LittleEndian(m.AsSpan(5), (ushort)rxLength);
+        BinaryPrimitives.WriteUInt16LittleEndian(m.AsSpan(7), (ushort)txLength);
+        lock (_downlinkLock)
+        {
+            _codec = state == 1 ? codec : 0;
+            _maxDownlink = codec == 1 ? CvsdMaxDownlink : DownlinkPackets * Math.Max(txLength, 60);
+            if (state != 1)
+            {
+                _downlink.Clear();
+                _silence = null;
+                Log.Info("hfp", $"downlink: {_silentFills} packets filled with silence, {_overflowBytes} bytes dropped (queue full)");
+                _silentFills = 0;
+                _overflowBytes = 0;
+            }
+        }
+        Post(m);
+    }
+
+    public void SendVoiceData(ReadOnlySpan<byte> payload)
+    {
+        if (Interlocked.Increment(ref _queuedVoice) > MaxQueuedVoice)
+        {
+            Interlocked.Decrement(ref _queuedVoice);
+            long dropped = Interlocked.Increment(ref _droppedVoice);
+            if (dropped == 1 || dropped % 100 == 0)
+            {
+                Log.Warn("hfp", $"the app reads the voice link slower than real time: {dropped} messages dropped so far");
+            }
+            return;
+        }
+        var m = new byte[1 + payload.Length];
+        m[0] = Protocol.VoiceData;
+        payload.CopyTo(m.AsSpan(1));
+        Post(m);
+    }
+
+    /// <summary>Queues downlink data from the app; it must start and end on unit boundaries of the link's framing.</summary>
+    public void AddDownlink(ReadOnlySpan<byte> data)
+    {
+        byte[] units = data.ToArray();
+        lock (_downlinkLock)
+        {
+            if (_codec == 0)
+            {
+                // No link up: what the app still sends for one that ended never goes out on the next.
+                return;
+            }
+            Stamp(units);
+            _downlink.AddRange(units);
+            if (_downlink.Count > _maxDownlink)
+            {
+                // Whole units only (the silent unit's length), so the stream stays aligned to its framing.
+                int unit = Math.Max(_silence?.Length ?? 1, 1);
+                int excess = _downlink.Count - _maxDownlink;
+                int drop = Math.Min(_downlink.Count, (excess + unit - 1) / unit * unit);
+                _downlink.RemoveRange(0, drop);
+                _overflowBytes += drop;
+            }
+        }
+    }
+
+    public void SetSilence(ReadOnlySpan<byte> unit)
+    {
+        lock (_downlinkLock)
+        {
+            _silence = unit.Length > 0 ? unit.ToArray() : null;
+        }
+    }
+
+    /// <summary>The next <paramref name="length"/> downlink bytes; silent units (else zeros) where the app sent none.</summary>
+    public byte[] TakeDownlink(int length)
+    {
+        lock (_downlinkLock)
+        {
+            if (_downlink.Count < length && _silence is not null)
+            {
+                _silentFills++;
+            }
+            while (_downlink.Count < length && _silence is { } silence)
+            {
+                byte[] unit = (byte[])silence.Clone();
+                Stamp(unit);
+                _downlink.AddRange(unit);
+            }
+            var packet = new byte[length];
+            int n = Math.Min(length, _downlink.Count);
+            _downlink.CopyTo(0, packet, 0, n);
+            _downlink.RemoveRange(0, n);
+            return packet;
+        }
+    }
+
+    // Our own sequence numbers on outgoing data: mSBC's H2 header per 60-byte packet, the [sequence][length] units of
+    // Apple's codecs; CVSD PCM stays as it is.
+    private void Stamp(byte[] units)
+    {
+        if (_codec == 2)
+        {
+            for (int at = 0; at + 1 < units.Length; at += 60)
+            {
+                units[at + 1] = H2Sequence[_h2];
+                _h2 = (_h2 + 1) % H2Sequence.Length;
+            }
+            return;
+        }
+        if (_codec == 1)
+        {
+            return;
+        }
+        int unit = 0;
+        while (unit + 2 <= units.Length && units[unit + 1] > 0 && unit + 2 + units[unit + 1] <= units.Length)
+        {
+            units[unit] = _sequence++;
+            unit += 2 + units[unit + 1];
+        }
+    }
+
     // Ignored once the channel ended.
     private void Post(byte[] message)
     {
@@ -1903,6 +2115,10 @@ internal sealed class AapChannel
         if (message.Length > 1 && message[0] == Protocol.AapData && IsAudio(message.AsSpan(1)))
         {
             Interlocked.Decrement(ref _queuedAudio);
+        }
+        else if (message.Length > 0 && message[0] == Protocol.VoiceData)
+        {
+            Interlocked.Decrement(ref _queuedVoice);
         }
     }
 

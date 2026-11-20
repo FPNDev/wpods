@@ -10,8 +10,9 @@ namespace WPods.Service;
 
 /// <summary>
 /// The WPods microphone: a virtual USB Audio Class 1 capture device (mono 48 kHz 16-bit) for Windows' usbaudio driver,
-/// named "&lt;terminal&gt; (&lt;product&gt;)" = "Headset (A2DP, &lt;AirPods name&gt;)". The serial comes from the
-/// pair's address, so each pair has its own endpoint. SET_INTERFACE 1 alt 1/0 = an app started/stopped recording.
+/// named "&lt;terminal&gt; (&lt;product&gt;)" = "Headset (A2DP, &lt;AirPods name&gt;)", or "Headset (HD, ...)" for a model
+/// without the stereo mic, whose mic is HD voice. The serial comes from the pair's address, so each pair has its own
+/// endpoint. SET_INTERFACE 1 alt 1/0 = an app started/stopped recording.
 /// </summary>
 internal sealed unsafe partial class MicDevice
 {
@@ -37,15 +38,17 @@ internal sealed unsafe partial class MicDevice
     private byte _configuration;
     private byte _alt;
 
-    public MicDevice(ulong address, string name)
+    public MicDevice(ulong address, string name, bool hd)
     {
         Address = address;
         Name = name;
+        Hd = hd;
         Serial = SerialOf(address);
+        Product = (hd ? "HD, " : "A2DP, ") + (name.Length > 100 ? name[..100] : name);
         Device = [18, 0x01, 0x10, 0x01, 0x00, 0x00, 0x00, 64, unchecked((byte)Vid), Vid >> 8, unchecked((byte)Pid), Pid >> 8, 0x00, 0x01, 1, 2, 3, 1];
         _strings[0] = UsbIp.EnglishLanguages;
         _strings[1] = UsbIp.StringDescriptor("WPods");
-        _strings[2] = UsbIp.StringDescriptor("A2DP, " + (name.Length > 100 ? name[..100] : name));
+        _strings[2] = UsbIp.StringDescriptor(Product);
         _strings[3] = UsbIp.StringDescriptor(Serial);
         _strings[4] = UsbIp.StringDescriptor("Headset");
         var b = new List<byte>();
@@ -68,6 +71,9 @@ internal sealed unsafe partial class MicDevice
 
     public ulong Address { get; }
     public string Name { get; }
+    public bool Hd { get; }
+    /// <summary>The USB product string: "A2DP, name" or "HD, name".</summary>
+    public string Product { get; }
     public string Serial { get; }
     public byte[] Device { get; }
     public byte[] Config { get; }

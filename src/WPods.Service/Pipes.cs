@@ -181,7 +181,15 @@ internal sealed class AapPipeServer(HciProxy hci)
             while (true)
             {
                 n = await next.ConfigureAwait(false);
-                if (n == 0 || n > Protocol.MaxAapPacket || !hci.Send(ch, buffer.AsSpan(0, n)))
+                if (n == 0 || n > Protocol.MaxAapPacket)
+                {
+                    break;
+                }
+                if (buffer[0] is Protocol.VoiceControl or Protocol.VoiceDownlink or Protocol.VoiceSilence)
+                {
+                    hci.OnVoiceMessage(ch, buffer.AsSpan(0, n));
+                }
+                else if (!hci.Send(ch, buffer.AsSpan(0, n)))
                 {
                     break;
                 }
@@ -256,7 +264,8 @@ internal sealed class MicPipeServer(Engine engine)
                 }
                 else if (buffer[0] == Protocol.MicDevice && n >= 10)
                 {
-                    engine.SetMic(BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(1)), Encoding.UTF8.GetString(buffer, 10, n - 10), reported: buffer[9] == 1);
+                    engine.SetMic(BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(1)), Encoding.UTF8.GetString(buffer, 10, n - 10),
+                        reported: (buffer[9] & Protocol.MicNameReported) != 0, hd: (buffer[9] & Protocol.MicHdVoice) != 0);
                 }
             }
         }
@@ -364,6 +373,9 @@ internal sealed class StatusPipeServer(Engine engine)
                         break;
                     case Protocol.AppStarted:
                         engine.AppStarted();
+                        break;
+                    case Protocol.SetHdVoice when n >= 10:
+                        engine.SetHdVoice(BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(1)), buffer[9] != 0);
                         break;
                 }
             }

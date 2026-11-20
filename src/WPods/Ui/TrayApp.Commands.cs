@@ -552,6 +552,7 @@ internal sealed partial class TrayApp
         {
             "disableHandsFree" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var off => s => s with { DisableHandsFree = off },
             "lowLatency" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var on => s => s with { LowLatency = on },
+            "hdVoice" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var hd => s => s with { HdVoice = hd },
             // The pipeline loads the new effective mode's model (HostSettingsChanged).
             "micMode" when value.ValueKind == JsonValueKind.String && MessageWriter.TryParse(value.GetString(), out MicMode mode) => s => s with { MicMode = mode },
             "duckPercent" when value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int duck) && duck is >= 10 and <= 90 => s => s with { DuckPercent = duck },
@@ -573,7 +574,8 @@ internal sealed partial class TrayApp
     {
         HostSettings current = _settings.Get(address);
         HostSettings next = change(current);
-        bool handsFree = next.DisableHandsFree != current.DisableHandsFree;
+        // Windows' Hands-Free changes (HD voice turns it off too).
+        bool handsFree = HandsFreeOff(address, next) != HandsFreeOff(address, current);
         if (_connections.Session?.Address != address || (handsFree && _handsFreeApplying.ContainsKey(address)))
         {
             return false;
@@ -586,7 +588,7 @@ internal sealed partial class TrayApp
         try
         {
             // Disabling Hands-Free while it is in use leaves the A2DP stream paused for good: drop it first.
-            if (next.DisableHandsFree && !current.DisableHandsFree && _mic.HandsFreeInUse)
+            if (HandsFreeOff(address, next) && !HandsFreeOff(address, current) && _mic.HandsFreeInUse)
             {
                 await DropHandsFreeAsync(address);
                 current = _settings.Get(address);
@@ -619,6 +621,8 @@ internal sealed partial class TrayApp
             }
         }
     }
+
+    private bool HandsFreeOff(ulong address, HostSettings settings) => settings.DisableHandsFree || _connections.HdVoiceOn(address, settings);
 
     // Counts Hands-Free changes in flight; the page shows a loader while any runs.
     private void SetHandsFreeApplying(ulong address, bool applying)

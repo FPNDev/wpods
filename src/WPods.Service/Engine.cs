@@ -48,10 +48,18 @@ internal sealed class Engine
     private readonly Queue<DateTime> _adapterResets = new();
     private const int MaxAdapterResets = 3;
     private static readonly TimeSpan AdapterResetWindow = TimeSpan.FromHours(24);
-    private (ulong Address, string Name)? _micWanted;
+    // Hd: the mic carries HD voice (a model without the stereo mic), named "HD" instead of "A2DP".
+    private (ulong Address, string Name, bool Hd)? _micWanted;
 
     public Engine()
     {
+        _hci.HdVoiceOn = HdVoiceOn;
+        _hci.VoiceCodecOrder = HdVoiceCodecs;
+        _hci.ErroneousDataReporting = static () =>
+        {
+            using RegistryKey? key = Registry.LocalMachine.OpenSubKey(RadioDriver.StateKey);
+            return key?.GetValue("HdVoiceErroneousData") is 1;
+        };
         _status = new StatusPipeServer(this);
         _micPipe = new MicPipeServer(this);
         _aapPipe = new AapPipeServer(_hci);
@@ -61,7 +69,7 @@ internal sealed class Engine
             {
                 if (key.GetValue("MicAddress") is long address && key.GetValue("MicName") is string name)
                 {
-                    _micWanted = ((ulong)address, name);
+                    _micWanted = ((ulong)address, name, key.GetValue("MicHd") is 1);
                 }
             }
         }
@@ -162,10 +170,10 @@ internal sealed class Engine
         }
         try
         {
-            RadioDriver.RestoreNative(id);
-            if (Uninstalling)
+            // A re-plug starts the native driver when Windows asks for a restart (the adapter is still held), and on
+            // uninstall makes Windows set the adapter's devices up fresh from the pairing data.
+            if (RadioDriver.RestoreNative(id) || Uninstalling)
             {
-                // Re-plug so Windows sets the adapter's devices up fresh from the pairing data.
                 RadioDriver.CyclePort(id);
             }
             return restored;
@@ -194,7 +202,10 @@ internal sealed class Engine
             }
             try
             {
-                RadioDriver.RestoreNative(bound);
+                if (RadioDriver.RestoreNative(bound))
+                {
+                    RadioDriver.CyclePort(bound);
+                }
             }
             catch (Exception e) when (e is Win32Exception or InvalidOperationException)
             {
@@ -401,8 +412,13 @@ internal sealed class Engine
     /// Sets the pair the mic is for. A Windows name (not <paramref name="reported"/> by the AirPods) is used only for a
     /// pair without a known name, so the mic's name and its Windows endpoint do not flip on every connect.
     /// </summary>
-    public void SetMic(ulong address, string name, bool reported)
+    public void SetMic(ulong address, string name, bool reported, bool hd)
     {
+        if (address == 0)
+        {
+            ClearMic();
+            return;
+        }
         if (!reported && KnownMicName(address) is { } known)
         {
             name = known;
@@ -410,16 +426,24 @@ internal sealed class Engine
         bool sameMic;
         lock (_lock)
         {
-            if (_micWanted is { } w && w.Address == address && w.Name == name)
+            if (_micWanted is { } w && w.Address == address && w.Name == name && w.Hd == hd)
             {
                 return;
             }
             sameMic = _micWanted is { } old && old.Address == address;
-            Log.Info("mic", $"pair {address:X12} \"{name}\"{(reported ? "" : " (Windows name)")}");
-            _micWanted = (address, name);
+            Log.Info("mic", $"pair {address:X12} \"{name}\"{(reported ? "" : " (Windows name)")}{(hd ? ", HD voice" : "")}");
+            _micWanted = (address, name, hd);
             using RegistryKey key = Registry.LocalMachine.CreateSubKey(RadioDriver.StateKey);
             key.SetValue("MicAddress", (long)address, RegistryValueKind.QWord);
             key.SetValue("MicName", name);
+            if (hd)
+            {
+                key.SetValue("MicHd", 1, RegistryValueKind.DWord);
+            }
+            else
+            {
+                key.DeleteValue("MicHd", throwOnMissingValue: false);
+            }
         }
         if (sameMic && MicCapturing)
         {
@@ -428,6 +452,72 @@ internal sealed class Engine
             return;
         }
         // The mic thread attaches the new mic after the detach.
+        DetachMic();
+        _micChanged.Set();
+    }
+
+    private const string HdVoiceKey = RadioDriver.StateKey + @"\HdVoice";
+
+    /// <summary>HD voice (experimental) is on for the pair: the service runs Hands-Free with it itself.</summary>
+    public static bool HdVoiceOn(ulong address)
+    {
+        using RegistryKey? key = Registry.LocalMachine.OpenSubKey(HdVoiceKey);
+        return key?.GetValue($"{address:X12}") is 1;
+    }
+
+    // Test switch (REG_SZ HdVoiceCodecs, e.g. "128,129"): the HFP codecs HD voice tries, in order.
+    private static int[] HdVoiceCodecs()
+    {
+        using RegistryKey? key = Registry.LocalMachine.OpenSubKey(RadioDriver.StateKey);
+        string? list = key?.GetValue("HdVoiceCodecs") as string;
+        var codecs = new List<int>();
+        foreach (string id in list?.Split(',') ?? [])
+        {
+            if (int.TryParse(id, out int codec))
+            {
+                codecs.Add(codec);
+            }
+        }
+        return [.. codecs];
+    }
+
+    public void SetHdVoice(ulong address, bool on)
+    {
+        if (HdVoiceOn(address) == on)
+        {
+            return;
+        }
+        using (RegistryKey key = Registry.LocalMachine.CreateSubKey(HdVoiceKey))
+        {
+            if (on)
+            {
+                key.SetValue($"{address:X12}", 1, RegistryValueKind.DWord);
+            }
+            else
+            {
+                key.DeleteValue($"{address:X12}", throwOnMissingValue: false);
+            }
+        }
+        Log.Info("hfp", $"{address:X12}: HD voice {(on ? "on" : "off")}");
+        _hci.HdVoiceChanged(address);
+    }
+
+    // The attached pair has no WPods mic (AirPods without the stereo mic stream): unplug it and forget the pair.
+    private void ClearMic()
+    {
+        lock (_lock)
+        {
+            if (_micWanted is null)
+            {
+                return;
+            }
+            Log.Info("mic", "no mic for the attached pair");
+            _micWanted = null;
+            using RegistryKey key = Registry.LocalMachine.CreateSubKey(RadioDriver.StateKey);
+            key.DeleteValue("MicAddress", throwOnMissingValue: false);
+            key.DeleteValue("MicName", throwOnMissingValue: false);
+            key.DeleteValue("MicHd", throwOnMissingValue: false);
+        }
         DetachMic();
         _micChanged.Set();
     }
@@ -445,7 +535,7 @@ internal sealed class Engine
         bool renamed;
         lock (_lock)
         {
-            renamed = !capturing && _micWanted is { } w && (w.Address != mic.Address || w.Name != mic.Name);
+            renamed = !capturing && _micWanted is { } w && (w.Address != mic.Address || w.Name != mic.Name || w.Hd != mic.Hd);
         }
         if (renamed)
         {
@@ -619,11 +709,7 @@ internal sealed class Engine
             if (!replugged && !_stop.IsCancellationRequested && RadioDriver.CyclePort(id))
             {
                 replugged = true;
-                for (int i = 0; i < 60 && !_stop.IsCancellationRequested
-                    && !(RadioDriver.IsPresent(id) && RadioDriver.IsOnWinUsb(id) && !RadioDriver.NeedsRestart(id)); i++)
-                {
-                    Thread.Sleep(250);
-                }
+                WaitReplugged(id);
                 continue;
             }
             SetState(ServiceState.Starting, "waiting for the Bluetooth adapter to be free");
@@ -640,7 +726,7 @@ internal sealed class Engine
         {
             Log.Info("radio", $"forgot {forgotten} hidden audio device nodes of the adapter's native driver");
         }
-        WinUsbDevice device = OpenRadio(id, _stop.Token);
+        WinUsbDevice device = OpenRadioOrReplug(id);
         // An open handle would block Windows removing the adapter (driver update, Device Manager, restart): release it
         // and answer only once it is closed.
         var gate = new Lock();
@@ -775,6 +861,41 @@ internal sealed class Engine
     // A fresh bus id per attach: usbip-win2 keeps retrying a broken import for a while, which must never match a new one.
     private string NextBusId() => $"1-{Interlocked.Increment(ref _busIds)}";
 
+    // Windows may leave the native driver's stack half removed after the switch (seen on Intel AX211: opens fail with
+    // 433 for minutes, and giving the adapter back then needs a restart). A re-plug starts the adapter fresh on WinUSB.
+    private WinUsbDevice OpenRadioOrReplug(string id)
+    {
+        try
+        {
+            return OpenRadio(id, _stop.Token);
+        }
+        catch (Win32Exception e) when (!_stop.IsCancellationRequested)
+        {
+            Log.Warn("radio", $"WinUSB did not open (Win32 error {e.NativeErrorCode}, {RadioDriver.DescribeState(id)}): re-plugging the adapter");
+            if (!RadioDriver.CyclePort(id))
+            {
+                throw;
+            }
+            // The adapter stays present until the re-plug takes it away, so that comes first (up to 3 s).
+            for (int i = 0; i < 12 && !_stop.IsCancellationRequested && RadioDriver.IsPresent(id); i++)
+            {
+                Thread.Sleep(250);
+            }
+            WaitReplugged(id);
+            return OpenRadio(id, _stop.Token);
+        }
+    }
+
+    // Up to 15 s for the re-plugged adapter to come back on WinUSB.
+    private void WaitReplugged(string id)
+    {
+        for (int i = 0; i < 60 && !_stop.IsCancellationRequested
+            && !(RadioDriver.IsPresent(id) && RadioDriver.IsOnWinUsb(id) && !RadioDriver.NeedsRestart(id)); i++)
+        {
+            Thread.Sleep(250);
+        }
+    }
+
     // WinUSB's device interface appears a moment after the bind.
     private static WinUsbDevice OpenRadio(string id, CancellationToken stop)
     {
@@ -808,7 +929,7 @@ internal sealed class Engine
                 WaitHandle.WaitAny([_running.WaitHandle, _stop.Token.WaitHandle]);
                 continue;
             }
-            (ulong Address, string Name)? wanted;
+            (ulong Address, string Name, bool Hd)? wanted;
             lock (_lock)
             {
                 wanted = _micWanted;
@@ -820,7 +941,7 @@ internal sealed class Engine
             }
             try
             {
-                AttachMic(server, w.Address, w.Name);
+                AttachMic(server, w.Address, w.Name, w.Hd);
             }
             catch (Exception e) when (e is not OutOfMemoryException)
             {
@@ -831,9 +952,9 @@ internal sealed class Engine
         }
     }
 
-    private void AttachMic(UsbIpServer server, ulong address, string name)
+    private void AttachMic(UsbIpServer server, ulong address, string name, bool hd)
     {
-        var mic = new MicDevice(address, name);
+        var mic = new MicDevice(address, name, hd);
         using (RegistryKey names = Registry.LocalMachine.CreateSubKey(RadioDriver.StateKey + @"\MicNames"))
         {
             // Windows keeps the name it saw first for a device; a renamed pair needs its old device nodes removed.
@@ -849,7 +970,7 @@ internal sealed class Engine
         bool current;
         lock (_lock)
         {
-            current = _micWanted is { } w && w.Address == address && w.Name == name && _running.IsSet;
+            current = _micWanted is { } w && w.Address == address && w.Name == name && w.Hd == hd && _running.IsSet;
             if (current)
             {
                 _micClient = client;
@@ -865,7 +986,7 @@ internal sealed class Engine
         }
         mic.CaptureChanged += capturing => OnCapture(mic, capturing);
         Volatile.Write(ref _mic, mic);
-        Log.Info("mic", $"attached \"Headset (A2DP, {name})\" ({mic.Serial})");
+        Log.Info("mic", $"attached \"Headset ({mic.Product})\" ({mic.Serial})");
         try
         {
             mic.Serve(client);

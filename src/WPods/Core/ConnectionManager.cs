@@ -91,6 +91,12 @@ public sealed class ConnectionManager : IAsyncDisposable
     /// <summary>True when the attach-time Hands-Free policy starts a real change in Windows, false when it ends.</summary>
     public event Action<ulong, bool>? HandsFreeChanging;
 
+    /// <summary>
+    /// HD voice of a pair for the service (<see cref="HdVoiceOn"/>): raised on attach and on a change of the setting,
+    /// before Windows' Hands-Free changes.
+    /// </summary>
+    public event Action<ulong, bool>? HdVoiceChanged;
+
     public void Start()
     {
         Log.Info("conn", $"start, lastUsed={Mac.Format(Settings.LastUsed)}");
@@ -98,6 +104,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         _link.DevicesChanged += OnLinkDevicesChanged;
         _link.Start();
         CheckPairings();
+        SeedHostSettings();
         // The initial enumeration raises no events; subscribers created before Start need the first list.
         DevicesChanged?.Invoke();
         _ = Task.Run(() => OnLinkAsync(0));
@@ -290,15 +297,26 @@ public sealed class ConnectionManager : IAsyncDisposable
         return false;
     }
 
-    /// <summary>A Hands-Free change applies at once to the attached device; throws if Windows rejects it (still saved).</summary>
+    /// <summary>
+    /// A Hands-Free change applies at once to the attached device; throws if Windows rejects it (still saved). Windows'
+    /// Hands-Free is off while DisableHandsFree or HD voice is on.
+    /// </summary>
     public async Task SetHostSettingsAsync(ulong address, HostSettings settings)
     {
-        bool handsFreeChanged = Settings.Get(address).DisableHandsFree != settings.DisableHandsFree;
-        Log.Info("conn", $"host settings {Mac.Format(address)}: disableHandsFree={settings.DisableHandsFree} lowLatency={settings.LowLatency} micMode={settings.MicMode} duckPercent={settings.DuckPercent}");
+        HostSettings previous = Settings.Get(address);
+        bool hdVoice = HdVoiceOn(address, settings);
+        bool handsFreeOff = settings.DisableHandsFree || hdVoice;
+        bool handsFreeChanged = (previous.DisableHandsFree || HdVoiceOn(address, previous)) != handsFreeOff;
+        Log.Info("conn", $"host settings {Mac.Format(address)}: disableHandsFree={settings.DisableHandsFree} hdVoice={settings.HdVoice} (runs {hdVoice}) lowLatency={settings.LowLatency} micMode={settings.MicMode} duckPercent={settings.DuckPercent}");
+        // The service learns the HD voice choice before the mic pipeline starts or stops the voice link (HostSettingsChanged).
+        if (previous.HdVoice != settings.HdVoice)
+        {
+            HdVoiceChanged?.Invoke(address, hdVoice);
+        }
         Settings.Set(address, settings);
         if (handsFreeChanged && Session?.Address == address)
         {
-            if (settings.DisableHandsFree)
+            if (handsFreeOff)
             {
                 await ApplyHandsFreeAsync(address, disable: true).ConfigureAwait(false);
             }
@@ -308,6 +326,12 @@ public sealed class ConnectionManager : IAsyncDisposable
             }
         }
     }
+
+    /// <summary>HD voice runs for the pair: on in its settings and offered for its model.</summary>
+    public bool HdVoiceOn(ulong address, HostSettings settings) =>
+        settings.HdVoice && ServiceStatus.HdVoiceAllowed(Session is { } session && session.Address == address
+            ? session.State.ModelNumber
+            : Settings.GetModel(address)?.Number);
 
     public async ValueTask DisposeAsync()
     {
@@ -336,11 +360,38 @@ public sealed class ConnectionManager : IAsyncDisposable
         DevicesChanged?.Invoke();
         _ = Task.Run(() =>
         {
+            SeedHostSettings();
             if (CheckPairings())
             {
                 DevicesChanged?.Invoke();
             }
         });
+    }
+
+    private void SeedHostSettings()
+    {
+        foreach (LinkDevice device in _link.Snapshot())
+        {
+            SeedHostSettings(device.Address, Settings.GetModel(device.Address)?.Number ?? Models.ModelNumberOf(device.ProductId));
+        }
+    }
+
+    // A pair without the stereo mic stream keeps Hands-Free by default: it is its only mic.
+    private void SeedHostSettings(ulong address, string? modelNumber)
+    {
+        if (Models.HasStereoMic(modelNumber))
+        {
+            return;
+        }
+        try
+        {
+            Settings.SetIfMissing(address, HostSettings.Default with { DisableHandsFree = false });
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Kept in memory and written with the next settings change.
+            Log.Warn("conn", $"host settings of {Mac.Format(address)} not saved: {e.Message}");
+        }
     }
 
     // True when a re-paired pair's remembered data was cleared.
@@ -646,6 +697,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         // Before the session reads the remembered capabilities and pod-saved settings.
         CheckPairing(address);
         var session = new AapSession(address, stream, Settings, _link.ProductId(address));
+        SeedHostSettings(address, session.State.ModelNumber);
         if (_reattaching is { } previous && previous.Address == address)
         {
             session.CarryOver(previous);
@@ -823,9 +875,12 @@ public sealed class ConnectionManager : IAsyncDisposable
     {
         // Set on the SetEnabled thread before Windows changes the service; read after the await.
         bool changing = false;
+        HostSettings settings = Settings.Get(address);
+        bool hdVoice = HdVoiceOn(address, settings);
+        HdVoiceChanged?.Invoke(address, hdVoice);
         try
         {
-            await ApplyHandsFreeAsync(address, Settings.Get(address).DisableHandsFree, () =>
+            await ApplyHandsFreeAsync(address, settings.DisableHandsFree || hdVoice, () =>
             {
                 if (!changing)
                 {

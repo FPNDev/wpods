@@ -89,6 +89,12 @@ internal static unsafe partial class RadioDriver
         && CM_Get_DevNode_Status(out uint status, out _, dev, 0) == 0
         && (status & 0x00000100 /* DN_NEED_RESTART */) != 0;
 
+    /// <summary>The instance's devnode status flags and problem code, for logs.</summary>
+    public static string DescribeState(string instanceId) =>
+        CM_Locate_DevNode(out uint dev, instanceId, 0) != 0 ? "not present"
+        : CM_Get_DevNode_Status(out uint status, out uint problem, dev, 0) != 0 ? "status unreadable"
+        : $"devnode status 0x{status:X8}, problem {problem}, service {GetService(dev) ?? "none"}";
+
     /// <summary>Find's reason when no adapter can be taken over: only adapters not connected over USB (UART, SDIO).</summary>
     public const string NotUsb = "not-usb";
 

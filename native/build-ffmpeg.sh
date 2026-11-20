@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Configures, builds and installs a minimal LGPL FFmpeg with MSVC: avcodec (aac decoder only) + avutil + swresample.
+# Configures, builds and installs a minimal LGPL FFmpeg with MSVC: avcodec (aac and sbc decoders, sbc encoder only;
+# sbc also does mSBC) + avutil + swresample.
 # --enable-small strips help/name strings; --optflags=-O2 keeps speed codegen (measured: same decode speed as plain
 # -O2, ~75 KB smaller; MSVC -O1 would be ~12% slower). -MT + -NODEFAULTLIB:libucrt.lib + ucrt.lib = hybrid CRT.
 # -guard:cf (compile + link) = Control Flow Guard.
@@ -18,7 +19,7 @@ cd "$build"
     --disable-programs --disable-doc --disable-debug \
     --disable-avformat --disable-avfilter --disable-avdevice --disable-swscale --disable-postproc \
     --disable-network --disable-pixelutils --disable-iamf \
-    --disable-everything --enable-decoder=aac \
+    --disable-everything --enable-decoder=aac --enable-decoder=sbc --enable-encoder=sbc \
     --enable-small --optflags=-O2 \
     --extra-cflags="-MT -guard:cf" --extra-ldflags="-NODEFAULTLIB:libucrt.lib -guard:cf" --extra-libs=ucrt.lib
 make -j"$(nproc)"

@@ -621,4 +621,45 @@ internal static unsafe partial class Native
     [LibraryImport("wpods_native.dll")]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     public static partial void wpn_fp_set_ftz_daz();
+
+    // LC3 (HD voice): mono float PCM in [-1, 1] at pcmRate; a null frame conceals a lost one.
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial nint wpn_lc3_decoder_create(int frameUs, int sampleRate, int pcmRate);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial int wpn_lc3_decode(nint decoder, byte* frame, int nbytes, float* pcm);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial void wpn_lc3_decoder_free(nint decoder);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial nint wpn_lc3_encoder_create(int frameUs, int sampleRate, int pcmRate);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial int wpn_lc3_encode(nint encoder, float* pcm, int nbytes, byte* frame);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial void wpn_lc3_encoder_free(nint encoder);
+
+    // Loopback capture (HD voice downlink): what Windows plays to a pair, mono float 48 kHz.
+    // Read returns samples, 0 after timeoutMs without audio, or a negative HRESULT (reopen).
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial int wpn_loopback_open(ulong btAddress, out nint capture, out uint period);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial int wpn_loopback_read(nint capture, float* output, uint capacity, uint timeoutMs);
+
+    [LibraryImport("wpods_native.dll")]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    public static partial void wpn_loopback_close(nint capture);
 }

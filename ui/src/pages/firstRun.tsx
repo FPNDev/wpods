@@ -4,17 +4,17 @@ import { setChecked, setText } from '../dom';
 import { post } from '../host';
 import { t, type LabelKey } from '../i18n';
 import { Icon, type IconName } from '../icons';
-import { current, store } from '../state';
+import { current, micLabel, store } from '../state';
 import type { Ctx, Page } from './page';
 
-// The WPods mic shows up in Windows as "Headset (A2DP, <AirPods name>)": the connected pair, else the selected one.
-const micName = (): string => {
+// The WPods mic's name parts: the connected pair, else the selected one.
+const micVars = (): { name: string; label: string } => {
   const d =
     store.attached === null
       ? current()
       : (store.byId.get(store.attached) ?? current());
 
-  return d?.name ?? 'AirPods';
+  return { name: d?.name ?? 'AirPods', label: micLabel(d) };
 };
 
 const Fact = (p: { icon: IconName; title: LabelKey; desc: LabelKey }) => (
@@ -112,7 +112,7 @@ export const createFirstRun = (ctx: Ctx): Page => {
         setChecked(startup.input, store.startup);
       },
       mic: () => {
-        setText(micDesc, t('firstRun.micDesc', { name: micName() }));
+        setText(micDesc, t('firstRun.micDesc', micVars()));
       },
     },
     returnFocus: () => readTerms,

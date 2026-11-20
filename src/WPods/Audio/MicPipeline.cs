@@ -10,12 +10,17 @@ public enum MicStatus
 {
     /// <summary>No app captures, or one captures while no AirPods are attached or Hands-Free has their mic.</summary>
     NotActive,
-    /// <summary>An app captures and AirPods are attached; no START written yet in this session.</summary>
+    /// <summary>An app captures and AirPods are attached; they have not confirmed a START yet.</summary>
     Starting,
-    /// <summary>A START was written or audio decoded; silence stays Live, as the AirPods send nothing while it is quiet.</summary>
+    /// <summary>
+    /// The AirPods reported their mic on after a START, or audio was decoded; silence stays Live, as the AirPods send
+    /// nothing while it is quiet.
+    /// </summary>
     Live,
     /// <summary>The virtual mic is unavailable, the decoder failed to load, a START write failed or no audio came.</summary>
     Problem,
+    /// <summary>The attached pair has no stereo mic stream: its mic works only through Hands-Free.</summary>
+    Unsupported,
 }
 
 /// <summary>A stage <see cref="MicPipeline"/> loads: the effective mic mode's model, or the voice enhancement.</summary>
@@ -40,6 +45,9 @@ public enum StageLoad
 /// the time, decoded only then). The session read loop only queues the audio packets; one real-time mic thread (MMCSS
 /// Pro Audio, performance cores) decodes AAC-ELD and runs mode model, gain, enhancement and limiter in float before one
 /// 16-bit conversion. Create before <see cref="ConnectionManager.Start"/>.
+/// With HD voice on for the attached pair, the service's Hands-Free voice link is the source instead: started and
+/// stopped with 0xF1, its uplink (0x05) decoded by <see cref="VoiceDecoder"/> into the same stages. Its downlink carries
+/// what Windows plays to the pair (<see cref="VoiceEncoder"/>), as the AirPods play no A2DP meanwhile.
 /// </summary>
 public sealed class MicPipeline
 {
@@ -55,6 +63,9 @@ public sealed class MicPipeline
     private const int FirstAudioMs = 1000;
     private const int StartTries = 5;
     private const int NoAudioGiveUpMs = 5000;
+    // HD voice: the service sets up the voice link itself and reports when no codec works, so 0xF1 is not resent while
+    // it does; nothing decoded within the 0x58 stream's whole no-audio budget is a problem.
+    private const int VoiceNoAudioMs = StartTries * FirstAudioMs + NoAudioGiveUpMs;
     // Hands-Free mic check interval while the mic streams. The AirPods drop the link when Hands-Free starts while
     // their mic streams here, and they report Hands-Free call audio only after that.
     private const int HandsFreePollMs = 50;
@@ -75,6 +86,8 @@ public sealed class MicPipeline
     private static readonly byte[] StartMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x01, 0x82, 0x00, 0x00, 0x00, 0x04, 0x96, 0x00];
     // AACP_STOP_AUDIO.
     private static readonly byte[] StopMicrophone = [0x04, 0x00, 0x04, 0x00, 0x58, 0x00, 0x00, 0x00, 0x02, 0x00, 0x03, 0x01];
+    private static readonly byte[] VoiceOn = [1];
+    private static readonly byte[] VoiceOff = [0];
 
     private readonly ConnectionManager _connections;
     private readonly SettingsStore _settings;
@@ -94,9 +107,14 @@ public sealed class MicPipeline
     // Mic-thread state (one session at a time; reset on detach after its read loop ended).
     private readonly float[] _pcm = GC.AllocateArray<float>(PcmCapacity, pinned: true);
     private readonly short[] _output = GC.AllocateArray<short>(PcmCapacity, pinned: true);
-    private AacDecoder? _decoder;
-    // Written under _lock.
+    private FfmpegDecoder? _decoder;
+    // HD voice: the current voice link's decoder, null while the link is down or its codec is not decoded; and its
+    // downlink, null while the link is down or its codec has no encoder.
+    private VoiceDecoder? _voice;
+    private VoiceEncoder? _downlink;
+    // Written under _lock: the stereo mic's decoder, HD voice's decoder could not load.
     private bool _nativeFailed;
+    private bool _voiceNativeFailed;
     private int _fill;
     // Position on the AirPods' clock (48 kHz samples) of the next sample written, -1 until the first AU; and the AU
     // timestamp expected next (24 kHz units). Lost AUs move the position on, so the jitter buffer conceals them.
@@ -121,8 +139,16 @@ public sealed class MicPipeline
     private AapSession? _session;
     // Name of the attached pair at attach (the Windows name unless the AirPods already reported theirs).
     private string _pairName = "";
+    // The attached pair's model has the 0x58 stream (Models.HasStereoMic); without it (and HD voice) no START and no
+    // virtual mic.
+    private bool _stereoMic;
+    // HD voice is on and allowed for the attached pair: the voice link is the source (START/STOP = 0xF1 1/0), Windows'
+    // Hands-Free is off for it, so its call audio and mic states are not tracked.
+    private bool _hdVoice;
+    // The service reported that no codec worked for the voice link since the last start.
+    private bool _voiceFailed;
     private bool _startSent;
-    // A START write succeeded or audio was decoded in this session.
+    // The AirPods reported their mic on after a START, or audio was decoded, in this session.
     private bool _started;
     // The latest START write failed.
     private bool _startFailed;
@@ -151,7 +177,7 @@ public sealed class MicPipeline
     private TaskCompletionSource? _handsFreeEnded;
     // No START before this tick (HandsFreeHoldMs); kept across a reattach.
     private long _holdUntil;
-    // Saved DisableHandsFree of the attached pair, to see Hands-Free being enabled.
+    // Windows' Hands-Free is off for the attached pair (DisableHandsFree or HD voice), to see it being enabled.
     private bool _disableHandsFree;
     private volatile bool _flush;
     // Saved mic mode of the attached pair.
@@ -204,7 +230,7 @@ public sealed class MicPipeline
 
     /// <summary>
     /// Problem cause: "M1" decoder or voice processor failed to load, "M2" START write failed, "M5" no audio after every
-    /// START. Set before <see cref="StatusChanged"/> is raised.
+    /// START, "M6" the HD voice link failed or brought no audio. Set before <see cref="StatusChanged"/> is raised.
     /// </summary>
     public string? FaultCode => _faultCode;
 
@@ -236,7 +262,7 @@ public sealed class MicPipeline
         }
     }
 
-    /// <summary>Sends 0x58 STOP before an intentional detach: AirPods cut off mid-stream may reconnect on their own.</summary>
+    /// <summary>Sends 0x58 STOP (HD voice: 0xF1 0) before an intentional detach: AirPods cut off mid-stream may reconnect on their own.</summary>
     public Task StopStreamAsync()
     {
         lock (_lock)
@@ -252,25 +278,31 @@ public sealed class MicPipeline
     private void OnAttached(AapSession session)
     {
         string pairName = _connections.GetDevices().Find(d => d.Address == session.Address)?.Name ?? "";
+        bool stereoMic = Models.HasStereoMic(session.State.ModelNumber);
+        bool hasMic;
         lock (_lock)
         {
             _session = session;
             _pairName = pairName;
+            _stereoMic = stereoMic;
             _startSent = false;
             _started = false;
             _startFailed = false;
             _noAudio = false;
+            _voiceFailed = false;
             _micOn = false;
             ResetHandsFreeLocked();
             HostSettings settings = _settings.Get(session.Address);
+            _hdVoice = HdVoiceOn(session, settings);
+            hasMic = _stereoMic || _hdVoice;
             _mode = settings.MicMode;
-            _disableHandsFree = settings.DisableHandsFree;
+            _disableHandsFree = settings.DisableHandsFree || _hdVoice;
             _keepOn = settings.LowLatency;
             MicConfig config = _settings.Mic;
-            Log.Info("mic", $"session {Mac.Format(session.Address)} attached, mode={_mode} (runs {config.EffectiveMode(_mode)}), capturing={_capturing}, keep on={_keepOn}");
+            Log.Info("mic", $"session {Mac.Format(session.Address)} attached, mode={_mode} (runs {config.EffectiveMode(_mode)}), capturing={_capturing}, keep on={_keepOn}, stereo mic={_stereoMic}, HD voice={_hdVoice}");
             RequestStagesLocked(config);
             UpdateStatusLocked("session attached");
-            if (StreamingLocked)
+            if (StreamingLocked && !_hdVoice)
             {
                 _handsFreePoll.Change(0, Timeout.Infinite);
             }
@@ -278,11 +310,13 @@ public sealed class MicPipeline
         session.Changed += OnSessionChanged;
         session.PacketReceived += OnPacket;
         session.CallAudioChanged += OnCallAudioChanged;
+        session.VoiceLinkChanged += OnVoiceLink;
+        session.VoiceDataReceived += OnVoiceData;
         // The service may have reported call audio before this subscription.
         OnCallAudioChanged(session.CallAudio);
         // The AirPods report their own name right after attach; sending the Windows name first would rename the mic
-        // twice on every connect (and Windows gives a renamed mic a new endpoint).
-        if (session.State.Name is null)
+        // twice on every connect (and Windows gives a renamed mic a new endpoint). A pair without a mic needs no name.
+        if (session.State.Name is null && hasMic)
         {
             _micNameFallback.Change(MicNameWaitMs, Timeout.Infinite);
         }
@@ -298,6 +332,8 @@ public sealed class MicPipeline
     {
         session.PacketReceived -= OnPacket;
         session.CallAudioChanged -= OnCallAudioChanged;
+        session.VoiceLinkChanged -= OnVoiceLink;
+        session.VoiceDataReceived -= OnVoiceData;
         session.Changed -= OnSessionChanged;
         lock (_lock)
         {
@@ -311,7 +347,7 @@ public sealed class MicPipeline
         }
         Log.Info("mic", $"session {Mac.Format(session.Address)} detached");
         using var done = new ManualResetEventSlim();
-        Enqueue(new Work(null, 0, 0, done));
+        Enqueue(new Work(WorkKind.Reset, null, 0, 0, default, done));
         done.Wait();
     }
 
@@ -320,11 +356,16 @@ public sealed class MicPipeline
     {
         _decoder?.Dispose();
         _decoder = null;
+        _downlink?.Dispose();
+        _downlink = null;
+        _voice?.Dispose();
+        _voice = null;
         _fill = 0;
         _position = -1;
         lock (_lock)
         {
             _nativeFailed = false;
+            _voiceNativeFailed = false;
             _model.ResetLocked();
             _enhancement.ResetLocked();
         }
@@ -334,6 +375,16 @@ public sealed class MicPipeline
     {
         if ((change & DeviceChange.Identity) != 0)
         {
+            // 0x1D may name another model than the product ID did.
+            lock (_lock)
+            {
+                if (_session is { } attached
+                    && SetSourceLocked(Models.HasStereoMic(attached.State.ModelNumber), HdVoiceOn(attached, _settings.Get(attached.Address)), $"model {attached.State.ModelNumber} reported"))
+                {
+                    ApplyStreamingLocked("model reported");
+                    UpdateStatusLocked("model reported");
+                }
+            }
             SetMicDevice(allowPairName: false);
         }
         if ((change & DeviceChange.Connection) == 0)
@@ -349,36 +400,47 @@ public sealed class MicPipeline
         }
     }
 
-    // AAP-reported name, else (allowPairName) the Windows name. _lock is never held while calling into VirtualMic.
+    // AAP-reported name, else (allowPairName) the Windows name; no mic without the stereo mic stream or HD voice, "HD"
+    // in its name for a model without the stereo mic. _lock is never held while calling into VirtualMic.
     private void SetMicDevice(bool allowPairName)
     {
         AapSession? session;
         string pairName;
+        bool hasMic;
+        bool stereoMic;
         lock (_lock)
         {
             session = _session;
             pairName = _pairName;
+            hasMic = _stereoMic || _hdVoice;
+            stereoMic = _stereoMic;
         }
         if (session is null)
         {
             return;
         }
-        if (session.State.Name is { } name)
+        if (!hasMic)
         {
             _micNameFallback.Change(Timeout.Infinite, Timeout.Infinite);
-            _mic.SetDevice(session.Address, name, reported: true);
+            _mic.ClearDevice();
+        }
+        else if (session.State.Name is { } name)
+        {
+            _micNameFallback.Change(Timeout.Infinite, Timeout.Infinite);
+            _mic.SetDevice(session.Address, name, reported: true, hdVoice: !stereoMic);
         }
         else if (allowPairName)
         {
-            _mic.SetDevice(session.Address, pairName, reported: false);
+            _mic.SetDevice(session.Address, pairName, reported: false, hdVoice: !stereoMic);
         }
     }
 
     private void OnHostSettingsChanged(ulong address, HostSettings settings)
     {
+        bool sourceChanged;
         lock (_lock)
         {
-            if (_session?.Address != address)
+            if (_session is not { } session || session.Address != address)
             {
                 return;
             }
@@ -388,17 +450,65 @@ public sealed class MicPipeline
                 Log.Info("mic", $"mode -> {settings.MicMode}");
                 RequestStagesLocked(_settings.Mic);
             }
-            if (_disableHandsFree && !settings.DisableHandsFree)
+            bool hdVoice = HdVoiceOn(session, settings);
+            sourceChanged = SetSourceLocked(_stereoMic, hdVoice, hdVoice ? "HD voice on" : "HD voice off");
+            bool disableHandsFree = settings.DisableHandsFree || hdVoice;
+            if (_disableHandsFree && !disableHandsFree)
             {
                 HoldLocked("Hands-Free enabled");
             }
-            _disableHandsFree = settings.DisableHandsFree;
+            else if (sourceChanged && hdVoice)
+            {
+                // Windows is letting Hands-Free go meanwhile; the voice link starts once it has.
+                HoldLocked("HD voice on");
+            }
+            _disableHandsFree = disableHandsFree;
             if (_keepOn != settings.LowLatency)
             {
                 _keepOn = settings.LowLatency;
                 ApplyStreamingLocked(_keepOn ? "low latency on" : "low latency off");
             }
+            else if (sourceChanged)
+            {
+                ApplyStreamingLocked(hdVoice ? "HD voice on" : "HD voice off");
+            }
+            if (sourceChanged)
+            {
+                UpdateStatusLocked(hdVoice ? "HD voice on" : "HD voice off");
+            }
         }
+        if (sourceChanged)
+        {
+            SetMicDevice(allowPairName: true);
+        }
+    }
+
+    private static bool HdVoiceOn(AapSession session, HostSettings settings) =>
+        settings.HdVoice && ServiceStatus.HdVoiceAllowed(session.State.ModelNumber);
+
+    // The attached pair's mic source (0x58 stream, HD voice or none) may change when its model is reported or HD voice
+    // is switched: a running old source is stopped, the caller starts the new one. False when nothing changed.
+    private bool SetSourceLocked(bool stereoMic, bool hdVoice, string reason)
+    {
+        if (stereoMic == _stereoMic && hdVoice == _hdVoice)
+        {
+            return false;
+        }
+        bool activeChanged = hdVoice != _hdVoice || !hdVoice;
+        if (activeChanged && _startSent && _session is { } session)
+        {
+            _ = StopLocked(session, reason);
+        }
+        _stereoMic = stereoMic;
+        _hdVoice = hdVoice;
+        Log.Info("mic", $"stereo mic={stereoMic}, HD voice={hdVoice} ({reason})");
+        _flush = true;
+        if (hdVoice)
+        {
+            ResetHandsFreeLocked();
+            _handsFreePoll.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+        return true;
     }
 
     private void OnMicConfigChanged(MicConfig config)
@@ -456,8 +566,7 @@ public sealed class MicPipeline
         if (!_capturing)
         {
             ApplyStreamingLocked("capture stopped");
-            _faultCode = null;
-            SetStatusLocked(_appCapture == CaptureState.Unavailable ? MicStatus.Problem : MicStatus.NotActive, reason);
+            UpdateStatusLocked(reason);
             return;
         }
         _flush = true;
@@ -476,9 +585,10 @@ public sealed class MicPipeline
         ApplyStreamingLocked("capture started");
     }
 
-    private bool StreamingLocked => _capturing || _keepOn;
+    private bool StreamingLocked => (_stereoMic || _hdVoice) && (_capturing || _keepOn);
 
-    // The AirPods mic streams while someone listens or, in low latency mode, all the time.
+    // The AirPods mic streams while someone listens or, in low latency mode, all the time (only with the stereo mic or
+    // HD voice).
     private void ApplyStreamingLocked(string reason)
     {
         if (!StreamingLocked)
@@ -500,7 +610,10 @@ public sealed class MicPipeline
         {
             return;
         }
-        _handsFreePoll.Change(0, Timeout.Infinite);
+        if (!_hdVoice)
+        {
+            _handsFreePoll.Change(0, Timeout.Infinite);
+        }
         if (!_startSent && !_handsFreeAudio && IsReady(session))
         {
             TryStartLocked(session, reason);
@@ -522,6 +635,11 @@ public sealed class MicPipeline
             if (!_startSent)
             {
                 TryStartLocked(session, "Hands-Free hold ended");
+                return;
+            }
+            if (_hdVoice)
+            {
+                CheckVoiceLocked(session, now);
                 return;
             }
             long lastAudio = Volatile.Read(ref _lastAudio);
@@ -564,6 +682,36 @@ public sealed class MicPipeline
         }
     }
 
+    // HD voice: restarts the voice link when its audio stalled; nothing within VoiceNoAudioMs of a start is a problem.
+    private void CheckVoiceLocked(AapSession session, long now)
+    {
+        long lastAudio = Volatile.Read(ref _lastAudio);
+        long silent = now - lastAudio;
+        long sinceStart = now - _lastStart;
+        if (lastAudio > _lastStart)
+        {
+            // The voice link carries packets even in silence, so a gap is a stall.
+            if (silent >= StallAfterMs && sinceStart >= RestartEveryMs)
+            {
+                Log.Info("mic", $"voice link stop sent to {Mac.Format(session.Address)} (stalled {silent} ms)");
+                _ = WriteStopAsync(session, voice: true);
+                SendStartLocked(session, now, $"stalled {silent} ms");
+                ArmLocked(VoiceNoAudioMs);
+                return;
+            }
+            ArmLocked(Math.Max(StallAfterMs - silent, RestartEveryMs - sinceStart));
+            return;
+        }
+        if (sinceStart < VoiceNoAudioMs)
+        {
+            ArmLocked(VoiceNoAudioMs - sinceStart);
+            return;
+        }
+        Log.Warn("mic", $"no HD voice audio {sinceStart} ms after the voice link start, giving up until audio comes or capture starts again");
+        _noAudio = true;
+        UpdateStatusLocked("no HD voice audio");
+    }
+
     // Read loop: handles the audio state report and queues audio packets for the mic thread.
     private void OnPacket(ReadOnlySpan<byte> packet)
     {
@@ -574,7 +722,12 @@ public sealed class MicPipeline
             lock (_lock)
             {
                 _micOn = (packet[12] & 0x20) != 0;
-                if (callAudio != _reportedCallAudio && _session is not null)
+                if (_micOn && _startSent && !_started && !_hdVoice)
+                {
+                    _started = true;
+                    UpdateStatusLocked("mic on reported");
+                }
+                if (callAudio != _reportedCallAudio && _session is not null && !_hdVoice)
                 {
                     _reportedCallAudio = callAudio;
                     Log.Info("mic", $"Hands-Free call audio {(callAudio ? "started" : "ended")} (AirPods report)");
@@ -596,7 +749,35 @@ public sealed class MicPipeline
         }
         byte[] data = ArrayPool<byte>.Shared.Rent(packet.Length);
         packet.CopyTo(data);
-        Enqueue(new Work(data, packet.Length, Environment.TickCount64, null));
+        Enqueue(new Work(WorkKind.StereoMic, data, packet.Length, Environment.TickCount64, default, null));
+    }
+
+    // Read loop. The link's report goes through the queue too, so the mic thread switches decoders between the right
+    // packets. A failure is a problem (M6) until the next start.
+    private void OnVoiceLink(VoiceLink link)
+    {
+        lock (_lock)
+        {
+            if (link.State == VoiceLinkState.Failed && _hdVoice && _startSent && !_voiceFailed)
+            {
+                Log.Warn("mic", "voice link failed: no codec worked");
+                _voiceFailed = true;
+                UpdateStatusLocked("voice link failed");
+            }
+        }
+        Enqueue(new Work(WorkKind.VoiceLink, null, 0, Environment.TickCount64, link, null));
+    }
+
+    // Read loop: decoded even with nobody listening (low latency mode), for the link's sequence and downlink silence.
+    private void OnVoiceData(ReadOnlySpan<byte> data)
+    {
+        if (data.IsEmpty)
+        {
+            return;
+        }
+        byte[] copy = ArrayPool<byte>.Shared.Rent(data.Length);
+        data.CopyTo(copy);
+        Enqueue(new Work(WorkKind.Voice, copy, data.Length, Environment.TickCount64, default, null));
     }
 
     private void Enqueue(Work work)
@@ -641,7 +822,18 @@ public sealed class MicPipeline
                 }
                 try
                 {
-                    ProcessPacket(work.Data.AsSpan(0, work.Length), work.Tick);
+                    switch (work.Kind)
+                    {
+                        case WorkKind.StereoMic:
+                            ProcessPacket(work.Data.AsSpan(0, work.Length), work.Tick);
+                            break;
+                        case WorkKind.VoiceLink:
+                            ApplyVoiceLink(work.Link);
+                            break;
+                        case WorkKind.Voice:
+                            ProcessVoice(work.Data.AsSpan(0, work.Length), work.Tick);
+                            break;
+                    }
                 }
                 catch (Exception e)
                 {
@@ -649,10 +841,23 @@ public sealed class MicPipeline
                 }
                 finally
                 {
-                    ArrayPool<byte>.Shared.Return(work.Data!);
+                    if (work.Data is { } data)
+                    {
+                        ArrayPool<byte>.Shared.Return(data);
+                    }
                 }
             }
         }
+    }
+
+    private void ResetStream()
+    {
+        _flush = false;
+        _fill = 0;
+        _errors = 0;
+        _inputMeter = default;
+        _outputMeter = default;
+        _levelLogTick = _timingLogTick = Environment.TickCount64;
     }
 
     // Mic thread: one 0x58 audio packet, received at tick now.
@@ -660,14 +865,9 @@ public sealed class MicPipeline
     {
         if (_flush)
         {
-            _flush = false;
+            ResetStream();
             _decoder?.Flush();
-            _fill = 0;
             _position = -1;
-            _errors = 0;
-            _inputMeter = default;
-            _outputMeter = default;
-            _levelLogTick = _timingLogTick = Environment.TickCount64;
         }
         if (_decoder is null && !TryCreateNative())
         {
@@ -688,7 +888,129 @@ public sealed class MicPipeline
             audio |= Decode(packet.Slice(start, length), now);
             offset = start + length;
         }
-        if (!audio)
+        if (audio)
+        {
+            OnDecoded(now, voice: false);
+        }
+    }
+
+    // Mic thread: a voice link that came up gets a new decoder and downlink; a link down drops them.
+    private void ApplyVoiceLink(VoiceLink link)
+    {
+        if (link.State == VoiceLinkState.Up && _voice?.Link == link)
+        {
+            return;
+        }
+        _downlink?.Dispose();
+        _downlink = null;
+        _voice?.Dispose();
+        _voice = null;
+        if (link.State != VoiceLinkState.Up)
+        {
+            return;
+        }
+        try
+        {
+            _voice = VoiceDecoder.Create(link);
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
+        {
+            // Problem (M1) while HD voice is on; its own flag, so the stereo mic's decoder is still tried without it.
+            Log.Error("mic", "voice decoder init failed", e);
+            lock (_lock)
+            {
+                _voiceNativeFailed = true;
+                UpdateStatusLocked("voice decoder init failed");
+            }
+            return;
+        }
+        lock (_lock)
+        {
+            if (_voiceNativeFailed)
+            {
+                _voiceNativeFailed = false;
+                UpdateStatusLocked("voice decoder created");
+            }
+        }
+        _fill = 0;
+        // Positions start at this PC's clock: a new link continues the old one's timeline, so the service's jitter
+        // buffer never takes its samples as late.
+        _position = Environment.TickCount64 * (VoiceDecoder.OutputRate / 1000);
+        if (_voice?.TakeSilence() is { } silence)
+        {
+            SendDownlink(silence);
+        }
+        StartDownlink(link);
+    }
+
+    // Mic thread, after the silent unit went out: the service sends that until the downlink's first data comes.
+    private void StartDownlink(VoiceLink link)
+    {
+        AapSession? session;
+        lock (_lock)
+        {
+            session = _session;
+        }
+        if (_voice is null || session is null)
+        {
+            return;
+        }
+        try
+        {
+            _downlink = VoiceEncoder.Start(link, session);
+        }
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or InvalidOperationException)
+        {
+            // The uplink still works; the downlink stays the silent unit.
+            Log.Error("mic", "voice encoder init failed", e);
+        }
+    }
+
+    // Mic thread: one 0x05 message; samples are dropped (but counted) while nobody listens.
+    private void ProcessVoice(ReadOnlySpan<byte> data, long now)
+    {
+        if (_voice is null)
+        {
+            return;
+        }
+        if (_flush)
+        {
+            ResetStream();
+        }
+        _voice.Push(data);
+        bool audio = false;
+        int samples;
+        while ((samples = _voice.Next(_pcm.AsSpan(_fill))) > 0)
+        {
+            audio = true;
+            _downlink?.AdvanceLink(samples);
+            if (!_capturing)
+            {
+                _position += samples;
+                continue;
+            }
+            foreach (float sample in _pcm.AsSpan(_fill, samples))
+            {
+                _inputMeter.Add(sample);
+            }
+            _fill += samples;
+            Emit(now);
+        }
+        if (_voice.TakeSilence() is { } silence)
+        {
+            SendDownlink(silence);
+        }
+        if (audio)
+        {
+            OnDecoded(now, voice: true);
+        }
+    }
+
+    // Mic thread: audio came through (voice: from the HD voice link); a pending start, fault or give-up ends. Audio of
+    // the source not in use, still on its way after a switch, neither counts as flowing nor makes the mic Live.
+    private void OnDecoded(long now, bool voice)
+    {
+        if (voice != Volatile.Read(ref _hdVoice))
         {
             return;
         }
@@ -697,7 +1019,8 @@ public sealed class MicPipeline
         {
             lock (_lock)
             {
-                if (_capturing && (!_started || _startFailed || _noAudio))
+                // Only with a START out: packets still on their way after a STOP never make the mic Live.
+                if (_capturing && _startSent && (!_started || _startFailed || _noAudio || _voiceFailed))
                 {
                     if (_noAudio)
                     {
@@ -707,9 +1030,32 @@ public sealed class MicPipeline
                     _started = true;
                     _startFailed = false;
                     _noAudio = false;
+                    _voiceFailed = false;
                     UpdateStatusLocked("decoded audio");
                 }
             }
+        }
+    }
+
+    // The downlink's silent unit (one framed unit), which the service sends whenever it has no downlink data queued.
+    private void SendDownlink(byte[] silence)
+    {
+        AapSession? session;
+        lock (_lock)
+        {
+            session = _session;
+        }
+        if (session is not null)
+        {
+            _ = WriteDownlinkAsync(session, silence);
+        }
+    }
+
+    private static async Task WriteDownlinkAsync(AapSession session, byte[] silence)
+    {
+        if (!await session.WriteVoiceAsync(ServicePipes.VoiceSilence, silence).ConfigureAwait(false))
+        {
+            Log.Warn("mic", "downlink silence write failed");
         }
     }
 
@@ -718,7 +1064,7 @@ public sealed class MicPipeline
     {
         lock (_lock)
         {
-            if (on == _linkCallAudio || _session is null)
+            if (on == _linkCallAudio || _session is null || _hdVoice)
             {
                 return;
             }
@@ -735,7 +1081,7 @@ public sealed class MicPipeline
         ulong address;
         lock (_lock)
         {
-            if (!StreamingLocked || _session is not { } session)
+            if (!StreamingLocked || _hdVoice || _session is not { } session)
             {
                 return;
             }
@@ -744,7 +1090,7 @@ public sealed class MicPipeline
         bool inUse = HandsFreeMicInUse(address);
         lock (_lock)
         {
-            if (!StreamingLocked || _session?.Address != address)
+            if (!StreamingLocked || _hdVoice || _session?.Address != address)
             {
                 return;
             }
@@ -823,10 +1169,13 @@ public sealed class MicPipeline
             ArmLocked(_holdUntil - now);
             return;
         }
-        CheckHandsFreeMicLocked(session);
-        if (_handsFreeMic)
+        if (!_hdVoice)
         {
-            return;
+            CheckHandsFreeMicLocked(session);
+            if (_handsFreeMic)
+            {
+                return;
+            }
         }
         BeginWaitLocked(now, reason);
         SendStartLocked(session, now, reason);
@@ -855,7 +1204,7 @@ public sealed class MicPipeline
         }
         try
         {
-            _decoder = new AacDecoder();
+            _decoder = FfmpegDecoder.StereoMic();
             Log.Info("mic", "decoder created");
             return true;
         }
@@ -1052,18 +1401,21 @@ public sealed class MicPipeline
 
     private void SendStartLocked(AapSession session, long now, string reason)
     {
-        Log.Info("mic", $"START sent to {Mac.Format(session.Address)} ({reason})");
+        Log.Info("mic", $"{(_hdVoice ? "voice link start" : "START")} sent to {Mac.Format(session.Address)} ({reason})");
         _startTries++;
         _startSent = true;
         _lastStart = now;
-        _ = SendStartAsync(session);
+        _voiceFailed = false;
+        _ = SendStartAsync(session, _hdVoice);
     }
 
     // A write skipped or cancelled because the session is closing is a detach, not a failure. A real failure is
     // Problem (M2) until a later START write succeeds or audio is decoded; the stall re-send retries.
-    private async Task SendStartAsync(AapSession session)
+    private async Task SendStartAsync(AapSession session, bool voice)
     {
-        bool ok = await session.WriteAsync(StartMicrophone).ConfigureAwait(false);
+        bool ok = voice
+            ? await session.WriteVoiceAsync(ServicePipes.VoiceControl, VoiceOn).ConfigureAwait(false)
+            : await session.WriteAsync(StartMicrophone).ConfigureAwait(false);
         if (!ok)
         {
             Log.Warn("mic", "START write failed");
@@ -1073,10 +1425,6 @@ public sealed class MicPipeline
             if (!_startSent || _session != session || (!ok &&(_connections.Session != session || session.Completion.IsCompleted)))
             {
                 return;
-            }
-            if (ok)
-            {
-                _started = true;
             }
             _startFailed = !ok;
             UpdateStatusLocked(ok ? "START written" : "START write failed");
@@ -1091,14 +1439,18 @@ public sealed class MicPipeline
         _started = false;
         _startFailed = false;
         _noAudio = false;
+        _voiceFailed = false;
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
-        Log.Info("mic", $"STOP sent to {Mac.Format(session.Address)} ({reason})");
-        return WriteStopAsync(session);
+        Log.Info("mic", $"{(_hdVoice ? "voice link stop" : "STOP")} sent to {Mac.Format(session.Address)} ({reason})");
+        return WriteStopAsync(session, _hdVoice);
     }
 
-    private static async Task WriteStopAsync(AapSession session)
+    private static async Task WriteStopAsync(AapSession session, bool voice)
     {
-        if (!await session.WriteAsync(StopMicrophone).ConfigureAwait(false))
+        bool ok = voice
+            ? await session.WriteVoiceAsync(ServicePipes.VoiceControl, VoiceOff).ConfigureAwait(false)
+            : await session.WriteAsync(StopMicrophone).ConfigureAwait(false);
+        if (!ok)
         {
             Log.Warn("mic", "STOP write failed");
         }
@@ -1106,12 +1458,20 @@ public sealed class MicPipeline
 
     private void UpdateStatusLocked(string reason)
     {
+        if (_session is not null && !_stereoMic && !_hdVoice)
+        {
+            _faultCode = null;
+            SetStatusLocked(MicStatus.Unsupported, reason);
+            return;
+        }
         if (!_capturing)
         {
+            _faultCode = null;
+            SetStatusLocked(_appCapture == CaptureState.Unavailable ? MicStatus.Problem : MicStatus.NotActive, reason);
             return;
         }
         bool off = _session is null || _handsFreeAudio || _handsFreeMic;
-        string? fault = off ? null : _nativeFailed ? "M1" : _startFailed ? "M2" : _noAudio ? "M5" : null;
+        string? fault = off ? null : _nativeFailed || (_hdVoice && _voiceNativeFailed) ? "M1" : _startFailed ? "M2" : _hdVoice && (_voiceFailed || _noAudio) ? "M6" : _noAudio ? "M5" : null;
         _faultCode = fault;
         SetStatusLocked(off ? MicStatus.NotActive : fault is not null ? MicStatus.Problem : _started ? MicStatus.Live : MicStatus.Starting, reason);
     }
@@ -1285,8 +1645,17 @@ public sealed class MicPipeline
 
     private sealed record Swap(MicOption? Option, IMicStage? Stage);
 
-    // An audio packet (pooled Data, Length bytes, received at Tick), or a detach reset when Done is set.
-    private readonly record struct Work(byte[]? Data, int Length, long Tick, ManualResetEventSlim? Done);
+    private enum WorkKind
+    {
+        Reset,
+        StereoMic,
+        VoiceLink,
+        Voice,
+    }
+
+    // A 0x58 packet or 0x05 voice data (pooled Data, Length bytes, received at Tick), a voice link report, or a detach
+    // reset when Done is set.
+    private readonly record struct Work(WorkKind Kind, byte[]? Data, int Length, long Tick, VoiceLink Link, ManualResetEventSlim? Done);
 
     /// <summary>RMS and peak of the samples added since the last <see cref="Take"/>, in dBFS (full scale = 1).</summary>
     private struct LevelMeter

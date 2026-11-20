@@ -116,6 +116,31 @@ void __stdcall wpn_mixer_push_mic(const int16_t* pcm, uint32_t count, int64_t po
 // All wpn_mixer_* functions are thread-safe and never hold an internal lock while a callback runs, so they may be
 // called under a lock the event callback also takes.
 
+// Loopback capture (mixer.cpp): what Windows plays to the paired device with this address (its A2DP output, else its
+// Hands-Free one) as mono float 48 kHz; period: samples per capture packet. Returns HRESULT (ERROR_NOT_FOUND when the
+// device has no active output). Independent of wpn_mixer_init; one thread at a time per capture.
+int32_t __stdcall wpn_loopback_open(uint64_t btAddress, void** capture, uint32_t* period);
+// Waits up to timeoutMs for audio when none is buffered; returns the samples written to out (at most capacity; 0 = none
+// came, as while Windows plays nothing there), or a negative HRESULT when the stream failed (close it and reopen).
+int32_t __stdcall wpn_loopback_read(void* capture, float* out, uint32_t capacity, uint32_t timeoutMs);
+// Stops and frees it; NULL is ignored.
+void __stdcall wpn_loopback_close(void* capture);
+
+// ---- LC3 codec (lc3.cpp, Google's liblc3) ----
+// frame_us: 7500 or 10000. sample_rate: LC3 codec rate (8000, 16000, 24000, 32000, 48000). pcm_rate: rate of the
+// float PCM given/returned (>= sample_rate, e.g. 48000; liblc3 resamples internally via its sr_pcm parameter).
+// Returns NULL on bad parameters or allocation failure.
+void* __cdecl wpn_lc3_decoder_create(int frame_us, int sample_rate, int pcm_rate);
+// Decodes one frame of nbytes (frame != NULL) or conceals a lost frame (frame == NULL, nbytes ignored). Writes one
+// frame of mono floats in [-1, 1] at pcm_rate to pcm (frame_us * pcm_rate / 1e6, e.g. 360 for 7.5 ms at 48 kHz).
+// Returns the sample count, or < 0 on error.
+int __cdecl wpn_lc3_decode(void* decoder, const unsigned char* frame, int nbytes, float* pcm);
+void __cdecl wpn_lc3_decoder_free(void* decoder);
+void* __cdecl wpn_lc3_encoder_create(int frame_us, int sample_rate, int pcm_rate);
+// Encodes one frame of mono floats in [-1, 1] at pcm_rate into exactly nbytes (20..400). Returns 0, or < 0 on error.
+int __cdecl wpn_lc3_encode(void* encoder, const float* pcm, int nbytes, unsigned char* frame);
+void __cdecl wpn_lc3_encoder_free(void* encoder);
+
 #ifdef __cplusplus
 }
 #endif

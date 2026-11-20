@@ -18,13 +18,26 @@ internal enum SessionEnd
     NoInitialReport,
 }
 
+/// <summary>HD voice link state reported by the service (0x04).</summary>
+public enum VoiceLinkState : byte
+{
+    Down = 0,
+    Up = 1,
+    /// <summary>No codec worked.</summary>
+    Failed = 2,
+}
+
+/// <summary>An HD voice link report: HFP codec ID, interval in 0.625 ms slots, over-the-air packet lengths.</summary>
+public readonly record struct VoiceLink(VoiceLinkState State, ushort Codec, byte Interval, ushort PacketIn, ushort PacketOut);
+
 /// <summary>
 /// One open AAP channel through WPods.Service. PacketReceived fires on the read loop, Changed on thread-pool threads
 /// serialized under the state lock. Handlers must not block.
 /// </summary>
 public sealed class AapSession : IAsyncDisposable
 {
-    private const int ReadBufferSize = 1691;
+    // AAP packets are at most 1691 bytes; HD voice data messages may carry several voice packets.
+    private const int ReadBufferSize = 65536;
     // An L2CAP write normally completes in milliseconds; 5 s means the channel is stuck. The write is then
     // cancelled (CancelIoEx through the token) and its completion awaited, so no buffer outlives it.
     private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(5);
@@ -118,6 +131,12 @@ public sealed class AapSession : IAsyncDisposable
     /// <summary>Call audio is being set up or is up on this link.</summary>
     public bool CallAudio => Volatile.Read(ref _callAudio);
 
+    /// <summary>The service's HD voice link changed state or codec; raised on the read loop.</summary>
+    public event Action<VoiceLink>? VoiceLinkChanged;
+
+    /// <summary>HD voice uplink data as it came over the air (whole packets, in order); raised on the read loop.</summary>
+    public event PacketHandler? VoiceDataReceived;
+
     internal Task<SessionEnd> Completion => _readLoop;
 
     /// <summary>
@@ -137,7 +156,18 @@ public sealed class AapSession : IAsyncDisposable
     }
 
     /// <summary>False when the session is closed or the write failed or timed out; throws only when <paramref name="ct"/> is cancelled.</summary>
-    public async ValueTask<bool> WriteAsync(ReadOnlyMemory<byte> packet, CancellationToken ct = default)
+    public ValueTask<bool> WriteAsync(ReadOnlyMemory<byte> packet, CancellationToken ct = default) => WriteMessageAsync(packet, logPacket: true, ct);
+
+    /// <summary>Writes an HD voice message (0xF1 start/stop, 0xF2 downlink data, 0xF3 silence); false like <see cref="WriteAsync"/>.</summary>
+    public ValueTask<bool> WriteVoiceAsync(byte kind, ReadOnlySpan<byte> payload)
+    {
+        byte[] message = new byte[1 + payload.Length];
+        message[0] = kind;
+        payload.CopyTo(message.AsSpan(1));
+        return WriteMessageAsync(message, logPacket: false, default);
+    }
+
+    private async ValueTask<bool> WriteMessageAsync(ReadOnlyMemory<byte> message, bool logPacket, CancellationToken ct)
     {
         await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -147,10 +177,13 @@ public sealed class AapSession : IAsyncDisposable
                 Log.Info("aap", "write skipped: session closed");
                 return false;
             }
-            Log.Packet(outbound: true, packet.Span);
+            if (logPacket)
+            {
+                Log.Packet(outbound: true, message.Span);
+            }
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct, _life.Token);
             timeout.CancelAfter(WriteTimeout);
-            await _stream.WriteAsync(packet, timeout.Token).ConfigureAwait(false);
+            await _stream.WriteAsync(message, timeout.Token).ConfigureAwait(false);
             return true;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -550,6 +583,34 @@ public sealed class AapSession : IAsyncDisposable
                     catch (Exception e)
                     {
                         Log.Error("aap", "call audio handler failed", e);
+                    }
+                    continue;
+                }
+                if (_readBuffer[0] == ServicePipes.VoiceState && count >= 9)
+                {
+                    ReadOnlySpan<byte> m = _readBuffer.AsSpan(1, count - 1);
+                    var link = new VoiceLink((VoiceLinkState)m[0], BinaryPrimitives.ReadUInt16LittleEndian(m[1..]), m[3],
+                        BinaryPrimitives.ReadUInt16LittleEndian(m[4..]), BinaryPrimitives.ReadUInt16LittleEndian(m[6..]));
+                    Log.Info("aap", $"voice link {link.State}: codec {link.Codec}, interval {link.Interval} slots, packets {link.PacketIn} in / {link.PacketOut} out");
+                    try
+                    {
+                        VoiceLinkChanged?.Invoke(link);
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Error("aap", "voice link handler failed", e);
+                    }
+                    continue;
+                }
+                if (_readBuffer[0] == ServicePipes.VoiceData)
+                {
+                    try
+                    {
+                        VoiceDataReceived?.Invoke(new ReadOnlySpan<byte>(_readBuffer, 1, count - 1));
+                    }
+                    catch (Exception e)
+                    {
+                        Log.Error("aap", "voice data handler failed", e);
                     }
                     continue;
                 }

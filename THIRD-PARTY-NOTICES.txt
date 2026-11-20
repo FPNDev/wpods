@@ -26,6 +26,12 @@ RNNoise 0.2 (with its built-in model)
              Copyright (c) 2003-2004, Mark Borgerding
   License:   BSD-3-Clause (text below)
 
+liblc3 1.1.3 (commit 96a3af0beb5487aca3b98a4b992a539a1f6d80d1), unmodified
+  Files:     wpods_native.dll (liblc3 statically linked, together with WPods' own C wrapper)
+  Copyright: Copyright 2022 Google LLC
+  License:   Apache License 2.0 (text below)
+  Source:    https://github.com/google/liblc3 (tag v1.1.3)
+
 DeepFilterNet, libDF v0.5.6 (commit 978576aa8400552a4ce9730838c635aa30db5e61), unmodified
   Files:     deepfilter.dll, DeepFilterNet3_onnx.tar.gz (pretrained DeepFilterNet3 model)
   Copyright: Copyright (c) 2021 Hendrik Schröter
@@ -1882,7 +1888,7 @@ use or other dealings in these Data Files or Software without prior
 written authorization of the copyright holder.
 
 -------------------------------------------------------------------------------
-Apache License 2.0: abseil-cpp, DPDFNet, prost (Rust crate)
+Apache License 2.0: abseil-cpp, DPDFNet, prost (Rust crate), liblc3
 -------------------------------------------------------------------------------
 
                                  Apache License

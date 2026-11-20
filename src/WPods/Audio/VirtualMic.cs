@@ -45,15 +45,16 @@ internal sealed class VirtualMic
     public void Open() => ThreadPool.QueueUserWorkItem(static s => ((VirtualMic)s!).Connect(), this);
 
     /// <summary>
-    /// Sets the pair shown as "Headset (A2DP, name)". <paramref name="reported"/>: the name came from the AirPods; a
-    /// Windows name is only used for a pair the service has no name for yet. Resent on every reopen.
+    /// Sets the pair shown as "Headset (A2DP, name)", or "Headset (HD, name)" with <paramref name="hdVoice"/> (a model
+    /// without the stereo mic). <paramref name="reported"/>: the name came from the AirPods; a Windows name is only used
+    /// for a pair the service has no name for yet. Resent on every reopen.
     /// </summary>
-    public void SetDevice(ulong address, string name, bool reported)
+    public void SetDevice(ulong address, string name, bool reported, bool hdVoice)
     {
         byte[] message = new byte[10 + Encoding.UTF8.GetByteCount(name)];
         message[0] = ServicePipes.MicDevice;
         BinaryPrimitives.WriteUInt64LittleEndian(message.AsSpan(1), address);
-        message[9] = reported ? (byte)1 : (byte)0;
+        message[9] = (byte)((reported ? ServicePipes.MicNameReported : 0) | (hdVoice ? ServicePipes.MicHdVoice : 0));
         Encoding.UTF8.GetBytes(name, message.AsSpan(10));
         lock (_lock)
         {
@@ -61,7 +62,7 @@ internal sealed class VirtualMic
             {
                 return;
             }
-            Log.Info("vmic", $"device {Mac.Format(address)} \"{name}\"");
+            Log.Info("vmic", $"device {Mac.Format(address)} \"{name}\"{(hdVoice ? " (HD voice)" : "")}");
             _device = message;
             if (_pipe is { } pipe)
             {
@@ -69,6 +70,9 @@ internal sealed class VirtualMic
             }
         }
     }
+
+    /// <summary>No virtual mic: the attached pair has neither the stereo mic stream nor HD voice. Resent on every reopen.</summary>
+    public void ClearDevice() => SetDevice(0, "", reported: false, hdVoice: false);
 
     /// <summary>
     /// Writes mono 48 kHz s16 PCM (at most 32768 samples) as one message, its first sample at

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.IO.Pipes;
 using System.Security;
 using System.Text;
@@ -47,8 +48,12 @@ internal sealed class ServiceStatus : IDisposable
     private const int MaxBackoffShift = 6; // 1 s up to 64 s
     private const string GuardKey = @"SOFTWARE\WPods\Service";
     private const string GuardValue = "GuardTripped";
+    // Hidden test switch: HD voice is offered for models with the stereo mic stream too.
+    private static readonly bool HdVoiceAnyModel = Flag("HdVoiceAnyModel");
 
     private readonly Lock _lock = new();
+    // HD voice per pair as last set; sent again after every connect, as the pipe may have been closed meanwhile.
+    private readonly Dictionary<ulong, bool> _hdVoice = [];
     private readonly Timer _reconnect;
     private NamedPipeClientStream? _pipe;
     private ServiceState? _state;
@@ -76,6 +81,29 @@ internal sealed class ServiceStatus : IDisposable
     public void CheckUpdate() => Send([ServicePipes.CheckUpdateMessage], "check for updates");
 
     public void UpdateNow() => Send([ServicePipes.UpdateNowMessage], "update now");
+
+    /// <summary>HD voice is offered for models without the stereo mic stream, or for any model with the test switch.</summary>
+    public static bool HdVoiceAllowed(string? modelNumber) => !Models.HasStereoMic(modelNumber) || HdVoiceAnyModel;
+
+    /// <summary>Tells the service to run Hands-Free itself for the pair (on) or not; it keeps the choice.</summary>
+    public void SetHdVoice(ulong address, bool on)
+    {
+        // Under the lock, so a reconnect's replay never sends an older choice after this one.
+        lock (_lock)
+        {
+            _hdVoice[address] = on;
+            SendHdVoice(address, on);
+        }
+    }
+
+    private void SendHdVoice(ulong address, bool on)
+    {
+        byte[] message = new byte[10];
+        message[0] = ServicePipes.SetHdVoiceMessage;
+        BinaryPrimitives.WriteUInt64LittleEndian(message.AsSpan(1), address);
+        message[9] = on ? (byte)1 : (byte)0;
+        Send(message, $"HD voice {(on ? "on" : "off")} for {Mac.Format(address)}");
+    }
 
     private void Send(byte[] message, string what)
     {
@@ -145,6 +173,13 @@ internal sealed class ServiceStatus : IDisposable
         {
             _announced = true;
             Send([ServicePipes.AppStartedMessage], "app started");
+        }
+        lock (_lock)
+        {
+            foreach ((ulong address, bool on) in _hdVoice)
+            {
+                SendHdVoice(address, on);
+            }
         }
         _ = ReadLoopAsync(pipe);
     }

@@ -18,8 +18,17 @@ EXPORTS
     wpn_mixer_set_source
     wpn_mixer_remove_source
     wpn_mixer_push_mic
+    wpn_loopback_open
+    wpn_loopback_read
+    wpn_loopback_close
     wpn_jitter_create
     wpn_jitter_reset
     wpn_jitter_push
     wpn_jitter_pull
     wpn_jitter_get_stats
+    wpn_lc3_decoder_create
+    wpn_lc3_decode
+    wpn_lc3_decoder_free
+    wpn_lc3_encoder_create
+    wpn_lc3_encode
+    wpn_lc3_encoder_free

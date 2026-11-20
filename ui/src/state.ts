@@ -187,6 +187,9 @@ export const live = (d: Entry): State | null =>
   d.conn === 'connected' && d.id === store.attached ? store.state : null;
 export const capsOf = (d: Entry): Set<Capability> =>
   live(d) ? store.stateCaps : d.capSet;
+// The WPods mic's name in Windows is "Headset (<label>, <AirPods name>)": "HD" for models without the stereo mic.
+export const micLabel = (d: Entry | null): string =>
+  d !== null && capsOf(d).has('noStereoMic') ? 'HD' : 'A2DP';
 
 const disconnecting = new Set<DeviceId>();
 const MASKED = new Set<Conn>(['connected', 'reconnecting', 'connecting']);

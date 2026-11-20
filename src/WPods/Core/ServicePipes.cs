@@ -17,7 +17,16 @@ internal static partial class ServicePipes
     public const byte AapEnded = 0x01;
     private const byte AapOpenReply = 0x02;
     public const byte AapCallAudio = 0x03;
+    // HD voice on the AAP pipe: link state and uplink data in; link start/stop, downlink data and silence out.
+    public const byte VoiceState = 0x04;
+    public const byte VoiceData = 0x05;
+    public const byte VoiceControl = 0xF1;
+    public const byte VoiceDownlink = 0xF2;
+    public const byte VoiceSilence = 0xF3;
     public const byte MicDevice = 0x10;
+    // Flags of 0x10: the name came from the AirPods; the mic carries HD voice (named "HD" instead of "A2DP").
+    public const byte MicNameReported = 1;
+    public const byte MicHdVoice = 2;
     public const byte MicPcm = 0x11;
     public const byte MicCapture = 0x12;
     public const byte ServiceStateMessage = 0x20;
@@ -27,6 +36,7 @@ internal static partial class ServicePipes
     public const byte CheckUpdateMessage = 0x24;
     public const byte UpdateNowMessage = 0x25;
     public const byte AppStartedMessage = 0x26;
+    public const byte SetHdVoiceMessage = 0x27;
 
     private const int ErrorInvalidData = 13;
     private const int ErrorBrokenPipe = 109;

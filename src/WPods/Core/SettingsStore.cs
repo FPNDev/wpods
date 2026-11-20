@@ -25,6 +25,11 @@ public sealed record HostSettings
     public MicMode MicMode { get; init; }
     /// <summary>Media volume during a conversation, in percent of the previous volume; clamped to 10..90 on load.</summary>
     public int DuckPercent { get; init; } = DefaultDuckPercent;
+    /// <summary>
+    /// HD voice (experimental): WPods runs Hands-Free with the pair instead of Windows and carries its mic. Applies only
+    /// where <see cref="ServiceStatus.HdVoiceAllowed"/>.
+    /// </summary>
+    public bool HdVoice { get; init; }
 
     internal const int DefaultDuckPercent = 40;
     internal const int MinDuckPercent = 10;
@@ -200,7 +205,7 @@ public sealed class SettingsStore
         Log.Info("settings", $"loaded: lastUsed={(_lastUsed == 0 ? "none" : Mac.Format(_lastUsed))} devices={_devices.Count} models={_models.Count} capabilities={_capabilities.Count} keys={_keys.Count} language={_ui.Language} theme={_ui.Theme}");
     }
 
-    /// <summary>Raised on the caller's thread of <see cref="ConnectionManager.SetHostSettingsAsync"/>.</summary>
+    /// <summary>Raised on the caller's thread of <see cref="ConnectionManager.SetHostSettingsAsync"/> or of a per-model default.</summary>
     public event Action<ulong, HostSettings>? HostSettingsChanged;
 
     /// <summary>Raised on the caller's thread of <see cref="SetMic"/>, outside the store's lock.</summary>
@@ -389,6 +394,30 @@ public sealed class SettingsStore
         finally
         {
             if (changed)
+            {
+                HostSettingsChanged?.Invoke(address, settings);
+            }
+        }
+    }
+
+    /// <summary>Like <see cref="Set"/>, but only for a pair without saved settings.</summary>
+    internal void SetIfMissing(ulong address, HostSettings settings)
+    {
+        bool added = false;
+        try
+        {
+            lock (_lock)
+            {
+                added = _devices.TryAdd(address, settings);
+                if (added)
+                {
+                    SaveSettings();
+                }
+            }
+        }
+        finally
+        {
+            if (added)
             {
                 HostSettingsChanged?.Invoke(address, settings);
             }

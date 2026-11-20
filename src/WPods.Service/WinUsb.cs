@@ -242,6 +242,36 @@ internal sealed unsafe partial class WinUsbDevice : IDisposable
         _pipes = map;
     }
 
+    /// <summary>The isochronous IN and OUT pipes of the interface's current alternate setting (0 when it has none).</summary>
+    public (byte In, byte Out) IsoPipes(int interfaceIndex)
+    {
+        byte input = 0;
+        byte output = 0;
+        byte* desc = stackalloc byte[9];
+        byte* info = stackalloc byte[12];
+        nint h = _interfaces[interfaceIndex];
+        if (!WinUsb_GetCurrentAlternateSetting(h, out byte alt) || !WinUsb_QueryInterfaceSettings(h, alt, desc))
+        {
+            return (0, 0);
+        }
+        for (byte p = 0; p < desc[4]; p++)
+        {
+            // WINUSB_PIPE_INFORMATION: PipeType u32 (1 = isochronous), PipeId u8.
+            if (WinUsb_QueryPipe(h, alt, p, info) && *(uint*)info == 1)
+            {
+                if ((info[4] & 0x80) != 0)
+                {
+                    input = info[4];
+                }
+                else
+                {
+                    output = info[4];
+                }
+            }
+        }
+        return (input, output);
+    }
+
     /// <summary>Maximum bytes per interval of <paramref name="pipe"/> in the interface's current alternate setting, 0 if none.</summary>
     public static int MaxBytesPerInterval(nint iface, byte pipe)
     {
@@ -420,6 +450,7 @@ internal sealed unsafe partial class IsoPipe
     private readonly BlockingCollection<(Urb Urb, int Slot, long End)> _pending = new(Slots - 1);
     private readonly Action<Urb, int, IsoResult?> _done;
     private readonly Thread _completer;
+    private readonly bool _continuousOut;
     private int _next;
     private long _urbs;
     private long _failed;
@@ -430,9 +461,11 @@ internal sealed unsafe partial class IsoPipe
     private bool? _timeFrames;
     private long _nextFrame;
 
-    public IsoPipe(WinUsbDevice device, nint iface, byte pipe, Action<Urb, int, IsoResult?> done)
+    /// <param name="continuousOut">OUT writes join the previous one (data in every frame) instead of each starting anew.</param>
+    public IsoPipe(WinUsbDevice device, nint iface, byte pipe, Action<Urb, int, IsoResult?> done, bool continuousOut = false)
     {
         _device = device;
+        _continuousOut = continuousOut;
         Interface = iface;
         _pipe = pipe;
         _done = done;
@@ -491,8 +524,9 @@ internal sealed unsafe partial class IsoPipe
             end = FrameFor(u.StartFrame, NowFrame()) + u.Packets;
             _nextFrame = end;
         }
-        // OUT data is sparse (one SCO packet every few frames), so each write starts at the next possible frame.
-        bool continueStream = u.In && _streaming;
+        // Sparse OUT data (one SCO packet every few frames) starts each write at the next possible frame; IN and
+        // continuous OUT join the previous transfer.
+        bool continueStream = (u.In || _continuousOut) && _streaming;
         int error = Start(u, slot, offset, length, continueStream);
         if (error != 0 && continueStream)
         {
@@ -601,9 +635,9 @@ internal sealed unsafe partial class IsoPipe
             u.Running = false;
             if (!ok)
             {
-                if (error != WinUsbDevice.ErrorAborted)
+                if (error != WinUsbDevice.ErrorAborted && ++_failed <= 3)
                 {
-                    _failed++;
+                    Log.Warn("usb", $"iso 0x{_pipe:X2} transfer failed, Win32 error {error}");
                 }
                 _streaming = false;
                 _done(u, error == WinUsbDevice.ErrorAborted ? UsbIp.ECONNRESET : UsbIp.EPROTO, null);

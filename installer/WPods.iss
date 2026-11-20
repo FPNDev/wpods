@@ -57,6 +57,8 @@ Source: "..\.build\publish\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignor
 Source: "drivers.ps1"; DestDir: "{app}\drivers"; Flags: ignoreversion
 ; Extracted to {tmp} and run by PrepareToInstall, before any file is copied.
 Source: "..\.build\deps\{#UsbipSetup}"; Flags: dontcopy
+; One-time update step, extracted to {tmp} (see UpdateStereoMicPairs).
+Source: "stereo-mic.ps1"; Flags: dontcopy
 
 [UninstallDelete]
 Type: files; Name: "{app}\drivers\installed.txt"
@@ -125,6 +127,8 @@ var
   ClosingForFirmware: Boolean;
   RemoveSettings: Boolean;
   FirstInstall: Boolean;
+  // The version this run updates, '' on a first install.
+  PreviousVersion: String;
   // Uninstall: the Bluetooth adapter is back on Windows' own driver, so usbip-win2 may go.
   AdapterRestored: Boolean;
   // Uninstall: usbip-win2 was installed by Setup but stays, so its marker must stay too.
@@ -149,6 +153,10 @@ begin
   // Read once, before this install registers itself: an update must not touch the user's startup choice.
   FirstInstall := not RegKeyExists(HKLM64,
     'Software\Microsoft\Windows\CurrentVersion\Uninstall\{08E1B0A8-4D58-46F6-B9EC-006F5CC3A69F}_is1');
+  if not RegQueryStringValue(HKLM64,
+    'Software\Microsoft\Windows\CurrentVersion\Uninstall\{08E1B0A8-4D58-46F6-B9EC-006F5CC3A69F}_is1',
+    'DisplayVersion', PreviousVersion) then
+    PreviousVersion := '';
   Result := True;
 end;
 
@@ -903,6 +911,23 @@ begin
       ExpandConstant('{log}')]), mbError, MB_OK, IDOK);
 end;
 
+// Updates from before 0.4.3: AirPods without the stereo mic get Hands-Free mode back and lose the WPods mic made for
+// them (stereo-mic.ps1). Runs while the service is stopped and the app closed; a failure only leaves them as they were.
+procedure UpdateStereoMicPairs;
+var
+  Code: Integer;
+begin
+  if PreviousVersion = '' then
+    Exit;
+  ExtractTemporaryFile('stereo-mic.ps1');
+  if not ExecAndLogOutput(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\stereo-mic.ps1') + '" -PreviousVersion ' + AddQuotes(PreviousVersion), '', SW_HIDE,
+    ewWaitUntilTerminated, Code, nil) then
+    Log('Could not run stereo-mic.ps1: ' + SysErrorMessage(Code))
+  else if Code <> 0 then
+    Log(Format('stereo-mic.ps1 exit code: %d', [Code]));
+end;
+
 // A failure keeps the app installed. Until the restart usbip-win2 needs, the service only starts with Windows, as a
 // takeover before it would leave every Bluetooth device without a working adapter.
 procedure InstallService;
@@ -954,6 +979,7 @@ begin
       RemoveLegacyDrivers;
     // The old service still runs from the renamed files: restart it as the new one.
     StopService;
+    UpdateStereoMicPairs;
     InstallService;
     if LeavePage <> nil then
       if LeaveTestModeBox.Checked and not TestModeTurnedOff then begin

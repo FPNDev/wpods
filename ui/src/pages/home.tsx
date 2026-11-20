@@ -31,6 +31,7 @@ import {
   current,
   effectiveMode,
   live,
+  micLabel,
   store,
   updateText,
 } from '../state';
@@ -243,6 +244,7 @@ export const createHome = (ctx: Ctx): Page => {
   let micDesc!: HTMLSpanElement;
   let micSideRow!: HTMLDivElement;
   let micModeRow!: HTMLDivElement;
+  let micNoteRow!: HTMLDivElement;
   let micModeSpin!: HTMLSpanElement;
 
   const micMode = createSegmented<MicMode>({
@@ -533,7 +535,9 @@ export const createHome = (ctx: Ctx): Page => {
             {micMode.el}
           </div>
           {toEnhancement.el}
-          <div class="wp-row">{Note({ label: 'mic.note' })}</div>
+          <div class="wp-row" ref={micNoteRow}>
+            {Note({ label: 'mic.note' })}
+          </div>
           <div class="wp-row wp-row--stack" ref={micSideRow}>
             <div class="wp-row__head">
               <div class="wp-row__text">
@@ -717,15 +721,29 @@ export const createHome = (ctx: Ctx): Page => {
     if (!d) {
       return;
     }
-    const mic = store.mic;
-    setAttr(chip, 'data-state', mic);
-    setText(chipLabel, t(`mic.status.${mic}`));
     const named =
       store.attached === null ? d : (store.byId.get(store.attached) ?? d);
-    setText(micDesc, t(`mic.desc.${mic}`, { name: named.name || 'AirPods' }));
+    // Also while the pair is not attached: without HD voice its mic works only through Hands-Free.
+    const caps = capsOf(named);
+    const handsFreeOnly =
+      caps.has('noStereoMic') && !(caps.has('hdVoice') && named.host.hdVoice);
+    const mic = handsFreeOnly ? 'unsupported' : store.mic;
+    setAttr(chip, 'data-state', mic);
+    setText(chipLabel, t(`mic.status.${mic}`));
+    setText(
+      micDesc,
+      t(`mic.desc.${mic}`, {
+        name: named.name || 'AirPods',
+        label: micLabel(named),
+      }),
+    );
     const st = live(d);
     const enabled = store.micEnabled;
-    setHidden(micModeRow, enabled.size < 2);
+    // WPods processes only the mic it carries: no modes or enhancement for a Hands-Free-only mic.
+    const processed = mic !== 'unsupported';
+    setHidden(micModeRow, !processed || enabled.size < 2);
+    setHidden(toEnhancement.el, !processed);
+    setHidden(micNoteRow, !processed);
     for (const mode of [
       'standard',
       'voiceIsolation',

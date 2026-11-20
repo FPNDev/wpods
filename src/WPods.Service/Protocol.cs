@@ -13,11 +13,19 @@ namespace WPods.Service;
 ///         0 closed by the AirPods), then the pipe closes; 0x03 + u8 call audio (Hands-Free) starting or up (1) or
 ///         ended (0), sent before the call audio link is up, on change and on open.
 ///   Closing the pipe closes the channel.
+///   HD voice (experimental; the service runs Hands-Free with the AirPods itself, see 0x27):
+///     app -> service: 0xF1 + u8 (1 start, 0 stop) the voice link; 0xF2 + bytes = downlink voice data in the link's
+///       framing, queued and sent at the link's pace; 0xF3 + bytes = one framed silent unit, sent whenever the queue
+///       is empty.
+///     service -> app: 0x04 + u8 state (0 down, 1 up, 2 failed) + u16 HFP codec ID + u8 interval in
+///       slots (0.625 ms) + u16 packet length in + u16 packet length out, on change; 0x05 + bytes = uplink voice data
+///       as it came over the air (whole packets, in order).
 ///
-/// \\.\pipe\WPods.Mic - the virtual microphone "Headset (A2DP, &lt;AirPods name&gt;)". One client at a time.
-///   app -> service: 0x10 + u64 address + u8 name source + UTF-8 name, on connect and on change. Source 1 = AirPods'
-///     name, 0 = Windows' name (used only while the service has none). Only that pair's mic is shown; renaming the mic
-///     being recorded from waits until recording stops.
+/// \\.\pipe\WPods.Mic - the virtual microphone "Headset (A2DP, &lt;AirPods name&gt;)", "Headset (HD, ...)" for HD voice
+///   of a model without the stereo mic. One client at a time.
+///   app -> service: 0x10 + u64 address + u8 flags + UTF-8 name, on connect and on change. Flag 1 = AirPods' name
+///     (else Windows' name, used only while the service has none), flag 2 = HD voice mic. Only that pair's mic is shown;
+///     renaming the mic being recorded from waits until recording stops. Address 0 = no mic.
 ///   app -> service: 0x11 + i64 position of the first sample on the AirPods' clock (48 kHz samples) + PCM,
 ///     mono 48 kHz s16le, even length, max 65536 bytes.
 ///   service -> app: 0x12 + u8 capture state (1 = an app records). After connect and on change.
@@ -29,6 +37,8 @@ namespace WPods.Service;
 ///   app -> service: 0x21 = retry the adapter takeover after the Guard handed it back.
 ///   app -> service: 0x23 + u8 (1 on, 0 off) = auto-update; 0x24 = check for updates; 0x25 = update now;
 ///     0x26 = app started (a downloaded update installs then).
+///   app -> service: 0x27 + u64 address + u8 (1 on, 0 off) = HD voice for that pair (kept across restarts). With it on
+///     and Windows' Hands-Free off for the pair, the service runs Hands-Free itself instead of declining it.
 /// </summary>
 internal static class Protocol
 {
@@ -40,7 +50,14 @@ internal static class Protocol
     public const byte AapEnded = 0x01;
     public const byte AapOpenResult = 0x02;
     public const byte AapCallAudio = 0x03;
+    public const byte VoiceState = 0x04;
+    public const byte VoiceData = 0x05;
+    public const byte VoiceControl = 0xF1;
+    public const byte VoiceDownlink = 0xF2;
+    public const byte VoiceSilence = 0xF3;
     public const byte MicDevice = 0x10;
+    public const byte MicNameReported = 1;
+    public const byte MicHdVoice = 2;
     public const byte MicPcm = 0x11;
     public const byte MicCapture = 0x12;
     public const byte Status = 0x20;
@@ -50,6 +67,7 @@ internal static class Protocol
     public const byte CheckUpdate = 0x24;
     public const byte UpdateNow = 0x25;
     public const byte AppStarted = 0x26;
+    public const byte SetHdVoice = 0x27;
 
     public const int MaxAapPacket = 1691;
     public const int MaxPcm = 65536;

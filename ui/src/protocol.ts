@@ -26,7 +26,9 @@ export type Capability =
   | 'hearingAid'
   | 'mediaAssist'
   | 'heartRate'
-  | 'singleBattery';
+  | 'singleBattery'
+  | 'noStereoMic'
+  | 'hdVoice';
 export type Conn =
   | 'connected'
   | 'connecting'
@@ -40,6 +42,8 @@ type HostSettings = {
   lowLatency: boolean;
   micMode: MicMode;
   duckPercent: number;
+  // Applies only where the caps contain 'hdVoice'.
+  hdVoice: boolean;
 };
 export type MicSlot = 'mode' | 'enhancement';
 type StageLoad = 'loading' | 'ready' | 'failed';
@@ -128,7 +132,8 @@ export type AccentRamp = {
   light3: string;
 };
 export type Language = { code: string; originalName: string; engName: string };
-export type MicStatus = 'notActive' | 'starting' | 'live' | 'problem';
+export type MicStatus =
+  'notActive' | 'starting' | 'live' | 'problem' | 'unsupported';
 export type ToastId =
   | 'noResponse'
   | 'connectFailed'
@@ -323,7 +328,7 @@ export type MainToHost =
   | {
       type: 'setHostSetting';
       id: DeviceId;
-      name: 'disableHandsFree' | 'lowLatency';
+      name: 'disableHandsFree' | 'lowLatency' | 'hdVoice';
       value: boolean;
     }
   | { type: 'setHostSetting'; id: DeviceId; name: 'micMode'; value: MicMode }

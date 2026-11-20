@@ -75,8 +75,10 @@ internal sealed class RadioLink : IDisposable
     public void Run()
     {
         _hci.SetSender(SendInternal);
+        _hci.SetCommandSender(SendOwnCommand);
         _hci.CallAudioEnded += OnCallAudioEnded;
         _hci.CallAudioStarted += OnCallAudioStarted;
+        _hci.VoiceLinkChanged += OnVoiceLinkChanged;
         try
         {
             Loop();
@@ -87,8 +89,10 @@ internal sealed class RadioLink : IDisposable
         }
         finally
         {
+            _hci.VoiceLinkChanged -= OnVoiceLinkChanged;
             _hci.CallAudioStarted -= OnCallAudioStarted;
             _hci.CallAudioEnded -= OnCallAudioEnded;
+            _hci.SetCommandSender(null);
             _hci.SetSender(null);
             Stop();
         }
@@ -177,6 +181,7 @@ internal sealed class RadioLink : IDisposable
                 {
                     _hci.RewriteCommand(withSetup.AsSpan(8));
                     urb.Held = _hci.OnCommand(data);
+                    Interlocked.Increment(ref _commandsArrived);
                 }
             }
             else
@@ -253,6 +258,39 @@ internal sealed class RadioLink : IDisposable
     // The service's own ACL packets join Windows' on the ACL OUT pipe, in order.
     private void SendInternal(Urb urb) => Queue(_aclOut).Add(urb);
 
+    // The service's own HCI command (opcode, length, parameters) goes through the control pipe worker, between Windows'.
+    private void SendOwnCommand(byte[] command)
+    {
+        var data = new byte[8 + command.Length];
+        data[0] = 0x20;
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(6), (ushort)command.Length);
+        command.CopyTo(data, 8);
+        Queue(0).Add(new Urb { Pipe = 0, Internal = true, Data = data, Length = (uint)command.Length });
+    }
+
+    // Windows' HCI commands that arrived, and those the control worker got to (sent or cancelled).
+    private long _commandsArrived;
+    private long _commandsRun;
+
+    // Waits (up to 1 s) for Windows' command at the controller to be answered, then sends ours; its events never reach
+    // Windows. One still queued behind ours is not waited for: Windows only sends it once its previous one was answered.
+    private void ExecuteOwnCommand(Urb u)
+    {
+        for (int i = 0; ((_hci.UnansweredMs > 0 && Interlocked.Read(ref _commandsArrived) == Interlocked.Read(ref _commandsRun)) || _hci.OwnCommandPending) && i < 50; i++)
+        {
+            Thread.Sleep(20);
+        }
+        ushort opcode = BinaryPrimitives.ReadUInt16LittleEndian(u.Data.AsSpan(8));
+        _hci.OwnCommandSent(opcode);
+        int error = _device.Control(BinaryPrimitives.ReadUInt64LittleEndian(u.Data), u.Data[8..], out _);
+        if (error != 0)
+        {
+            _hci.OwnCommandFailed(opcode);
+            NoteError(error);
+            Log.Warn("radio", $"own HCI command 0x{opcode:X4} not sent, Win32 error {error}");
+        }
+    }
+
     private BlockingCollection<Urb> Queue(byte pipe) => _queues.GetOrAdd(pipe, StartWorker);
 
     private BlockingCollection<Urb> StartWorker(byte pipe)
@@ -286,6 +324,11 @@ internal sealed class RadioLink : IDisposable
                     FlushDeferred(deferred);
                     continue;
                 }
+                if (u.Internal && pipe == 0)
+                {
+                    ExecuteOwnCommand(u);
+                    continue;
+                }
                 if (u.Internal)
                 {
                     // Ours wait without blocking Windows' packets: while Windows is mid-PDU on the link, while the
@@ -308,6 +351,16 @@ internal sealed class RadioLink : IDisposable
                 while (u.Held && _hci.CallAudioHeld())
                 {
                     Thread.Sleep(20);
+                }
+                bool command = pipe == 0 && u.Data.Length > 8 && u.Data[0] == 0x20;
+                // One HCI command at a time: Windows' next one waits for our command's status.
+                for (int i = 0; command && _hci.OwnCommandPending && i < 100; i++)
+                {
+                    Thread.Sleep(20);
+                }
+                if (command)
+                {
+                    Interlocked.Increment(ref _commandsRun);
                 }
                 if (u.Cancelled)
                 {
@@ -410,21 +463,29 @@ internal sealed class RadioLink : IDisposable
         else
         {
             bool acl = pipe == _aclOut;
-            if (acl && !_hci.ReserveOut(u.Data, () => u.Cancelled))
+            if (acl && _hci.FilterWindowsAcl(u.Data))
+            {
+                // Held A2DP media or an AVDTP command answered by the proxy: completed as if sent.
+                got = (uint)u.Data.Length;
+            }
+            else if (acl && !_hci.ReserveOut(u.Data, () => u.Cancelled))
             {
                 u.Running = false;
                 _live.TryRemove(u.Seq, out _);
                 return;
             }
-            int error = _device.Write(iface, pipe, u.Data, out got);
-            if (error != 0)
+            else
             {
-                if (acl)
+                int error = _device.Write(iface, pipe, u.Data, out got);
+                if (error != 0)
                 {
-                    _hci.UnreserveOut(u.Data);
+                    if (acl)
+                    {
+                        _hci.UnreserveOut(u.Data);
+                    }
+                    NoteError(error);
+                    status = UsbIp.Errno(error);
                 }
-                NoteError(error);
-                status = UsbIp.Errno(error);
             }
         }
         u.Running = false;
@@ -758,6 +819,10 @@ internal sealed class RadioLink : IDisposable
     {
         if (u.Internal)
         {
+            if (u.In)
+            {
+                OnVoiceIso(u, status, result);
+            }
             return;
         }
         _live.TryRemove(u.Seq, out _);
@@ -813,6 +878,284 @@ internal sealed class RadioLink : IDisposable
         }
     }
 
+    // HD voice: our own voice link streams on the call audio interface while Windows has none. Each SCO packet in is
+    // answered with one out, keeping the controller's rate and timing; 2-frame IN URBs space sparse transparent packets
+    // evenly, while CVSD's PCM fills every frame in one continuous OUT stream.
+    private const int TransparentUrbs = 8;
+    private const int TransparentFrames = 2;
+    private const int CvsdUrbs = 8;
+    private const int CvsdFrames = 8;
+    // CVSD's SCO packets carry 48 bytes of PCM (3 frames with the header); the OUT stream starts that many ahead.
+    private const byte CvsdPacketBytes = 48;
+    private const int CvsdLeadPackets = 4;
+    // Failed IN URBs in a row after which the voice stream gives up.
+    private const int MaxVoiceFailures = 20;
+    private VoiceLinkInfo? _voice;
+    // The proxy's latest link (any thread); the session ended (under _isoLock); the interface our link streams on.
+    private VoiceLinkInfo? _voiceWanted;
+    private bool _voiceClosed;
+    private int _voiceInterface = 1;
+    private IsoPipe? _voiceIn;
+    private IsoPipe? _voiceOut;
+    // Iso completion thread of _voiceIn only: the SCO packet being parsed, failed IN URBs in a row.
+    private readonly byte[] _voiceHeader = new byte[3];
+    private int _voiceHeaderHave;
+    private readonly byte[] _voicePacket = new byte[255];
+    private int _voicePacketHave;
+    private int _voiceRemaining;
+    private int _voiceFailures;
+    // Per voice link: SCO packets by packet status flag (0 good, 1 possibly invalid, 2 no data, 3 partly lost) and bytes.
+    private readonly long[] _voiceStatus = new long[4];
+    private long _voiceBytes;
+
+    // Pool items may run out of order: each applies the latest wanted link, so a late start never revives one that ended.
+    private void OnVoiceLinkChanged(VoiceLinkInfo? info)
+    {
+        Volatile.Write(ref _voiceWanted, info);
+        ThreadPool.QueueUserWorkItem(static s => ((RadioLink)s!).ApplyVoiceLink(), this);
+    }
+
+    private void ApplyVoiceLink()
+    {
+        VoiceLinkInfo? info;
+        IsoPipe? input;
+        IsoPipe? output;
+        lock (_isoLock)
+        {
+            info = Volatile.Read(ref _voiceWanted);
+            if (_voiceClosed || ReferenceEquals(info, _voice))
+            {
+                return;
+            }
+            (input, output) = (_voiceIn, _voiceOut);
+            _voice = null;
+            _voiceIn = null;
+            _voiceOut = null;
+        }
+        // Closed outside the lock: their completer may wait for the proxy's lock, whose holder may wait for this one.
+        input?.Close();
+        output?.Close();
+        lock (_isoLock)
+        {
+            if (_voiceClosed || _voice is not null)
+            {
+                return;
+            }
+            if (info is null || !ReferenceEquals(Volatile.Read(ref _voiceWanted), info))
+            {
+                _device.SetAlternate(_voiceInterface, 0);
+                Log.Info("radio", $"voice link stopped: interface {_voiceInterface} alt 0; {_voiceBytes} bytes in, SCO packets by status {string.Join("/", _voiceStatus)}");
+                return;
+            }
+            StartVoiceLocked(info);
+        }
+    }
+
+    private void StartVoiceLocked(VoiceLinkInfo info)
+    {
+        int index = CallAudioInterface();
+        if (index >= _device.Interfaces.Count)
+        {
+            Log.Warn("radio", "voice link: the adapter has no call audio interface");
+            return;
+        }
+        _voiceInterface = index;
+        nint iface = _device.Interfaces[index];
+        CloseIso(iface);
+        // Transparent data as Windows streams mSBC (alt 6, else 1); 16-bit PCM for one CVSD link: alt 2.
+        byte alt = info.Transparent ? (byte)6 : (byte)2;
+        int error = _device.SetAlternate(index, alt);
+        // Right after a previous voice link WinUSB may still report the interface busy for a moment.
+        for (int i = 0; error == 170 && i < 10; i++)
+        {
+            Thread.Sleep(200);
+            error = _device.SetAlternate(index, alt);
+        }
+        if (error != 0 && info.Transparent)
+        {
+            alt = 1;
+            error = _device.SetAlternate(index, alt);
+        }
+        (byte inPipe, byte outPipe) = error == 0 ? _device.IsoPipes(index) : ((byte)0, (byte)0);
+        if (inPipe == 0 || outPipe == 0)
+        {
+            Log.Warn("radio", $"voice link: interface {index} alt {alt} not usable (Win32 error {error})");
+            if (error == 0)
+            {
+                _device.SetAlternate(index, 0);
+            }
+            return;
+        }
+        try
+        {
+            _voiceIn = new IsoPipe(_device, iface, inPipe, RetIso);
+            _voiceOut = new IsoPipe(_device, iface, outPipe, RetIso, continuousOut: !info.Transparent);
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            Log.Warn("radio", $"voice link: iso pipes not opened: {e.Message}");
+            StopVoiceLocked();
+            _device.SetAlternate(index, 0);
+            return;
+        }
+        _voice = info;
+        DropVoicePacket();
+        _voiceFailures = 0;
+        Array.Clear(_voiceStatus);
+        _voiceBytes = 0;
+        Log.Info("radio", $"voice link 0x{info.Handle:X3}: interface {index} alt {alt}, pipes 0x{inPipe:X2}/0x{outPipe:X2}");
+        for (int i = 0; i < (info.Transparent ? TransparentUrbs : CvsdUrbs); i++)
+        {
+            _voiceIn.Submit(new Urb { Pipe = inPipe, In = true, Internal = true, Packets = info.Transparent ? TransparentFrames : CvsdFrames });
+        }
+        if (!info.Transparent)
+        {
+            // CVSD's PCM fills every frame: the OUT stream starts CvsdLeadPackets of silence ahead, so each completion's
+            // packets join it before it runs dry.
+            byte[] lead = new byte[CvsdLeadPackets * (3 + CvsdPacketBytes)];
+            for (int at = 0; at < lead.Length; at += 3 + CvsdPacketBytes)
+            {
+                lead[at] = (byte)info.Handle;
+                lead[at + 1] = (byte)(info.Handle >> 8);
+                lead[at + 2] = CvsdPacketBytes;
+            }
+            _voiceOut.Submit(new Urb { Pipe = outPipe, In = false, Internal = true, Data = lead, Packets = CvsdLeadPackets });
+        }
+    }
+
+    // Call audio is the interface after the HCI one: 1, or 3 on Apple adapters with keyboard and mouse first.
+    private int CallAudioInterface()
+    {
+        if (_device.TryGetPipeInterface(_aclIn, out nint hci))
+        {
+            for (int i = 0; i < _device.Interfaces.Count; i++)
+            {
+                if (_device.Interfaces[i] == hci)
+                {
+                    return i + 1;
+                }
+            }
+        }
+        return 1;
+    }
+
+    private void StopVoiceLocked()
+    {
+        _voice = null;
+        _voiceIn?.Close();
+        _voiceOut?.Close();
+        _voiceIn = null;
+        _voiceOut = null;
+    }
+
+    // Lost data: the SCO packet being parsed is dropped and the next one starts anew.
+    private void DropVoicePacket()
+    {
+        _voiceHeaderHave = 0;
+        _voicePacketHave = 0;
+        _voiceRemaining = 0;
+    }
+
+    // Our IN URB completed: its SCO payloads go to the proxy, one OUT packet per SCO packet in goes out, and the URB is
+    // resubmitted (also after a failure, unless they keep failing).
+    private void OnVoiceIso(Urb u, int status, IsoResult? result)
+    {
+        VoiceLinkInfo? voice = Volatile.Read(ref _voice);
+        if (voice is null || status == UsbIp.ECONNRESET)
+        {
+            return;
+        }
+        var uplink = new List<byte>();
+        var downlink = new List<byte>();
+        int count = 0;
+        if (status == 0 && result is { } r)
+        {
+            _voiceFailures = 0;
+            for (int i = 0; i < u.Packets; i++)
+            {
+                if (r.Status[i] != 0)
+                {
+                    DropVoicePacket();
+                    continue;
+                }
+                for (int b = r.Offsets[i]; b < r.Offsets[i] + r.Actual[i]; b++)
+                {
+                    if (_voiceRemaining > 0)
+                    {
+                        _voicePacket[_voicePacketHave++] = r.Data[b];
+                        if (--_voiceRemaining == 0)
+                        {
+                            uplink.AddRange(_voicePacket.AsSpan(0, _voicePacketHave));
+                            _voicePacketHave = 0;
+                        }
+                        continue;
+                    }
+                    _voiceHeader[_voiceHeaderHave++] = r.Data[b];
+                    if (_voiceHeaderHave < 3)
+                    {
+                        continue;
+                    }
+                    _voiceHeaderHave = 0;
+                    if ((_voiceHeader[0] | ((_voiceHeader[1] & 0x0F) << 8)) != voice.Handle)
+                    {
+                        // Out of step after lost data: SCO packets start on a frame, so the rest of this one is skipped.
+                        break;
+                    }
+                    _voiceRemaining = _voiceHeader[2];
+                    _voiceStatus[(_voiceHeader[1] >> 4) & 3]++;
+                    _voiceBytes += _voiceRemaining;
+                    // Transparent data goes out in the link's packets; 16-bit PCM (CVSD) in the controller's own size.
+                    byte[] payload = _hci.TakeVoiceOut(voice.Transparent ? voice.TxLength : _voiceRemaining);
+                    downlink.Add((byte)voice.Handle);
+                    downlink.Add((byte)(voice.Handle >> 8));
+                    downlink.Add((byte)payload.Length);
+                    downlink.AddRange(payload);
+                    count++;
+                }
+            }
+        }
+        else
+        {
+            DropVoicePacket();
+            if (++_voiceFailures >= MaxVoiceFailures)
+            {
+                if (_voiceFailures == MaxVoiceFailures)
+                {
+                    Log.Warn("radio", $"voice link: {MaxVoiceFailures} IN transfers failed in a row, the voice stream stops");
+                }
+                return;
+            }
+        }
+        if (uplink.Count > 0)
+        {
+            _hci.OnVoiceIn(voice.Handle, [.. uplink]);
+        }
+        // StopVoice holds the lock while it closes the pipes and waits for this thread: give up once the link is gone.
+        while (!_isoLock.TryEnter(5))
+        {
+            if (Volatile.Read(ref _voice) != voice)
+            {
+                return;
+            }
+        }
+        try
+        {
+            if (_voice != voice || _voiceIn is not { } inPipe)
+            {
+                return;
+            }
+            if (count > 0 && _voiceOut is { } outPipe)
+            {
+                outPipe.Submit(new Urb { Pipe = (byte)(u.Pipe & 0x7F), In = false, Internal = true, Data = [.. downlink], Packets = count });
+            }
+            inPipe.Submit(new Urb { Pipe = u.Pipe, In = true, Internal = true, Packets = u.Packets });
+        }
+        finally
+        {
+            _isoLock.Exit();
+        }
+    }
+
     // Iso pipes of one interface close before its alternate setting changes (their buffers belong to the old setting).
     private void CloseIso(nint iface)
     {
@@ -834,6 +1177,8 @@ internal sealed class RadioLink : IDisposable
         _client.Dispose();
         lock (_isoLock)
         {
+            _voiceClosed = true;
+            StopVoiceLocked();
             foreach (IsoPipe ip in _isoPipes.Values)
             {
                 ip.Close();

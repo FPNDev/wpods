@@ -1,6 +1,7 @@
 // Mixer: plays picked endpoints (loopback for render endpoints) live in the attached pair's A2DP endpoint, or its
 // Hands-Free one while Hands-Free is active, on one real-time engine thread that exists only while there is something
 // to play. g_lock is never held across COM, a wait or the event callback.
+// Also a loopback capture of what Windows plays to the pair, as mono 48 kHz, pulled by the caller's own thread.
 #include <windows.h>
 #include <cfgmgr32.h>
 #include <mmreg.h>
@@ -1407,6 +1408,175 @@ DWORD WINAPI engine_main(void* previous)
     return 0;
 }
 
+constexpr uint32_t kLoopbackRate = 48000;
+
+// One loopback stream: its packets averaged to mono and, when Windows cannot convert the rate, resampled here
+// (linear). Used by one thread at a time.
+class Loopback {
+public:
+    Loopback() = default;
+    Loopback(Loopback const&) = delete;
+    Loopback& operator=(Loopback const&) = delete;
+    ~Loopback()
+    {
+        if (m_client) {
+            m_client->Stop();
+        }
+    }
+
+    // Throws on failure.
+    void open(uint64_t address)
+    {
+        auto const enumerator = winrt::create_instance<IMMDeviceEnumerator>(__uuidof(MMDeviceEnumerator));
+        winrt::com_ptr<IMMDevice> device = find_pair_endpoint(enumerator.get(), address, eRender, false);
+        if (!device) {
+            device = find_pair_endpoint(enumerator.get(), address, eRender, true);
+        }
+        if (!device) {
+            winrt::throw_hresult(HRESULT_FROM_WIN32(ERROR_NOT_FOUND));
+        }
+        DWORD const flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_LOOPBACK;
+        m_client = activate(device.get());
+        MixFormat const mix = mix_format(m_client.get());
+        Format deviceFormat;
+        bool const supported = parse_format(mix.get(), deviceFormat);
+        uint32_t period = 0;
+        if (supported && deviceFormat.rate == kLoopbackRate) {
+            m_format = deviceFormat;
+            period = init_low_latency(m_client, flags, mix.get());
+            if (period == 0) {
+                m_client = activate(device.get());
+                winrt::check_hresult(init_legacy(m_client.get(), flags, mix.get(), period));
+            }
+        } else {
+            // Windows converts to float32 at 48 kHz in the device's channels; else the device's format is read as is.
+            WAVEFORMATEXTENSIBLE wanted{};
+            wanted.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+            wanted.Format.nChannels = mix->nChannels;
+            wanted.Format.nSamplesPerSec = kLoopbackRate;
+            wanted.Format.wBitsPerSample = 32;
+            wanted.Format.nBlockAlign = static_cast<WORD>(mix->nChannels * sizeof(float));
+            wanted.Format.nAvgBytesPerSec = kLoopbackRate * wanted.Format.nBlockAlign;
+            wanted.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+            wanted.Samples.wValidBitsPerSample = 32;
+            wanted.dwChannelMask = supported ? deviceFormat.mask : 0;
+            wanted.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
+            DWORD const convert = AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
+            m_client = activate(device.get());
+            if (SUCCEEDED(init_legacy(m_client.get(), flags | convert, &wanted.Format, period))) {
+                m_format = { mix->nChannels, kLoopbackRate, wanted.dwChannelMask, 32, true };
+            } else {
+                if (!supported) {
+                    winrt::throw_hresult(AUDCLNT_E_UNSUPPORTED_FORMAT);
+                }
+                m_client = activate(device.get());
+                winrt::check_hresult(init_legacy(m_client.get(), flags, mix.get(), period));
+                m_format = deviceFormat;
+            }
+        }
+        m_event = make_event();
+        winrt::check_hresult(m_client->SetEventHandle(m_event.get()));
+        winrt::check_hresult(m_client->GetService(__uuidof(IAudioCaptureClient), m_capture.put_void()));
+        m_step = static_cast<double>(m_format.rate) / kLoopbackRate;
+        m_period = static_cast<uint32_t>(uint64_t{ period } * kLoopbackRate / m_format.rate);
+        winrt::check_hresult(m_client->Start());
+    }
+
+    uint32_t period() const { return m_period; }
+
+    // Samples written, or a negative HRESULT.
+    int32_t read(float* out, uint32_t capacity, uint32_t timeoutMs)
+    {
+        // The event may still be set for a packet an earlier drain took: 0 only once the timeout really ran out.
+        ULONGLONG const deadline = GetTickCount64() + timeoutMs;
+        while (m_next == m_pending.size()) {
+            HRESULT const hr = drain();
+            if (FAILED(hr)) {
+                return hr;
+            }
+            if (m_next != m_pending.size()) {
+                break;
+            }
+            ULONGLONG const now = GetTickCount64();
+            if (now >= deadline) {
+                return 0;
+            }
+            DWORD const wait = WaitForSingleObject(m_event.get(), static_cast<DWORD>(deadline - now));
+            if (wait == WAIT_FAILED) {
+                return HRESULT_FROM_WIN32(GetLastError());
+            }
+        }
+        size_t const count = std::min<size_t>({ capacity, m_pending.size() - m_next, INT32_MAX });
+        std::copy_n(m_pending.data() + m_next, count, out);
+        m_next += count;
+        if (m_next == m_pending.size()) {
+            m_pending.clear();
+            m_next = 0;
+        }
+        return static_cast<int32_t>(count);
+    }
+
+private:
+    HRESULT drain()
+    {
+        while (true) {
+            UINT32 packet = 0;
+            HRESULT hr = m_capture->GetNextPacketSize(&packet);
+            if (FAILED(hr) || packet == 0) {
+                return hr;
+            }
+            BYTE* data = nullptr;
+            UINT32 frames = 0;
+            DWORD flags = 0;
+            hr = m_capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
+            if (FAILED(hr)) {
+                return hr;
+            }
+            push(data, frames, (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0);
+            hr = m_capture->ReleaseBuffer(frames);
+            if (FAILED(hr)) {
+                return hr;
+            }
+        }
+    }
+
+    void push(BYTE const* data, uint32_t frames, bool silent)
+    {
+        uint32_t const channels = m_format.channels;
+        float const scale = 1.0f / static_cast<float>(channels);
+        for (uint32_t f = 0; f < frames; ++f) {
+            float sample = 0;
+            if (!silent) {
+                for (uint32_t c = 0; c < channels; ++c) {
+                    sample += read_sample(data, size_t{ f } * channels + c, m_format);
+                }
+                sample *= scale;
+            }
+            if (m_format.rate == kLoopbackRate) {
+                m_pending.push_back(sample);
+                continue;
+            }
+            // Output points between the previous input sample (0) and this one (1).
+            for (; m_frac < 1; m_frac += m_step) {
+                m_pending.push_back(m_previous + (sample - m_previous) * static_cast<float>(m_frac));
+            }
+            m_frac -= 1;
+            m_previous = sample;
+        }
+    }
+
+    winrt::com_ptr<IAudioClient> m_client;
+    winrt::com_ptr<IAudioCaptureClient> m_capture;
+    winrt::handle m_event;
+    Format m_format;
+    uint32_t m_period = 0;
+    double m_step = 1; // input frames per output sample
+    double m_frac = 0;
+    float m_previous = 0;
+    std::vector<float> m_pending; // mono 48 kHz not yet read, from m_next on
+    size_t m_next = 0;
+};
+
 } // namespace
 
 int32_t __stdcall wpn_mixer_init(wpn_mixer_event_cb callback, void* ctx)
@@ -1581,4 +1751,40 @@ void __stdcall wpn_mixer_push_mic(const int16_t* pcm, uint32_t count, int64_t po
     }
     // Set (and never cleared) before g_micDirect was first set.
     wpn_jitter_push(g_micJitter.load(), pcm, count, pos);
+}
+
+int32_t __stdcall wpn_loopback_open(uint64_t btAddress, void** capture, uint32_t* period)
+{
+    if (!capture || !period) {
+        return E_POINTER;
+    }
+    *capture = nullptr;
+    *period = 0;
+    try {
+        winrt::check_hresult(ensure_mta());
+        auto loopback = std::make_unique<Loopback>();
+        loopback->open(btAddress);
+        *period = loopback->period();
+        *capture = loopback.release();
+        return S_OK;
+    } catch (...) {
+        return winrt::to_hresult();
+    }
+}
+
+int32_t __stdcall wpn_loopback_read(void* capture, float* out, uint32_t capacity, uint32_t timeoutMs)
+{
+    if (!capture || (!out && capacity > 0)) {
+        return E_POINTER;
+    }
+    try {
+        return static_cast<Loopback*>(capture)->read(out, capacity, timeoutMs);
+    } catch (...) {
+        return winrt::to_hresult();
+    }
+}
+
+void __stdcall wpn_loopback_close(void* capture)
+{
+    delete static_cast<Loopback*>(capture);
 }

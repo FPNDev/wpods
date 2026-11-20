@@ -2,8 +2,11 @@ using System.Collections.Frozen;
 
 namespace WPods.Core;
 
-/// <summary>Art is the illustration key; SingleBattery means one battery (AirPods Max) instead of left, right and case.</summary>
-public sealed record AirPodsModel(string Name, string Art, DeviceCapabilities Capabilities, bool SingleBattery);
+/// <summary>
+/// Art is the illustration key; SingleBattery means one battery (AirPods Max) instead of left, right and case.
+/// StereoMic: the AAP 0x58 mic stream (Apple's studio-quality recording, H2 chip), which keeps audio in stereo.
+/// </summary>
+public sealed record AirPodsModel(string Name, string Art, DeviceCapabilities Capabilities, bool SingleBattery, bool StereoMic);
 
 /// <summary>
 /// Model table keyed by AAP 0x1D model number (per Apple support 109525) and by Bluetooth product ID
@@ -11,8 +14,8 @@ public sealed record AirPodsModel(string Name, string Art, DeviceCapabilities Ca
 /// </summary>
 public static class Models
 {
-    /// <summary>Model not in the table: plain AirPods illustration, no baseline features.</summary>
-    public static readonly AirPodsModel Unknown = new("AirPods", "airpods", DeviceCapabilities.None, SingleBattery: false);
+    /// <summary>Model not in the table: plain AirPods illustration, no baseline features; the stereo mic is tried.</summary>
+    public static readonly AirPodsModel Unknown = new("AirPods", "airpods", DeviceCapabilities.None, SingleBattery: false, StereoMic: true);
 
     private static readonly FrozenDictionary<ushort, AirPodsModel> ByProximityId;
     private static readonly FrozenDictionary<ushort, string> NumberByProductId;
@@ -36,17 +39,18 @@ public static class Models
 
         (AirPodsModel Model, ushort[] Ids, string[] Numbers)[] table =
         [
-            (new("AirPods 1", "airpods", airPods12, false), [0x2002], ["A1523", "A1722"]),
-            (new("AirPods 2", "airpods", airPods12, false), [0x200F], ["A2032", "A2031"]),
-            (new("AirPods 3", "airpods", airPods3, false), [0x2013], ["A2565", "A2564"]),
-            (new("AirPods 4", "airpods4", airPods4, false), [0x2019], ["A3053", "A3050", "A3054"]),
-            (new("AirPods 4 (ANC)", "airpods4", airPods4Anc, false), [0x201B], ["A3056", "A3055", "A3057"]),
-            (new("AirPods 5", "airpods4", airPods4Anc, false), [0x2030, 0x2036], ["A3531", "A3532", "A3533", "A3439", "A3440", "A3441"]),
-            (new("AirPods Pro 1", "pro", pro1, false), [0x200E], ["A2084", "A2083"]),
-            (new("AirPods Pro 2", "pro", pro2, false), [0x2014, 0x2024], ["A2931", "A2699", "A2698", "A3047", "A3048", "A3049"]),
-            (new("AirPods Pro 3", "pro", pro2 | DeviceCapabilities.HeartRate, false), [0x2027], ["A3063", "A3064", "A3065"]),
-            (new("AirPods Max 1", "max", max1, true), [0x200A, 0x201F], ["A2096", "A3184"]),
-            (new("AirPods Max 2", "max", max2, true), [], ["A3454"]),
+            // StereoMic: H2 models only (Apple's studio-quality recording); W1/H1 models never answer the stream's START.
+            (new("AirPods 1", "airpods", airPods12, false, false), [0x2002], ["A1523", "A1722"]),
+            (new("AirPods 2", "airpods", airPods12, false, false), [0x200F], ["A2032", "A2031"]),
+            (new("AirPods 3", "airpods", airPods3, false, false), [0x2013], ["A2565", "A2564"]),
+            (new("AirPods 4", "airpods4", airPods4, false, true), [0x2019], ["A3053", "A3050", "A3054"]),
+            (new("AirPods 4 (ANC)", "airpods4", airPods4Anc, false, true), [0x201B], ["A3056", "A3055", "A3057"]),
+            (new("AirPods 5", "airpods4", airPods4Anc, false, true), [0x2030, 0x2036], ["A3531", "A3532", "A3533", "A3439", "A3440", "A3441"]),
+            (new("AirPods Pro 1", "pro", pro1, false, false), [0x200E], ["A2084", "A2083"]),
+            (new("AirPods Pro 2", "pro", pro2, false, true), [0x2014, 0x2024], ["A2931", "A2699", "A2698", "A3047", "A3048", "A3049"]),
+            (new("AirPods Pro 3", "pro", pro2 | DeviceCapabilities.HeartRate, false, true), [0x2027], ["A3063", "A3064", "A3065"]),
+            (new("AirPods Max 1", "max", max1, true, false), [0x200A, 0x201F], ["A2096", "A3184"]),
+            (new("AirPods Max 2", "max", max2, true, true), [], ["A3454"]),
         ];
         var byId = new Dictionary<ushort, AirPodsModel>();
         var numberById = new Dictionary<ushort, string>();
@@ -74,4 +78,7 @@ public static class Models
     public static string? ModelNumberOf(ushort productId) => NumberByProductId.GetValueOrDefault(productId);
 
     public static AirPodsModel? FromModelNumber(string? number) => number is null ? null : ByModelNumber.GetValueOrDefault(number);
+
+    /// <summary>False only for a known model without the stereo mic stream; unknown models are tried.</summary>
+    public static bool HasStereoMic(string? number) => (FromModelNumber(number) ?? Unknown).StereoMic;
 }
