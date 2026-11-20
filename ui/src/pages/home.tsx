@@ -567,7 +567,8 @@ export const createHome = (ctx: Ctx): Page => {
 
       <div>
         {legal.el}
-        <p class="wp-group__foot wp-legal-foot">
+        <p class="wp-group__foot wp-legal-foot wp-support">
+          <Icon name="heart" class="wp-support__heart" />
           <span l:text="home.support" />{' '}
           <button
             type="button"

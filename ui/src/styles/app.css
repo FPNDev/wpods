@@ -169,6 +169,17 @@ span.wp-menu__glyph {
 .wp-legal-foot {
   text-align: center;
 }
+.wp-support {
+  padding-top: var(--space-3);
+}
+.wp-support__heart {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-inline-end: var(--space-1);
+  vertical-align: -1px;
+  color: var(--danger);
+}
 .wp-link {
   appearance: none;
   border: 0;
