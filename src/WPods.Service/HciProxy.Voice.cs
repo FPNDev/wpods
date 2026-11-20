@@ -229,17 +229,35 @@ internal sealed partial class HciProxy
             ReadOnlySpan<byte> d = sig.Slice(at + 4, Math.Min(length, sig.Length - at - 4));
             switch (code)
             {
-                case 0x02 when d.Length >= 4 && BinaryPrimitives.ReadUInt16LittleEndian(d) == RfcommPsm:
-                    link.RfcommRequests[id] = BinaryPrimitives.ReadUInt16LittleEndian(d[2..]);
-                    break;
-                // A new request with this id: an earlier RFCOMM one under it was refused (its answer named no CID).
-                case 0x02:
-                    link.RfcommRequests.Remove(id);
-                    break;
-                // Windows accepts the AirPods' channel: DCID is Windows' end, SCID theirs.
-                case 0x03 when d.Length >= 6 && BinaryPrimitives.ReadUInt16LittleEndian(d[4..]) == 0
+                case 0x02 when d.Length >= 4:
+                    {
+                        // A new request with this id or this CID: an earlier RFCOMM one under it was refused.
+                        ushort cid = BinaryPrimitives.ReadUInt16LittleEndian(d[2..]);
+                        foreach ((ushort remote, ushort local) in link.RfcommAnswered)
+                        {
+                            if (local == cid)
+                            {
+                                link.RfcommAnswered.Remove(remote);
+                                break;
+                            }
+                        }
+                        if (BinaryPrimitives.ReadUInt16LittleEndian(d) == RfcommPsm)
+                        {
+                            link.RfcommRequests[id] = cid;
+                        }
+                        else
+                        {
+                            link.RfcommRequests.Remove(id);
+                        }
+                        break;
+                    }
+                // Windows answers the AirPods' channel ("pending" comes first): DCID is Windows' end, SCID theirs.
+                case 0x03 when d.Length >= 6 && BinaryPrimitives.ReadUInt16LittleEndian(d[4..]) != 1
                     && link.RfcommIncoming.Remove(BinaryPrimitives.ReadUInt16LittleEndian(d[2..])):
-                    AddWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d));
+                    if (BinaryPrimitives.ReadUInt16LittleEndian(d[4..]) == 0)
+                    {
+                        AddWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d));
+                    }
                     break;
                 // Windows configures the channel the AirPods accepted: DCID is their end.
                 case 0x04 when d.Length >= 2 && link.RfcommAnswered.Remove(BinaryPrimitives.ReadUInt16LittleEndian(d), out ushort windows):
@@ -248,8 +266,8 @@ internal sealed partial class HciProxy
                 case 0x06 when d.Length >= 4:
                     RemoveWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d[2..]));
                     break;
-                // Windows answers the AirPods' Disconnection Request (also one we never saw: several commands in one
-                // PDU skip NoteInboundRfcommLocked): DCID is Windows' end.
+                // Windows answers the AirPods' Disconnection Request, also one not seen inbound (only the first command
+                // of a PDU passed on whole is): DCID is Windows' end.
                 case 0x07 when d.Length >= 2:
                     RemoveWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d));
                     break;
@@ -258,7 +276,7 @@ internal sealed partial class HciProxy
         }
     }
 
-    /// <summary>Inbound L2CAP signaling for Windows (first command of the PDU): the AirPods' side of Windows' RFCOMM.</summary>
+    /// <summary>One inbound L2CAP signaling command for Windows (at least 4 data bytes): the AirPods' side of Windows' RFCOMM.</summary>
     private void NoteInboundRfcommLocked(Link link, byte code, byte id, ReadOnlySpan<byte> d)
     {
         switch (code)

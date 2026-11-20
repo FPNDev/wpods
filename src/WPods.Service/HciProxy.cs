@@ -1285,6 +1285,10 @@ internal sealed partial class HciProxy
                 }
                 else
                 {
+                    if (command.Length >= 8)
+                    {
+                        NoteInboundRfcommLocked(link, command[0], command[1], command[4..]);
+                    }
                     windows.AddRange(command);
                 }
                 at = end;
