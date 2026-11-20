@@ -283,7 +283,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     // Only for a pair whose mic comes through WPods.
     setHidden(latencyMic.row, caps.has('noStereoMic') && !hdVoiceOn);
     renderHost(latencyMic, d.host.lowLatencyMic, locked);
-    setHidden(latencyMicNote, !d.host.lowLatencyMic);
+    setHidden(latencyMicNote, !d.host.lowLatencyMic || hdVoiceOn);
     setHidden(latencyMicHdNote, !d.host.lowLatencyMic || !hdVoiceOn);
     setChecked(startup.input, store.startup);
     theme.set(getTheme());

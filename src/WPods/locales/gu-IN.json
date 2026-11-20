@@ -274,7 +274,7 @@
     "windows.latencyMic": "ઓછો માઇક વિલંબ",
     "windows.latencyMicDesc": "કોઈ ઍપ માઇક ખોલે એ જ ક્ષણે તે ચાલુ થઈ જાય છે.",
     "windows.latencyMicNote": "માઇક ચાલુ રહે છે, તેથી AirPods ની બૅટરી વધુ વપરાઈ શકે છે.",
-    "windows.latencyMicHdNote": "HD વૉઇસ સાથે, આ વૉઇસ લિંક ચાલુ રાખે છે, તેથી આખો સમય અવાજ મોનો રહે છે.",
+    "windows.latencyMicHdNote": "અવાજ મોનો રહે છે, અને AirPods ની બૅટરી વધુ વપરાઈ શકે છે.",
     "windows.startup": "Windows સાથે શરૂ કરો",
     "windows.startupDesc": "તમે સાઇન ઇન કરો ત્યારે ટ્રેમાં ખૂલે છે.",
     "windows.theme": "થીમ",

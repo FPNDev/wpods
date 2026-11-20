@@ -274,7 +274,7 @@
     "windows.latencyMic": "कम माइक लेटेंसी",
     "windows.latencyMicDesc": "कोई ऐप माइक खोलते ही वह चालू रहता है।",
     "windows.latencyMicNote": "माइक चालू रहता है, इसलिए AirPods की बैटरी ज़्यादा ख़र्च हो सकती है।",
-    "windows.latencyMicHdNote": "HD वॉइस के साथ यह वॉइस लिंक चालू रखता है, इसलिए पूरे समय आवाज़ मोनो रहती है।",
+    "windows.latencyMicHdNote": "आवाज़ मोनो रहती है, और AirPods की बैटरी ज़्यादा ख़र्च हो सकती है।",
     "windows.startup": "Windows के साथ शुरू करें",
     "windows.startupDesc": "साइन इन करने पर ट्रे में खुलता है।",
     "windows.theme": "थीम",

@@ -274,7 +274,7 @@
     "windows.latencyMic": "کم مائیک تاخیر",
     "windows.latencyMicDesc": "کوئی ایپ مائیک کھولتے ہی وہ کام کرنے لگتا ہے۔",
     "windows.latencyMicNote": "مائیک چالو رہتا ہے، اس لیے AirPods کی بیٹری زیادہ خرچ ہو سکتی ہے۔",
-    "windows.latencyMicHdNote": "HD وائس کے ساتھ یہ وائس لنک قائم رکھتا ہے، اس لیے پورا وقت آواز مونو رہتی ہے۔",
+    "windows.latencyMicHdNote": "آواز مونو رہتی ہے، اور AirPods کی بیٹری زیادہ خرچ ہو سکتی ہے۔",
     "windows.startup": "Windows کے ساتھ شروع کریں",
     "windows.startupDesc": "سائن ان کرنے پر ٹرے میں کھلتا ہے۔",
     "windows.theme": "تھیم",

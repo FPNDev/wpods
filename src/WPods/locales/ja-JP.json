@@ -274,7 +274,7 @@
     "windows.latencyMic": "低遅延マイク",
     "windows.latencyMicDesc": "アプリがマイクを開いた瞬間から使えます。",
     "windows.latencyMicNote": "マイクが動作し続けるため、AirPodsのバッテリー消費が増えることがあります。",
-    "windows.latencyMicHdNote": "HD音声では音声リンクを維持するため、常にモノラルになります。",
+    "windows.latencyMicHdNote": "音声はモノラルのままで、AirPodsのバッテリー消費が増えることがあります。",
     "windows.startup": "Windowsの起動時に開始",
     "windows.startupDesc": "サインインすると、通知領域で起動します。",
     "windows.theme": "テーマ",

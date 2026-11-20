@@ -105,6 +105,11 @@ internal sealed partial class HciProxy
     {
         lock (_gate)
         {
+            if (FindLinkLocked(address) is { } link)
+            {
+                link.GatewayRetries = 0;
+                link.GatewayNotBefore = 0;
+            }
             CheckGatewayLocked(address);
         }
         // Windows' Hands-Free state follows the app's change a moment later.
@@ -179,17 +184,117 @@ internal sealed partial class HciProxy
         return owner?.TakeDownlink(length) ?? new byte[length];
     }
 
-    private const int MaxGatewayRetries = 5;
-    private static readonly TimeSpan GatewayRetryDelay = TimeSpan.FromMilliseconds(1500);
+    // Never several tries a second: refused tries in a row can leave the AirPods refusing Hands-Free until they are put
+    // back in their case.
+    private static readonly TimeSpan[] GatewayRetryDelays =
+        [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(16), TimeSpan.FromSeconds(30)];
+    private static readonly TimeSpan GatewayRecheckDelay = TimeSpan.FromSeconds(1);
 
-    private void RetryGatewayLocked(Link link)
+    // Our Hands-Free channel ended (declined, refused or closed): with HD voice on, ours is tried again after a pause.
+    private void DeclineEndedLocked(Link link, HandsFreeDecline decline)
     {
-        if (++link.GatewayRetries > MaxGatewayRetries)
+        link.Decline = null;
+        if (!HdVoiceOn(link.Address))
         {
-            Log.Warn("hfp", $"{link.Address:X12}: HD voice: Hands-Free not set up after {MaxGatewayRetries} tries");
             return;
         }
-        _ = RecheckGatewayAsync(link.Address, GatewayRetryDelay);
+        if (decline.Gateway is null)
+        {
+            // HD voice came on while the startup decline ran.
+            _ = RecheckGatewayAsync(link.Address, GatewayRecheckDelay);
+            return;
+        }
+        if (link.GatewayRetries >= GatewayRetryDelays.Length)
+        {
+            Log.Warn("hfp", $"{link.Address:X12}: HD voice: Hands-Free not set up after {GatewayRetryDelays.Length} tries");
+            return;
+        }
+        TimeSpan delay = GatewayRetryDelays[link.GatewayRetries++];
+        HoldGatewayLocked(link, delay);
+        _ = RecheckGatewayAsync(link.Address, delay);
+    }
+
+    // Other rechecks (HD voice change, Windows' channel closing) wait for the pause too.
+    private static void HoldGatewayLocked(Link link, TimeSpan delay) =>
+        link.GatewayNotBefore = Math.Max(link.GatewayNotBefore, Environment.TickCount64 + (long)delay.TotalMilliseconds);
+
+    // Windows' own RFCOMM (Hands-Free) channels on the link: ours starts only once they are gone.
+    private void NoteWindowsRfcommLocked(Link link, ReadOnlySpan<byte> sig)
+    {
+        for (int at = 0; at + 4 <= sig.Length;)
+        {
+            byte code = sig[at];
+            byte id = sig[at + 1];
+            int length = BinaryPrimitives.ReadUInt16LittleEndian(sig[(at + 2)..]);
+            ReadOnlySpan<byte> d = sig.Slice(at + 4, Math.Min(length, sig.Length - at - 4));
+            switch (code)
+            {
+                case 0x02 when d.Length >= 4 && BinaryPrimitives.ReadUInt16LittleEndian(d) == RfcommPsm:
+                    link.RfcommRequests[id] = BinaryPrimitives.ReadUInt16LittleEndian(d[2..]);
+                    break;
+                // A new request with this id: an earlier RFCOMM one under it was refused (its answer named no CID).
+                case 0x02:
+                    link.RfcommRequests.Remove(id);
+                    break;
+                // Windows accepts the AirPods' channel: DCID is Windows' end, SCID theirs.
+                case 0x03 when d.Length >= 6 && BinaryPrimitives.ReadUInt16LittleEndian(d[4..]) == 0
+                    && link.RfcommIncoming.Remove(BinaryPrimitives.ReadUInt16LittleEndian(d[2..])):
+                    AddWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d));
+                    break;
+                // Windows configures the channel the AirPods accepted: DCID is their end.
+                case 0x04 when d.Length >= 2 && link.RfcommAnswered.Remove(BinaryPrimitives.ReadUInt16LittleEndian(d), out ushort windows):
+                    AddWindowsRfcommLocked(link, windows);
+                    break;
+                case 0x06 when d.Length >= 4:
+                    RemoveWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d[2..]));
+                    break;
+                // Windows answers the AirPods' Disconnection Request (also one we never saw: several commands in one
+                // PDU skip NoteInboundRfcommLocked): DCID is Windows' end.
+                case 0x07 when d.Length >= 2:
+                    RemoveWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d));
+                    break;
+            }
+            at += 4 + length;
+        }
+    }
+
+    /// <summary>Inbound L2CAP signaling for Windows (first command of the PDU): the AirPods' side of Windows' RFCOMM.</summary>
+    private void NoteInboundRfcommLocked(Link link, byte code, byte id, ReadOnlySpan<byte> d)
+    {
+        switch (code)
+        {
+            // The AirPods answer Windows' request. Their result lies past the bytes seen here: the channel counts once
+            // Windows configures it (refusals name no CID).
+            case 0x03 when BinaryPrimitives.ReadUInt16LittleEndian(d) is var remote and not 0 && link.RfcommRequests.Remove(id, out ushort windows):
+                link.RfcommAnswered[remote] = windows;
+                break;
+            case 0x02 when BinaryPrimitives.ReadUInt16LittleEndian(d) == RfcommPsm:
+                link.RfcommIncoming.Add(BinaryPrimitives.ReadUInt16LittleEndian(d[2..]));
+                break;
+            case 0x06:
+                RemoveWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d));
+                break;
+        }
+    }
+
+    private static void AddWindowsRfcommLocked(Link link, ushort cid)
+    {
+        link.WindowsRfcomm.Add(cid);
+        Log.Info("hfp", $"{link.Address:X12}: Windows' RFCOMM channel 0x{cid:X4} open");
+    }
+
+    private void RemoveWindowsRfcommLocked(Link link, ushort cid)
+    {
+        if (!link.WindowsRfcomm.Remove(cid))
+        {
+            return;
+        }
+        Log.Info("hfp", $"{link.Address:X12}: Windows' RFCOMM channel 0x{cid:X4} closing");
+        if (link.WindowsRfcomm.Count == 0 && HdVoiceOn(link.Address))
+        {
+            HoldGatewayLocked(link, GatewayRecheckDelay);
+            _ = RecheckGatewayAsync(link.Address, GatewayRecheckDelay);
+        }
     }
 
     private async Task RecheckGatewayAsync(ulong address, TimeSpan delay)
@@ -217,6 +322,17 @@ internal sealed partial class HciProxy
             return;
         }
         if (!wanted || link.Decline is not null || !link.Encrypted)
+        {
+            return;
+        }
+        if (link.WindowsRfcomm.Count > 0)
+        {
+            // Rechecked once Windows' channel closed (RemoveWindowsRfcommLocked).
+            Log.Info("hfp", $"{address:X12}: HD voice: waiting for Windows' Hands-Free to close");
+            return;
+        }
+        // The recheck scheduled for the end of the pause may fire a timer tick early.
+        if (Environment.TickCount64 < link.GatewayNotBefore - 50)
         {
             return;
         }

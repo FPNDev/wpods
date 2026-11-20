@@ -274,7 +274,7 @@
     "windows.latencyMic": "குறைந்த மைக் தாமதம்",
     "windows.latencyMicDesc": "ஆப் மைக்கைத் திறந்த உடனே அது இயங்கும்.",
     "windows.latencyMicNote": "மைக் இயக்கத்தில் இருக்கும், எனவே AirPods அதிக பேட்டரியைப் பயன்படுத்தக்கூடும்.",
-    "windows.latencyMicHdNote": "HD குரலுடன் இது குரல் இணைப்பை இயக்கத்தில் வைத்திருக்கும், எனவே எல்லா நேரமும் ஒலி மோனோவாக இருக்கும்.",
+    "windows.latencyMicHdNote": "ஒலி மோனோவாக இருக்கும், மேலும் AirPods அதிக பேட்டரியைப் பயன்படுத்தக்கூடும்.",
     "windows.startup": "Windows உடன் தொடங்கு",
     "windows.startupDesc": "நீங்கள் உள்நுழையும்போது அறிவிப்புப் பகுதியில் திறக்கும்.",
     "windows.theme": "தீம்",

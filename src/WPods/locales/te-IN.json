@@ -274,7 +274,7 @@
     "windows.latencyMic": "తక్కువ మైక్ లేటెన్సీ",
     "windows.latencyMicDesc": "యాప్ మైక్‌ను తెరిచిన క్షణంలోనే అది పని చేస్తుంది.",
     "windows.latencyMicNote": "మైక్ ఆన్‌లో ఉంటుంది, కాబట్టి AirPods ఎక్కువ బ్యాటరీని ఉపయోగించవచ్చు.",
-    "windows.latencyMicHdNote": "HD వాయిస్‌తో ఇది వాయిస్ లింక్‌ను కొనసాగిస్తుంది, కాబట్టి ఎల్లప్పుడూ శబ్దం మోనోగా ఉంటుంది.",
+    "windows.latencyMicHdNote": "శబ్దం మోనోగా ఉంటుంది, మరియు AirPods ఎక్కువ బ్యాటరీని ఉపయోగించవచ్చు.",
     "windows.startup": "Windowsతో పాటు ప్రారంభించండి",
     "windows.startupDesc": "మీరు సైన్ ఇన్ చేసినప్పుడు ట్రేలో తెరుచుకుంటుంది.",
     "windows.theme": "థీమ్",

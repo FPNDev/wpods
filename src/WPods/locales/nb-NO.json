@@ -274,7 +274,7 @@
     "windows.latencyMic": "Lav mikrofonforsinkelse",
     "windows.latencyMicDesc": "Mikrofonen er klar idet en app åpner den.",
     "windows.latencyMicNote": "Mikrofonen holdes i gang, så AirPods kan bruke mer batteri.",
-    "windows.latencyMicHdNote": "Med HD-tale holder dette taleforbindelsen oppe, så lyden er i mono hele tiden.",
+    "windows.latencyMicHdNote": "Lyden forblir i mono, og AirPods kan bruke mer batteri.",
     "windows.startup": "Start med Windows",
     "windows.startupDesc": "Åpnes i systemstatusfeltet når du logger på.",
     "windows.theme": "Tema",

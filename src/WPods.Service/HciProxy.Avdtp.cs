@@ -62,6 +62,7 @@ internal sealed partial class HciProxy
         if (cid == 0x0001)
         {
             NoteWindowsSignalingLocked(link, data);
+            NoteWindowsRfcommLocked(link, data);
             return false;
         }
         if (link.Avdtp is not { } a)
@@ -154,6 +155,10 @@ internal sealed partial class HciProxy
         else if (code == 0x02 && BinaryPrimitives.ReadUInt16LittleEndian(d) == AvdtpPsm)
         {
             link.AvdtpIncoming.Add(BinaryPrimitives.ReadUInt16LittleEndian(d[2..]));
+        }
+        else
+        {
+            NoteInboundRfcommLocked(link, code, id, d);
         }
     }
 

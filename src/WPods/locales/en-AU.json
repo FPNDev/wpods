@@ -274,7 +274,7 @@
     "windows.latencyMic": "Low mic latency",
     "windows.latencyMicDesc": "Your mic is live the moment an app opens it.",
     "windows.latencyMicNote": "The mic stays on, so your AirPods may use more battery.",
-    "windows.latencyMicHdNote": "With HD voice, this keeps the voice link up, so sound stays mono the whole time.",
+    "windows.latencyMicHdNote": "Sound stays mono, and your AirPods may use more battery.",
     "windows.startup": "Start with Windows",
     "windows.startupDesc": "Opens in the tray when you sign in.",
     "windows.theme": "Theme",

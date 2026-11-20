@@ -15,6 +15,7 @@ namespace WPods.Ui;
 internal sealed partial class TrayApp
 {
     private static readonly TimeSpan LinkWait = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PageRetryAfter = TimeSpan.FromSeconds(6);
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan HandsFreeDropTimeout = TimeSpan.FromSeconds(5);
 
@@ -369,8 +370,8 @@ internal sealed partial class TrayApp
     }
 
     /// <summary>
-    /// Brings the link up if needed, then attaches, within <see cref="LinkWait"/>. An attach by the connection
-    /// manager itself also counts; false on timeout, attach failure or Cancel.
+    /// Brings the link up if needed, then attaches, within <see cref="LinkWait"/>.
+    /// An attach by the connection manager itself also counts; false on timeout, attach failure or Cancel.
     /// </summary>
     private async Task<bool> ConnectAudioAsync(ulong address)
     {
@@ -390,6 +391,16 @@ internal sealed partial class TrayApp
                 Log.Info("ui", $"connect {Mac.Format(address)}: link down, asking Windows to connect audio");
                 int hr = await Task.Run(() => NearbyNative.wpn_bt_connect_audio(address), cancel.Token);
                 Log.Info("ui", $"connect {Mac.Format(address)}: connect audio hr=0x{hr:X8}, waiting for link");
+                try
+                {
+                    await link.Task.WaitAsync(PageRetryAfter, cancel.Token);
+                }
+                catch (TimeoutException)
+                {
+                    cancel.CancelAfter(LinkWait);
+                    hr = await Task.Run(() => NearbyNative.wpn_bt_connect_audio(address), cancel.Token);
+                    Log.Info("ui", $"connect {Mac.Format(address)}: no link after {PageRetryAfter.TotalSeconds:0} s, connect audio again hr=0x{hr:X8}");
+                }
                 await link.Task.WaitAsync(cancel.Token);
                 Log.Info("ui", $"connect {Mac.Format(address)}: link up");
             }
@@ -404,7 +415,7 @@ internal sealed partial class TrayApp
                 return true;
             }
             // The connection manager may still be attaching this pair on its own after the link-up event.
-            Log.Info("ui", $"connect {Mac.Format(address)}: ConnectAsync false, waiting for an attach until the 10 s deadline");
+            Log.Info("ui", $"connect {Mac.Format(address)}: ConnectAsync false, waiting for an attach until the deadline");
             await attached.Task.WaitAsync(cancel.Token);
             Log.Info("ui", $"connect {Mac.Format(address)}: attached by the connection manager");
             return true;
@@ -448,31 +459,21 @@ internal sealed partial class TrayApp
     // again: toast and resend the real devices and state.
     private async void Disconnect(ulong address, bool reconnect)
     {
-        if (!await DisconnectCoreAsync(address))
+        if (_connections.Session?.Address == address)
         {
-            SendToast("disconnectFailed", address);
+            await _mic.StopStreamAsync();
+            bool ok = await _connections.DisconnectAsync();
+            Log.Info("ui", $"disconnect {Mac.Format(address)}: {ok}, reconnect={reconnect}");
+            if (!ok)
+            {
+                SendToast("disconnectFailed", address);
+                SendRealState();
+            }
         }
         if (reconnect)
         {
             Connect(address);
         }
-    }
-
-    // False when the pair stayed attached (the real devices and state are sent again).
-    private async Task<bool> DisconnectCoreAsync(ulong address)
-    {
-        if (_connections.Session?.Address != address)
-        {
-            return true;
-        }
-        await _mic.StopStreamAsync();
-        bool ok = await _connections.DisconnectAsync();
-        Log.Info("ui", $"disconnect {Mac.Format(address)}: {ok}");
-        if (!ok)
-        {
-            SendRealState();
-        }
-        return ok;
     }
 
     private KnownDevice? Find(ulong address) => _connections.GetDevices().Find(d => d.Address == address);

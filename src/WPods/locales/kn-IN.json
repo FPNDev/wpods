@@ -274,7 +274,7 @@
     "windows.latencyMic": "ಕಡಿಮೆ ಮೈಕ್ ವಿಳಂಬ",
     "windows.latencyMicDesc": "ಯಾವುದೇ ಆ್ಯಪ್ ಮೈಕ್ ತೆರೆದ ಕ್ಷಣವೇ ಅದು ಸಿದ್ಧವಾಗಿರುತ್ತದೆ.",
     "windows.latencyMicNote": "ಮೈಕ್ ಚಾಲೂ ಇರುತ್ತದೆ, ಹಾಗಾಗಿ AirPods ಹೆಚ್ಚು ಬ್ಯಾಟರಿ ಬಳಸಬಹುದು.",
-    "windows.latencyMicHdNote": "HD ಧ್ವನಿಯೊಂದಿಗೆ ಇದು ಧ್ವನಿ ಲಿಂಕ್ ಅನ್ನು ಚಾಲನೆಯಲ್ಲಿ ಇರಿಸುತ್ತದೆ, ಹಾಗಾಗಿ ಶಬ್ದ ಎಲ್ಲಾ ಸಮಯ ಮೋನೋ ಆಗಿರುತ್ತದೆ.",
+    "windows.latencyMicHdNote": "ಶಬ್ದ ಮೋನೋ ಆಗಿರುತ್ತದೆ, ಮತ್ತು AirPods ಹೆಚ್ಚು ಬ್ಯಾಟರಿ ಬಳಸಬಹುದು.",
     "windows.startup": "Windows ನೊಂದಿಗೆ ಪ್ರಾರಂಭಿಸಿ",
     "windows.startupDesc": "ನೀವು ಸೈನ್ ಇನ್ ಮಾಡಿದಾಗ ಟ್ರೇಯಲ್ಲಿ ತೆರೆಯುತ್ತದೆ.",
     "windows.theme": "ಥೀಮ್",

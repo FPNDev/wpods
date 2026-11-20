@@ -274,7 +274,7 @@
     "windows.latencyMic": "Төмен микрофон кідірісі",
     "windows.latencyMicDesc": "Қолданба микрофонды ашқан сәтте ол дайын болады.",
     "windows.latencyMicNote": "Микрофон қосулы қалады, сондықтан AirPods аккумуляторы тезірек отыруы мүмкін.",
-    "windows.latencyMicHdNote": "HD дауыспен бұл дауыс байланысын ұстап тұрады, сондықтан дыбыс үнемі моно болады.",
+    "windows.latencyMicHdNote": "Дыбыс моно болып қалады, ал AirPods аккумуляторы тезірек отыруы мүмкін.",
     "windows.startup": "Windows жүйесімен бірге іске қосу",
     "windows.startupDesc": "Жүйеге кіргенде хабарландыру аймағында ашылады.",
     "windows.theme": "Тақырып",

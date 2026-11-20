@@ -274,7 +274,7 @@
     "windows.latencyMic": "Alacsony mikrofonkésleltetés",
     "windows.latencyMicDesc": "A mikrofon azonnal működik, amint egy alkalmazás megnyitja.",
     "windows.latencyMicNote": "A mikrofon aktív marad, ezért az AirPods akkumulátora gyorsabban merülhet.",
-    "windows.latencyMicHdNote": "HD hanggal ez fenntartja a hangkapcsolatot, ezért a hang végig monó marad.",
+    "windows.latencyMicHdNote": "A hang monó marad, és az AirPods akkumulátora gyorsabban merülhet.",
     "windows.startup": "Indítás a Windows rendszerrel",
     "windows.startupDesc": "Bejelentkezéskor az értesítési területen indul el.",
     "windows.theme": "Téma",

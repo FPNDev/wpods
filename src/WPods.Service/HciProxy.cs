@@ -1442,7 +1442,7 @@ internal sealed partial class HciProxy
                 SendCommandLocked(link, 0x07, id, Cids(decline.LocalCid, decline.RemoteCid));
                 Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: channel closed by the AirPods");
                 StopVoiceLocked(link, "Hands-Free closed by the AirPods");
-                link.Decline = null;
+                DeclineEndedLocked(link, decline);
                 break;
             case 0x06 when ch is not null:
                 SendCommandLocked(link, 0x07, id, Cids(ch.LocalCid, ch.RemoteCid));
@@ -1453,7 +1453,7 @@ internal sealed partial class HciProxy
             case 0x07:
                 if (link.Ids.Remove(id, out Request closed) && link.Decline is { Step: DeclineStep.Closing } closing && closed.Cid == closing.LocalCid)
                 {
-                    link.Decline = null;
+                    DeclineEndedLocked(link, closing);
                 }
                 break;
             case 0x01:
@@ -1471,7 +1471,7 @@ internal sealed partial class HciProxy
                     else if (IsDeclineRequest(link, rejected, out HandsFreeDecline? decline))
                     {
                         Log.Warn("hfp", $"{link.Address:X12}: Hands-Free decline: command rejected");
-                        link.Decline = null;
+                        DeclineEndedLocked(link, decline);
                     }
                     break;
                 }
@@ -1551,12 +1551,8 @@ internal sealed partial class HciProxy
         if (result != 0)
         {
             Log.Info("hfp", $"{link.Address:X12}: Hands-Free decline: the AirPods refused the RFCOMM channel, result {result}");
-            link.Decline = null;
-            if (decline.Gateway is not null)
-            {
-                // Refused while the AirPods open their own RFCOMM channel (refused in turn): ours again in a moment.
-                RetryGatewayLocked(link);
-            }
+            // Refused while the AirPods open their own RFCOMM channel (refused in turn): ours again after a pause.
+            DeclineEndedLocked(link, decline);
             return;
         }
         decline.RemoteCid = remoteCid;
@@ -1660,7 +1656,7 @@ internal sealed partial class HciProxy
         decline.Step = DeclineStep.Closing;
         if (decline.RemoteCid == 0)
         {
-            link.Decline = null;
+            DeclineEndedLocked(link, decline);
             return;
         }
         SignalLocked(link, null, 0x06, Cids(decline.RemoteCid, decline.LocalCid));
@@ -1843,8 +1839,17 @@ internal sealed partial class HciProxy
         /// <summary>HD voice: our voice link on this link, and an app channel waiting for Hands-Free to connect.</summary>
         public VoiceLink? Voice;
         public AapChannel? VoiceWanted;
-        /// <summary>HD voice: our Hands-Free connection attempts the AirPods refused on this link.</summary>
+        /// <summary>HD voice: our Hands-Free retries on this link since HD voice was switched, and the end of the current pause.</summary>
         public int GatewayRetries;
+        public long GatewayNotBefore;
+        /// <summary>
+        /// Windows' own RFCOMM channels (its CIDs); its requests (id -> its CID) and those the AirPods answered (their CID ->
+        /// its CID); the AirPods' requests to it (their CIDs).
+        /// </summary>
+        public readonly HashSet<ushort> WindowsRfcomm = [];
+        public readonly Dictionary<byte, ushort> RfcommRequests = [];
+        public readonly Dictionary<ushort, ushort> RfcommAnswered = [];
+        public readonly HashSet<ushort> RfcommIncoming = [];
         /// <summary>Windows' A2DP stream on this link (AVDTP channels, state), once its channels were seen.</summary>
         public HciProxy.AvdtpState? Avdtp;
         /// <summary>Windows' L2CAP requests for AVDTP (id -> its CID) and the AirPods' AVDTP channel requests (their CIDs).</summary>

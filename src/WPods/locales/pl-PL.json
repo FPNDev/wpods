@@ -274,7 +274,7 @@
     "windows.latencyMic": "Niskie opóźnienie mikrofonu",
     "windows.latencyMicDesc": "Mikrofon działa, gdy tylko aplikacja go otworzy.",
     "windows.latencyMicNote": "Mikrofon pozostaje włączony, więc AirPods mogą szybciej zużywać baterię.",
-    "windows.latencyMicHdNote": "Z głosem HD połączenie głosowe pozostaje aktywne, więc dźwięk jest cały czas mono.",
+    "windows.latencyMicHdNote": "Dźwięk pozostaje mono, a AirPods mogą szybciej zużywać baterię.",
     "windows.startup": "Uruchamiaj z systemem Windows",
     "windows.startupDesc": "Otwiera się w zasobniku po zalogowaniu.",
     "windows.theme": "Motyw",

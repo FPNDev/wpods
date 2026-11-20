@@ -274,7 +274,7 @@
     "windows.latencyMic": "Latensi mikrofon rendah",
     "windows.latencyMicDesc": "Mikrofon langsung aktif saat aplikasi membukanya.",
     "windows.latencyMicNote": "Mikrofon tetap aktif, jadi baterai AirPods mungkin lebih boros.",
-    "windows.latencyMicHdNote": "Dengan Suara HD, ini menjaga sambungan suara tetap aktif, jadi suara tetap mono sepanjang waktu.",
+    "windows.latencyMicHdNote": "Suara tetap mono, dan baterai AirPods mungkin lebih boros.",
     "windows.startup": "Mulai dengan Windows",
     "windows.startupDesc": "Terbuka di baki sistem saat Anda masuk.",
     "windows.theme": "Tema",

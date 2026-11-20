@@ -274,7 +274,7 @@
     "windows.latencyMic": "Lage microfoonlatentie",
     "windows.latencyMicDesc": "Je microfoon werkt zodra een app hem opent.",
     "windows.latencyMicNote": "De microfoon blijft actief, dus je AirPods kunnen meer batterij verbruiken.",
-    "windows.latencyMicHdNote": "Met HD-spraak blijft de spraakverbinding open, dus het geluid blijft de hele tijd mono.",
+    "windows.latencyMicHdNote": "Het geluid blijft mono en je AirPods kunnen meer batterij verbruiken.",
     "windows.startup": "Starten met Windows",
     "windows.startupDesc": "Opent in het systeemvak wanneer je je aanmeldt.",
     "windows.theme": "Thema",

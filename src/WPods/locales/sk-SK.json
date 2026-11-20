@@ -274,7 +274,7 @@
     "windows.latencyMic": "Nízke oneskorenie mikrofónu",
     "windows.latencyMicDesc": "Mikrofón funguje hneď, ako ho aplikácia otvorí.",
     "windows.latencyMicNote": "Mikrofón zostáva zapnutý, takže sa AirPods môžu rýchlejšie vybíjať.",
-    "windows.latencyMicHdNote": "S HD hlasom zostáva hlasové spojenie stále aktívne, takže zvuk je celý čas mono.",
+    "windows.latencyMicHdNote": "Zvuk zostáva mono a AirPods sa môžu rýchlejšie vybíjať.",
     "windows.startup": "Spúšťať so systémom Windows",
     "windows.startupDesc": "Po prihlásení sa otvorí v oblasti oznámení.",
     "windows.theme": "Motív",

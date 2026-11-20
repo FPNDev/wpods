@@ -274,7 +274,7 @@
     "windows.latencyMic": "低咪高峰延遲",
     "windows.latencyMicDesc": "應用程式一開啟咪高峰即可使用。",
     "windows.latencyMicNote": "咪高峰會一直開着，因此 AirPods 可能較耗電。",
-    "windows.latencyMicHdNote": "開啟 HD 語音時會一直保持語音連結，因此聲音一直是單聲道。",
+    "windows.latencyMicHdNote": "聲音維持單聲道，AirPods 亦可能較耗電。",
     "windows.startup": "隨 Windows 啟動",
     "windows.startupDesc": "登入時在系統匣中開啟。",
     "windows.theme": "佈景主題",

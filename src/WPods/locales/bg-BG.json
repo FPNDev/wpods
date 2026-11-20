@@ -274,7 +274,7 @@
     "windows.latencyMic": "Ниско забавяне на микрофона",
     "windows.latencyMicDesc": "Микрофонът е активен в момента, в който приложение го отвори.",
     "windows.latencyMicNote": "Микрофонът остава включен, затова AirPods може да изразходват повече батерия.",
-    "windows.latencyMicHdNote": "С HD глас това поддържа гласовата връзка, затова звукът остава моно през цялото време.",
+    "windows.latencyMicHdNote": "Звукът остава моно и AirPods може да изразходват повече батерия.",
     "windows.startup": "Стартиране с Windows",
     "windows.startupDesc": "Отваря се в областта за уведомяване, когато влезете.",
     "windows.theme": "Тема",

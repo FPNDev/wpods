@@ -274,7 +274,7 @@
     "windows.latencyMic": "Pieni mikrofonin viive",
     "windows.latencyMicDesc": "Mikrofoni toimii heti, kun sovellus avaa sen.",
     "windows.latencyMicNote": "Mikrofoni pysyy päällä, joten AirPods voivat kuluttaa enemmän akkua.",
-    "windows.latencyMicHdNote": "HD-äänen kanssa tämä pitää ääniyhteyden auki, joten ääni on koko ajan mono.",
+    "windows.latencyMicHdNote": "Ääni pysyy monona, ja AirPods voivat kuluttaa enemmän akkua.",
     "windows.startup": "Käynnistä Windowsin kanssa",
     "windows.startupDesc": "Avautuu ilmaisinalueelle, kun kirjaudut sisään.",
     "windows.theme": "Teema",

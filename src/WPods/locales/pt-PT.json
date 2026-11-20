@@ -274,7 +274,7 @@
     "windows.latencyMic": "Baixa latência do microfone",
     "windows.latencyMicDesc": "O microfone funciona assim que uma app o abre.",
     "windows.latencyMicNote": "O microfone fica ativo, pelo que os AirPods podem gastar mais bateria.",
-    "windows.latencyMicHdNote": "Com a voz HD, a ligação de voz mantém-se ativa, pelo que o som fica mono o tempo todo.",
+    "windows.latencyMicHdNote": "O som fica mono e os AirPods podem gastar mais bateria.",
     "windows.startup": "Iniciar com o Windows",
     "windows.startupDesc": "Abre na área de notificação quando inicia sessão.",
     "windows.theme": "Tema",

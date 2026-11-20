@@ -274,7 +274,7 @@
     "windows.latencyMic": "കുറഞ്ഞ മൈക്ക് ലേറ്റൻസി",
     "windows.latencyMicDesc": "ഒരു ആപ്പ് മൈക്ക് തുറക്കുന്ന നിമിഷം തന്നെ അത് പ്രവർത്തിക്കും.",
     "windows.latencyMicNote": "മൈക്ക് ഓണായി തുടരും, അതിനാൽ AirPods കൂടുതൽ ബാറ്ററി ഉപയോഗിച്ചേക്കാം.",
-    "windows.latencyMicHdNote": "HD വോയ്‌സിനൊപ്പം ഇത് വോയ്‌സ് ലിങ്ക് സജീവമായി നിലനിർത്തുന്നു, അതിനാൽ ശബ്ദം മുഴുവൻ സമയവും മോണോ ആയിരിക്കും.",
+    "windows.latencyMicHdNote": "ശബ്ദം മോണോ ആയി തുടരും, AirPods കൂടുതൽ ബാറ്ററി ഉപയോഗിച്ചേക്കാം.",
     "windows.startup": "Windows-നൊപ്പം ആരംഭിക്കുക",
     "windows.startupDesc": "നിങ്ങൾ സൈൻ ഇൻ ചെയ്യുമ്പോൾ ട്രേയിൽ തുറക്കുന്നു.",
     "windows.theme": "തീം",

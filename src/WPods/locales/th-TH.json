@@ -274,7 +274,7 @@
     "windows.latencyMic": "ความหน่วงไมค์ต่ำ",
     "windows.latencyMicDesc": "ไมค์พร้อมใช้ทันทีที่แอปเปิดใช้งาน",
     "windows.latencyMicNote": "ไมค์จะเปิดอยู่ตลอด AirPods จึงอาจใช้แบตเตอรี่มากขึ้น",
-    "windows.latencyMicHdNote": "เมื่อใช้เสียง HD การเชื่อมต่อเสียงจะทำงานตลอด เสียงจึงเป็นโมโนตลอดเวลา",
+    "windows.latencyMicHdNote": "เสียงจะเป็นโมโน และ AirPods อาจใช้แบตเตอรี่มากขึ้น",
     "windows.startup": "เริ่มพร้อม Windows",
     "windows.startupDesc": "เปิดในถาดระบบเมื่อคุณลงชื่อเข้าใช้",
     "windows.theme": "ธีม",

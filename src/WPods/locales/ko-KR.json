@@ -274,7 +274,7 @@
     "windows.latencyMic": "낮은 마이크 지연 시간",
     "windows.latencyMicDesc": "앱이 마이크를 여는 즉시 사용할 수 있습니다.",
     "windows.latencyMicNote": "마이크가 계속 켜져 있어 AirPods 배터리 소모가 늘어날 수 있습니다.",
-    "windows.latencyMicHdNote": "HD 음성을 사용하면 음성 연결이 계속 유지되어 소리가 항상 모노로 재생됩니다.",
+    "windows.latencyMicHdNote": "소리가 모노로 유지되며 AirPods 배터리 소모가 늘어날 수 있습니다.",
     "windows.startup": "Windows 시작 시 실행",
     "windows.startupDesc": "로그인하면 트레이에서 실행됩니다.",
     "windows.theme": "테마",

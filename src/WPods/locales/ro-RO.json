@@ -274,7 +274,7 @@
     "windows.latencyMic": "Latență redusă a microfonului",
     "windows.latencyMicDesc": "Microfonul funcționează imediat ce o aplicație îl deschide.",
     "windows.latencyMicNote": "Microfonul rămâne activ, deci căștile AirPods pot consuma mai multă baterie.",
-    "windows.latencyMicHdNote": "Cu vocea HD, legătura vocală rămâne activă, deci sunetul rămâne mono tot timpul.",
+    "windows.latencyMicHdNote": "Sunetul rămâne mono, iar căștile AirPods pot consuma mai multă baterie.",
     "windows.startup": "Pornire cu Windows",
     "windows.startupDesc": "Se deschide în zona de notificare când vă conectați.",
     "windows.theme": "Temă",

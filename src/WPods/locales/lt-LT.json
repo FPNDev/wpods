@@ -274,7 +274,7 @@
     "windows.latencyMic": "Maža mikrofono delsa",
     "windows.latencyMicDesc": "Mikrofonas veikia vos tik programa jį atidaro.",
     "windows.latencyMicNote": "Mikrofonas lieka įjungtas, todėl AirPods gali greičiau išsikrauti.",
-    "windows.latencyMicHdNote": "Su HD balsu balso ryšys lieka įjungtas, todėl garsas visą laiką mono.",
+    "windows.latencyMicHdNote": "Garsas lieka mono, o AirPods gali greičiau išsikrauti.",
     "windows.startup": "Paleisti kartu su „Windows“",
     "windows.startupDesc": "Prisijungus atidaroma sistemos dėkle.",
     "windows.theme": "Tema",

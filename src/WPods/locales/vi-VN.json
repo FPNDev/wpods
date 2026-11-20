@@ -274,7 +274,7 @@
     "windows.latencyMic": "Độ trễ micrô thấp",
     "windows.latencyMicDesc": "Micrô hoạt động ngay khi ứng dụng mở nó.",
     "windows.latencyMicNote": "Micrô luôn bật nên AirPods có thể tốn pin hơn.",
-    "windows.latencyMicHdNote": "Với Giọng nói HD, kết nối giọng nói luôn được duy trì nên âm thanh luôn là mono.",
+    "windows.latencyMicHdNote": "Âm thanh vẫn là mono và AirPods có thể tốn pin hơn.",
     "windows.startup": "Khởi động cùng Windows",
     "windows.startupDesc": "Mở trong khay hệ thống khi bạn đăng nhập.",
     "windows.theme": "Chủ đề",

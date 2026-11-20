@@ -274,7 +274,7 @@
     "windows.latencyMic": "କମ୍ ମାଇକ୍ ଲାଟେନ୍ସି",
     "windows.latencyMicDesc": "କୌଣସି ଆପ୍ ମାଇକ୍ ଖୋଲିବା ମାତ୍ରେ ଏହା ସକ୍ରିୟ ରହେ।",
     "windows.latencyMicNote": "ମାଇକ୍ ଚାଲୁ ରହେ, ତେଣୁ AirPods ଅଧିକ ବ୍ୟାଟେରୀ ବ୍ୟବହାର କରିପାରନ୍ତି।",
-    "windows.latencyMicHdNote": "HD ଭଏସ୍ ସହିତ ଏହା ଭଏସ୍ ଲିଙ୍କ ଚାଲୁ ରଖେ, ତେଣୁ ସମ୍ପୂର୍ଣ୍ଣ ସମୟ ଧ୍ୱନି ମୋନୋ ରହେ।",
+    "windows.latencyMicHdNote": "ଧ୍ୱନି ମୋନୋ ରହେ, ଏବଂ AirPods ଅଧିକ ବ୍ୟାଟେରୀ ବ୍ୟବହାର କରିପାରନ୍ତି।",
     "windows.startup": "Windows ସହ ଆରମ୍ଭ କରନ୍ତୁ",
     "windows.startupDesc": "ଆପଣ ସାଇନ୍ ଇନ୍ କଲେ ଟ୍ରେରେ ଖୋଲେ।",
     "windows.theme": "ଥିମ୍",

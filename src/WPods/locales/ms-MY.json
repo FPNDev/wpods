@@ -274,7 +274,7 @@
     "windows.latencyMic": "Kependaman mikrofon rendah",
     "windows.latencyMicDesc": "Mikrofon terus aktif sebaik apl membukanya.",
     "windows.latencyMicNote": "Mikrofon kekal aktif, jadi AirPods anda mungkin menggunakan lebih banyak bateri.",
-    "windows.latencyMicHdNote": "Dengan Suara HD, ini mengekalkan pautan suara, jadi bunyi kekal mono sepanjang masa.",
+    "windows.latencyMicHdNote": "Bunyi kekal mono, dan AirPods anda mungkin menggunakan lebih banyak bateri.",
     "windows.startup": "Mulakan dengan Windows",
     "windows.startupDesc": "Dibuka di dulang sistem apabila anda mendaftar masuk.",
     "windows.theme": "Tema",

@@ -274,7 +274,7 @@
     "windows.latencyMic": "Niska latencija mikrofona",
     "windows.latencyMicDesc": "Mikrofon radi čim ga aplikacija otvori.",
     "windows.latencyMicNote": "Mikrofon ostaje uključen pa AirPods mogu trošiti više baterije.",
-    "windows.latencyMicHdNote": "S HD glasom glasovna veza ostaje aktivna pa je zvuk cijelo vrijeme mono.",
+    "windows.latencyMicHdNote": "Zvuk ostaje mono, a AirPods mogu trošiti više baterije.",
     "windows.startup": "Pokreni sa sustavom Windows",
     "windows.startupDesc": "Otvara se u području obavijesti kad se prijavite.",
     "windows.theme": "Tema",

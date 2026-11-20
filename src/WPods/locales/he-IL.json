@@ -274,7 +274,7 @@
     "windows.latencyMic": "השהיית מיקרופון נמוכה",
     "windows.latencyMicDesc": "המיקרופון פעיל ברגע שאפליקציה פותחת אותו.",
     "windows.latencyMicNote": "המיקרופון נשאר פעיל, ולכן ייתכן שהסוללה של ה-AirPods תתרוקן מהר יותר.",
-    "windows.latencyMicHdNote": "עם קול HD, זה משאיר את קישור הקול פעיל, ולכן הצליל נשאר מונו כל הזמן.",
+    "windows.latencyMicHdNote": "הצליל נשאר מונו, וייתכן שהסוללה של ה-AirPods תתרוקן מהר יותר.",
     "windows.startup": "הפעלה עם Windows",
     "windows.startupDesc": "נפתח במגש המערכת בעת הכניסה ל-Windows.",
     "windows.theme": "ערכת נושא",

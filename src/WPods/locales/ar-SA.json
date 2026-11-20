@@ -274,7 +274,7 @@
     "windows.latencyMic": "زمن انتقال منخفض للميكروفون",
     "windows.latencyMicDesc": "يعمل الميكروفون فور أن يفتحه أي تطبيق.",
     "windows.latencyMicNote": "يبقى الميكروفون يعمل، لذا قد تستهلك AirPods المزيد من البطارية.",
-    "windows.latencyMicHdNote": "مع صوت HD، يُبقي هذا رابط الصوت قائمًا، لذا يبقى الصوت أحاديًا طوال الوقت.",
+    "windows.latencyMicHdNote": "يبقى الصوت أحاديًا، وقد تستهلك AirPods المزيد من البطارية.",
     "windows.startup": "التشغيل مع Windows",
     "windows.startupDesc": "يفتح في علبة النظام عند تسجيل الدخول.",
     "windows.theme": "النسق",

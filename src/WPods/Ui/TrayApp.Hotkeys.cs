@@ -443,17 +443,18 @@ internal sealed partial class TrayApp
         {
             return new Outcome(connecting, null);
         }
-        pending(connect ? connecting : done with { Tone = "pending" });
-        if (connect)
+        if (!connect)
         {
-            if (await ConnectCoreAsync(address) is { } failure)
-            {
-                return Fail(title, Text("toast." + failure));
-            }
-            // Cancelled from the home page or by a Disconnect hotkey.
-            return _connections.Session?.Address == address ? new Outcome(done, Sounds.Cue.On) : new Outcome(done with { Detail = Text("status.notConnected"), Tone = "off" }, null);
+            Disconnect(address, reconnect: false);
+            return new Outcome(done, Sounds.Cue.Off);
         }
-        return await DisconnectCoreAsync(address) ? new Outcome(done, Sounds.Cue.Off) : Fail(title, Text("toast.disconnectFailed"));
+        pending(connecting);
+        if (await ConnectCoreAsync(address) is { } failure)
+        {
+            return Fail(title, Text("toast." + failure));
+        }
+        // Cancelled from the home page or by a Disconnect hotkey.
+        return _connections.Session?.Address == address ? new Outcome(done, Sounds.Cue.On) : new Outcome(done with { Detail = Text("status.notConnected"), Tone = "off" }, null);
     }
 
     private void ToggleMainFromHotkey()

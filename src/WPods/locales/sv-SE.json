@@ -274,7 +274,7 @@
     "windows.latencyMic": "Låg mikrofonlatens",
     "windows.latencyMicDesc": "Mikrofonen fungerar så fort en app öppnar den.",
     "windows.latencyMicNote": "Mikrofonen hålls igång, så dina AirPods kan dra mer batteri.",
-    "windows.latencyMicHdNote": "Med HD-röst hålls röstlänken uppe, så ljudet är i mono hela tiden.",
+    "windows.latencyMicHdNote": "Ljudet förblir mono, och dina AirPods kan dra mer batteri.",
     "windows.startup": "Starta med Windows",
     "windows.startupDesc": "Öppnas i meddelandefältet när du loggar in.",
     "windows.theme": "Tema",
