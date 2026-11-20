@@ -231,7 +231,7 @@ internal sealed partial class HciProxy
             {
                 case 0x02 when d.Length >= 4:
                     {
-                        // A new request with this id or this CID: an earlier RFCOMM one under it was refused.
+                        // A new request reusing an id or CID: what is still noted under it is a refused request's.
                         ushort cid = BinaryPrimitives.ReadUInt16LittleEndian(d[2..]);
                         foreach ((ushort remote, ushort local) in link.RfcommAnswered)
                         {
@@ -266,8 +266,8 @@ internal sealed partial class HciProxy
                 case 0x06 when d.Length >= 4:
                     RemoveWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d[2..]));
                     break;
-                // Windows answers the AirPods' Disconnection Request, also one not seen inbound (only the first command
-                // of a PDU passed on whole is): DCID is Windows' end.
+                // Windows answers the AirPods' Disconnection Request (DCID is Windows' end). Also catches a request missed
+                // inbound, where only the first command of a PDU passed on whole is noted.
                 case 0x07 when d.Length >= 2:
                     RemoveWindowsRfcommLocked(link, BinaryPrimitives.ReadUInt16LittleEndian(d));
                     break;
