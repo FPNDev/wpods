@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Ao conectar aqui, eles saem do outro dispositivo e passam para este.",
     "home.keysHint": "Conecte uma vez para ativar a detecção de AirPods por perto.",
     "home.more": "Mais",
+    "home.support": "Gostou do WPods?",
+    "home.supportLink": "Apoiar o projeto",
     "home.controlsDesc": "Modos de ruído, velocidade para pressionar, volume do toque",
     "home.windowsDesc": "Viva-voz, modos de microfone, mixer, teclas de atalho",
     "status.connected": "Conectado",

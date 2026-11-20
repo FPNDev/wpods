@@ -76,6 +76,8 @@
     "home.hintElsewhere": "ここで接続すると、ほかのデバイスから接続が切り替わります。",
     "home.keysHint": "一度接続すると、近くにあるAirPodsを検出できるようになります。",
     "home.more": "その他",
+    "home.support": "WPodsを気に入りましたか?",
+    "home.supportLink": "プロジェクトを支援する",
     "home.controlsDesc": "リスニングモード、押すときの間隔、トーン音量",
     "home.windowsDesc": "ハンズフリー、マイクモード、ミキサー、ショートカットキー",
     "status.connected": "接続済み",

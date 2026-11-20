@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Si els connectes aquí, es desconnectaran de l'altre dispositiu.",
     "home.keysHint": "Connecta'ls un cop per activar la detecció de proximitat.",
     "home.more": "Més",
+    "home.support": "T'agrada WPods?",
+    "home.supportLink": "Dona suport al projecte",
     "home.controlsDesc": "Modes d'escolta, velocitat de la premuda, efectes de so",
     "home.windowsDesc": "Mans lliures, modes de micròfon, mesclador, dreceres de teclat",
     "status.connected": "Connectat",

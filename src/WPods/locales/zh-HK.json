@@ -76,6 +76,8 @@
     "home.hintElsewhere": "在這裏連接會從另一部裝置接手 AirPods。",
     "home.keysHint": "連接一次即可啟用附近偵測。",
     "home.more": "更多",
+    "home.support": "喜歡 WPods 嗎？",
+    "home.supportLink": "支持這個項目",
     "home.controlsDesc": "聆聽模式、按下速度、提示聲音量",
     "home.windowsDesc": "免提、咪高風模式、混音器、快捷鍵",
     "status.connected": "已連接",

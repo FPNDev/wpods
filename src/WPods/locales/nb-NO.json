@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Kobler du til her, overtar du dem fra den andre enheten.",
     "home.keysHint": "Koble til én gang for at WPods skal oppdage dem i nærheten.",
     "home.more": "Mer",
+    "home.support": "Liker du WPods?",
+    "home.supportLink": "Støtt prosjektet",
     "home.controlsDesc": "Lyttemoduser, trykkhastighet, tonevolum",
     "home.windowsDesc": "Håndfri, mikrofonmoduser, mikser, hurtigtaster",
     "status.connected": "Tilkoblet",

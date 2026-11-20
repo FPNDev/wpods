@@ -76,6 +76,8 @@
     "home.hintElsewhere": "এখানে সংযোগ করলে এগুলো অন্য ডিভাইস থেকে সরে এখানে চলে আসবে।",
     "home.keysHint": "কাছাকাছি থাকলে শনাক্ত করার সুবিধা চালু করতে একবার সংযোগ করুন।",
     "home.more": "আরও",
+    "home.support": "WPods ভালো লাগছে?",
+    "home.supportLink": "সমর্থন করুন",
     "home.controlsDesc": "নয়েজ মোড, চাপার গতি, টোন ভলিউম",
     "home.windowsDesc": "Hands-Free, মাইক মোড, মিক্সার, হটকি",
     "status.connected": "সংযুক্ত",

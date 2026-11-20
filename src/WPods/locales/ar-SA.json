@@ -76,6 +76,8 @@
     "home.hintElsewhere": "الاتصال من هنا ينقلها من الجهاز الآخر.",
     "home.keysHint": "اتصل مرة واحدة لتفعيل اكتشاف AirPods القريبة.",
     "home.more": "المزيد",
+    "home.support": "هل أعجبك WPods؟",
+    "home.supportLink": "ادعم المشروع",
     "home.controlsDesc": "أنماط الضوضاء، سرعة الضغط، مستوى صوت النغمة",
     "home.windowsDesc": "Hands-Free، أنماط الميكروفون، الخلاط، مفاتيح الاختصار",
     "status.connected": "متصل",

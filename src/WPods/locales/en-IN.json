@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Connecting here takes them over from the other device.",
     "home.keysHint": "Connect once to enable nearby detection.",
     "home.more": "More",
+    "home.support": "Like WPods?",
+    "home.supportLink": "Support it",
     "home.controlsDesc": "Noise modes, press speed, tone volume",
     "home.windowsDesc": "Hands-Free, mic modes, mixer, hotkeys",
     "status.connected": "Connected",

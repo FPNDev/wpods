@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Si los conectas aquí, se desconectarán del otro dispositivo.",
     "home.keysHint": "Conéctalos una vez para que se detecten cuando estén cerca.",
     "home.more": "Más",
+    "home.support": "¿Te gusta WPods?",
+    "home.supportLink": "Apoya el proyecto",
     "home.controlsDesc": "Modos de ruido, velocidad de pulsación, volumen del tono",
     "home.windowsDesc": "Manos libres, modos de micrófono, mezclador, atajos",
     "status.connected": "Conectados",

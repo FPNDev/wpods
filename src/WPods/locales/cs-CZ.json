@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Připojením tady je převezmete z druhého zařízení.",
     "home.keysHint": "Připojte je jednou, aby začala fungovat detekce v okolí.",
     "home.more": "Další",
+    "home.support": "Líbí se vám WPods?",
+    "home.supportLink": "Podpořit projekt",
     "home.controlsDesc": "Režimy poslechu, rychlost stisknutí, hlasitost tónu",
     "home.windowsDesc": "Hands-Free, režimy mikrofonu, směšovač, klávesové zkratky",
     "status.connected": "Připojeno",

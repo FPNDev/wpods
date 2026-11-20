@@ -10,6 +10,7 @@
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/FPNDev/wpods)](https://github.com/FPNDev/wpods/releases/latest)
 ![Windows 10/11 x64](https://img.shields.io/badge/Windows%2010%2F11-x64-0078D4)
+[![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20WPods-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/fpndev)
 
 </div>
 
@@ -25,7 +26,8 @@
   <a href="#before-you-install"><b>Before you install</b></a> |
   <a href="#install"><b>Install</b></a> |
   <a href="#uninstall"><b>Uninstall</b></a> |
-  <a href="#help-and-feedback"><b>Help</b></a>
+  <a href="#help-and-feedback"><b>Help</b></a> |
+  <a href="#support-wpods"><b>Support</b></a>
 </p>
 
 ## Preview
@@ -182,6 +184,24 @@ Supports AirPods (1st, 2nd and 3rd gen), AirPods 4 and 4 (ANC), AirPods 5, AirPo
 - AirPods (1st gen) and AirPods (2nd gen) also support the microphone side setting.
 - AirPods Max use head detection.
 - The stereo mic (`Headset (A2DP, <AirPods name>)`), mic modes and voice enhancement work on AirPods 4, AirPods 4 (ANC), AirPods 5, AirPods Pro 2, Pro 3 and AirPods Max 2. AirPods (1st, 2nd and 3rd gen), AirPods Pro (1st gen) and AirPods Max (1st gen) can't send their mic in stereo: it works through Windows' Hands-Free mode, or through WPods with HD voice (experimental), and sound turns mono while an app uses it.
+
+## Support WPods
+
+WPods is free and stays free. If it's useful to you, you can support it on [Ko-fi](https://ko-fi.com/fpndev).
+
+Donations buy test hardware first. A few models run different chips and firmware, and they are the ones with the most open issues, such as codecs like AAC-ELD. Fixing those needs the real hardware. They're funded one at a time, in this order:
+
+| #   | Model                 | Status      |
+| --- | --------------------- | ----------- |
+| 1   | AirPods (1st gen)     | Funding now |
+| 2   | AirPods (2nd gen)     | Queued      |
+| 3   | AirPods 5             | Queued      |
+| 4   | AirPods Max (1st gen) | Queued      |
+| 5   | AirPods Max 2         | Queued      |
+
+The current goal and its progress are on the Ko-fi page. Anything over a goal carries over to the next model, and once all five are bought, donations go to general development. Every purchase is posted with its receipt in [Funding: test AirPods and receipts](https://github.com/FPNDev/wpods/discussions/5), along with a monthly summary of donations.
+
+I'll buy these models myself either way - I want no one to feel obliged to donate - I am committed to supporting WPods. Donations just get them here sooner, which makes WPods better for everyone. And if you just want to use WPods, enjoy it: that's what it's for.
 
 ## How WPods compares
 

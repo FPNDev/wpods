@@ -76,6 +76,8 @@
     "home.hintElsewhere": "在这里连接后，AirPods 会从另一台设备切换过来。",
     "home.keysHint": "连接一次即可启用附近检测。",
     "home.more": "更多",
+    "home.support": "喜欢 WPods 吗？",
+    "home.supportLink": "支持这个项目",
     "home.controlsDesc": "聆听模式、按下速度、提示声音量",
     "home.windowsDesc": "免提、麦克风模式、混音器、快捷键",
     "status.connected": "已连接",

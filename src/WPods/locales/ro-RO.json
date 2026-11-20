@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Dacă le conectați aici, căștile se deconectează de la celălalt dispozitiv.",
     "home.keysHint": "Conectați căștile o dată pentru a activa detectarea lor în apropiere.",
     "home.more": "Mai multe",
+    "home.support": "Vă place WPods?",
+    "home.supportLink": "Susțineți proiectul",
     "home.controlsDesc": "Moduri de ascultare, viteză de apăsare, volum ton",
     "home.windowsDesc": "Mâini libere, moduri microfon, mixer, taste rapide",
     "status.connected": "Conectat",

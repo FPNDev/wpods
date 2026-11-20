@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Wenn Sie hier verbinden, werden sie vom anderen Gerät übernommen.",
     "home.keysHint": "Verbinden Sie einmal, um die Erkennung in der Nähe zu aktivieren.",
     "home.more": "Mehr",
+    "home.support": "Gefällt Ihnen WPods?",
+    "home.supportLink": "Projekt unterstützen",
     "home.controlsDesc": "Hörmodi, Drücktempo, Tonlautstärke",
     "home.windowsDesc": "Freisprechen, Mikrofonmodi, Mixer, Tastenkürzel",
     "status.connected": "Verbunden",

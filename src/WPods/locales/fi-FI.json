@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Kun yhdistät tähän, kuulokkeet siirtyvät pois toisesta laitteesta.",
     "home.keysHint": "Yhdistä kerran, jotta lähellä olevat kuulokkeet voidaan tunnistaa.",
     "home.more": "Lisää",
+    "home.support": "Pidätkö WPodsista?",
+    "home.supportLink": "Tue projektia",
     "home.controlsDesc": "Kuuntelutilat, painamisnopeus, äänitehosteet",
     "home.windowsDesc": "Handsfree, mikrofonitilat, mikseri, pikanäppäimet",
     "status.connected": "Yhdistetty",

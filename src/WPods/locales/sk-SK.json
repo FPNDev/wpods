@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Ak ich pripojíte tu, odpoja sa od druhého zariadenia.",
     "home.keysHint": "Pripojte ich raz a WPods ich potom rozpozná nablízku.",
     "home.more": "Ďalšie",
+    "home.support": "Páči sa vám WPods?",
+    "home.supportLink": "Podporiť projekt",
     "home.controlsDesc": "Režimy počúvania, rýchlosť stlačenia, hlasitosť tónu",
     "home.windowsDesc": "Hands-Free, režimy mikrofónu, mixér, klávesové skratky",
     "status.connected": "Pripojené",

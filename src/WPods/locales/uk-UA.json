@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Якщо під'єднати їх тут, вони від'єднаються від іншого пристрою.",
     "home.keysHint": "Під'єднайте їх один раз, щоб WPods знаходив їх поблизу.",
     "home.more": "Додатково",
+    "home.support": "Подобається WPods?",
+    "home.supportLink": "Підтримати проєкт",
     "home.controlsDesc": "Режими шуму, темп натискання, гучність сигналу",
     "home.windowsDesc": "Hands-Free, режими мікрофона, мікшер, гарячі клавіші",
     "status.connected": "Під'єднано",

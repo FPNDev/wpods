@@ -31,6 +31,7 @@ internal sealed partial class TrayApp
     private readonly string?[] _micStages = new string?[2];
 
     private const string ReleasesUrl = "https://github.com/FPNDev/wpods/releases/";
+    private const string SupportUrl = "https://github.com/FPNDev/wpods#support-wpods";
 
     private void OnMainMessage(WebPane pane, PageMessage m)
     {
@@ -202,6 +203,9 @@ internal sealed partial class TrayApp
                 break;
             case "openReleaseNotes" when _service.Update.NotesUrl.StartsWith(ReleasesUrl, StringComparison.OrdinalIgnoreCase):
                 Launch(_service.Update.NotesUrl);
+                break;
+            case "openSupport":
+                Launch(SupportUrl);
                 break;
             case "openAddDevice":
                 // Windows 11 "Add a device" dialog.

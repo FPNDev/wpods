@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Če se povežete tukaj, jih prevzamete od druge naprave.",
     "home.keysHint": "Povežite se enkrat, da omogočite zaznavanje v bližini.",
     "home.more": "Več",
+    "home.support": "Vam je WPods všeč?",
+    "home.supportLink": "Podprite projekt",
     "home.controlsDesc": "Načini poslušanja, hitrost pritiska, glasnost tona",
     "home.windowsDesc": "Prostoročni način, načini mikrofona, mešalnik, bližnjične tipke",
     "status.connected": "Povezano",

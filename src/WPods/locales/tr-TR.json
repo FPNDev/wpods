@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Burada bağlanırsanız AirPods diğer cihazdan bu bilgisayara geçer.",
     "home.keysHint": "Yakınlık algılamayı etkinleştirmek için bir kez bağlanın.",
     "home.more": "Diğer",
+    "home.support": "WPods'u beğendiniz mi?",
+    "home.supportLink": "Projeyi destekleyin",
     "home.controlsDesc": "Gürültü modları, basma hızı, ses tonu yüksekliği",
     "home.windowsDesc": "Eller Serbest, mikrofon modları, karıştırıcı, kısayol tuşları",
     "status.connected": "Bağlı",

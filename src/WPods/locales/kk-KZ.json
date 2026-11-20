@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Осында қосылсаңыз, олар басқа құрылғыдан осы компьютерге ауысады.",
     "home.keysHint": "Жақын маңдағы AirPods құлаққаптарын анықтау үшін бір рет қосылыңыз.",
     "home.more": "Қосымша",
+    "home.support": "WPods ұнады ма?",
+    "home.supportLink": "Жобаға қолдау көрсету",
     "home.controlsDesc": "Шу режимдері, басу жылдамдығы, үн деңгейі",
     "home.windowsDesc": "Hands-Free, микрофон режимдері, микшер, жылдам пернелер",
     "status.connected": "Қосылған",

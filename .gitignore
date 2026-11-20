@@ -11,6 +11,7 @@ src/WPods/web/
 *.code-workspace
 ERRORS.md
 REVIEW.md
+FUND.md
 actions-runner
 CLAUDE.md
 .prettierrc

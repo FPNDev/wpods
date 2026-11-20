@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Menyambungkan di sini akan mengambil alih AirPods dari perangkat lain.",
     "home.keysHint": "Sambungkan sekali untuk mengaktifkan deteksi di sekitar.",
     "home.more": "Lainnya",
+    "home.support": "Suka WPods?",
+    "home.supportLink": "Dukung proyek ini",
     "home.controlsDesc": "Mode kebisingan, kecepatan tekan, volume nada",
     "home.windowsDesc": "Hands-Free, mode mikrofon, mixer, tombol pintasan",
     "status.connected": "Tersambung",

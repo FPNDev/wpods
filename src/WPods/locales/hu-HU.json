@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Ha itt csatlakozik, átveszi őket a másik eszköztől.",
     "home.keysHint": "A közeli eszközök észleléséhez csatlakozzon egyszer.",
     "home.more": "Továbbiak",
+    "home.support": "Tetszik a WPods?",
+    "home.supportLink": "A projekt támogatása",
     "home.controlsDesc": "Hallgatási módok, megnyomás sebessége, hangjelzések",
     "home.windowsDesc": "Kihangosító, mikrofonmódok, keverő, billentyűparancsok",
     "status.connected": "Csatlakoztatva",

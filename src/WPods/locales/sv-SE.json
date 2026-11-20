@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Om du ansluter här tas de över från den andra enheten.",
     "home.keysHint": "Anslut en gång för att kunna upptäcka dem i närheten.",
     "home.more": "Mer",
+    "home.support": "Gillar du WPods?",
+    "home.supportLink": "Stöd projektet",
     "home.controlsDesc": "Lyssningslägen, tryckhastighet, tonvolym",
     "home.windowsDesc": "Handsfree, mikrofonlägen, mixer, kortkommandon",
     "status.connected": "Ansluten",

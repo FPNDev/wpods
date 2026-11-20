@@ -76,6 +76,8 @@
     "home.hintElsewhere": "여기에서 연결하면 다른 기기와의 연결이 이 PC로 전환됩니다.",
     "home.keysHint": "근처 감지를 사용하려면 한 번 연결하세요.",
     "home.more": "더 보기",
+    "home.support": "WPods가 마음에 드시나요?",
+    "home.supportLink": "프로젝트 후원하기",
     "home.controlsDesc": "듣기 모드, 누르기 속도, 톤 음량",
     "home.windowsDesc": "핸즈프리, 마이크 모드, 믹서, 단축키",
     "status.connected": "연결됨",

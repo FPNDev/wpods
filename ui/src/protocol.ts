@@ -357,6 +357,7 @@ export type MainToHost =
         | 'updateNow'
         | 'dismissUpdate'
         | 'openReleaseNotes'
+        | 'openSupport'
         | 'openAddDevice'
         | 'getStarted'
         | 'restartWindows'

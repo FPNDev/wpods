@@ -76,6 +76,8 @@
     "home.hintElsewhere": "Opretter du forbindelse her, overtager pc'en dem fra den anden enhed.",
     "home.keysHint": "Opret forbindelse én gang for at slå registrering i nærheden til.",
     "home.more": "Mere",
+    "home.support": "Kan du lide WPods?",
+    "home.supportLink": "Støt projektet",
     "home.controlsDesc": "Lyttefunktioner, trykhastighed, tonelydstyrke",
     "home.windowsDesc": "Håndfri, mikrofontilstande, mixer, genvejstaster",
     "status.connected": "Forbundet",

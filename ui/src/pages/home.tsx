@@ -565,7 +565,20 @@ export const createHome = (ctx: Ctx): Page => {
         </div>
       </section>
 
-      {legal.el}
+      <div>
+        {legal.el}
+        <p class="wp-group__foot wp-legal-foot">
+          <span l:text="home.support" />{' '}
+          <button
+            type="button"
+            class="wp-link wp-focusable"
+            l:text="home.supportLink"
+            onclick={() => {
+              post({ type: 'openSupport' });
+            }}
+          />
+        </p>
+      </div>
     </div>
   ) as HTMLDivElement;
 
