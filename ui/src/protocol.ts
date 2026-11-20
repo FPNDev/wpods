@@ -39,7 +39,9 @@ export type Conn =
 export type MicMode = 'standard' | 'voiceIsolation' | 'wideSpectrum';
 type HostSettings = {
   disableHandsFree: boolean;
+  // Low audio latency (sound) and low mic latency.
   lowLatency: boolean;
+  lowLatencyMic: boolean;
   micMode: MicMode;
   duckPercent: number;
   // Applies only where the caps contain 'hdVoice'.
@@ -209,6 +211,8 @@ export type HotkeyAction =
   | 'mixer.off'
   | 'lowLatency.on'
   | 'lowLatency.off'
+  | 'lowLatencyMic.on'
+  | 'lowLatencyMic.off'
   | 'handsFree.on'
   | 'handsFree.off'
   | 'conversation.on'
@@ -217,6 +221,8 @@ export type HotkeyAction =
   | 'hearingAid.off'
   | 'mediaAssist.on'
   | 'mediaAssist.off'
+  | 'connection.on'
+  | 'connection.off'
   | 'window.toggle';
 export type HotkeyStatus = 'ok' | 'toggle' | 'conflict' | 'taken' | 'reserved';
 // vk: Windows virtual-key code; mods: Alt 1, Ctrl 2, Shift 4, Win 8. `char` labels layout-dependent punctuation keys.
@@ -328,7 +334,7 @@ export type MainToHost =
   | {
       type: 'setHostSetting';
       id: DeviceId;
-      name: 'disableHandsFree' | 'lowLatency' | 'hdVoice';
+      name: 'disableHandsFree' | 'lowLatency' | 'lowLatencyMic' | 'hdVoice';
       value: boolean;
     }
   | { type: 'setHostSetting'; id: DeviceId; name: 'micMode'; value: MicMode }

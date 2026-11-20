@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using WPods.Audio;
 using WPods.Core;
+using WPods.Nearby;
 using Shortcut = WPods.Core.Shortcut;
 
 namespace WPods.Ui;
@@ -91,6 +92,7 @@ internal sealed partial class TrayApp
             {
                 "noise" => await NoiseAsync(group[0], Pending),
                 "mic" => await MicAsync(group[0], Pending),
+                "connection" => await ConnectionAsync(group, Pending),
                 _ => await ToggleAsync(setting, group, Pending),
             };
             items[slot] = outcome.Item;
@@ -323,6 +325,7 @@ internal sealed partial class TrayApp
         {
             "mixer" => (Text("mixer.title"), "mixer"),
             "lowLatency" => (Text("windows.latency"), "latency"),
+            "lowLatencyMic" => (Text("windows.latencyMic"), "mic"),
             "handsFree" => (Text("hotkeys.handsFree"), "hands-free"),
             "conversation" => (Text("features.conversation"), "conversation"),
             "hearingAid" => (Text("features.hearingAid"), "ear"),
@@ -350,6 +353,8 @@ internal sealed partial class TrayApp
         {
             "mixer" => _settings.Mixer.Enabled,
             "lowLatency" => host.LowLatency,
+            // Only for a pair whose mic comes through WPods, as on the settings page.
+            "lowLatencyMic" when Models.HasStereoMic(s!.ModelNumber) || _connections.HdVoiceOn(session!.Address, host) => host.LowLatencyMic,
             "handsFree" => !host.DisableHandsFree,
             "conversation" when (caps & DeviceCapabilities.ConversationAwareness) != 0 => s!.ConversationAwareness == true,
             "hearingAid" when (caps & DeviceCapabilities.HearingAid) != 0 => s!.HearingAidEnabled,
@@ -359,6 +364,11 @@ internal sealed partial class TrayApp
         if (current is not { } was)
         {
             return Fail(title, Text("osd.notSupported"));
+        }
+        // HD voice keeps Windows' Hands-Free off, as on the settings page.
+        if (setting == "handsFree" && _connections.HdVoiceOn(session!.Address, host))
+        {
+            return Fail(title, Text("osd.hdVoiceOn"));
         }
         bool on = group.Count == 2 ? !was : group[0].EndsWith(".on", StringComparison.Ordinal);
         var done = new OsdItem(icon, title, Text(on ? "osd.on" : "osd.off"), on ? "on" : "off");
@@ -382,6 +392,10 @@ internal sealed partial class TrayApp
                 SendHostSettings(session.Address);
                 failure = on ? "toast.lowLatencyFailed" : failure;
                 break;
+            case "lowLatencyMic":
+                ok = await ApplyHostSettingsAsync(session!.Address, h => h with { LowLatencyMic = on }, toast: false);
+                SendHostSettings(session.Address);
+                break;
             case "handsFree":
                 ok = await ApplyHostSettingsAsync(session!.Address, h => h with { DisableHandsFree = !on }, toast: false);
                 SendHostSettings(session.Address);
@@ -398,6 +412,48 @@ internal sealed partial class TrayApp
                 break;
         }
         return ok ? new Outcome(done, on ? Sounds.Cue.On : Sounds.Cue.Off) : Fail(title, Text(failure));
+    }
+
+    // Connect: the last used pair; Disconnect: the attached one. One hotkey for both switches between them.
+    private async Task<Outcome> ConnectionAsync(List<string> group, Action<OsdItem> pending)
+    {
+        AapSession? session = _connections.Session;
+        bool connect = group.Count == 2 ? session is null : group[0] == "connection.on";
+        ulong address = session?.Address ?? _settings.LastUsed;
+        string title = Find(address)?.Name is { Length: > 0 } name ? name : Text("app.name");
+        var done = new OsdItem("bluetooth", title, Text(connect ? "status.connected" : "status.notConnected"), connect ? "on" : "off");
+        // Disconnect during a connect cancels it, like the home page's Cancel.
+        if (!connect && session is null && _connecting.Contains(address))
+        {
+            Cancel(address);
+            return new Outcome(done, Sounds.Cue.Off);
+        }
+        if (connect == (session is not null))
+        {
+            return new Outcome(done, null);
+        }
+        if (address == 0)
+        {
+            return Fail(title, Text("toast.connectFailed"));
+        }
+        var connecting = new OsdItem("bluetooth", title, Text("status.connecting"), "pending");
+        // A connect still under way: this press only shows it; the running one reports its result.
+        if (connect && (_connecting.Contains(address)
+            || _offerByAddress.TryGetValue(address, out NearbyOffer? offer) && offer.State == OfferState.Connecting))
+        {
+            return new Outcome(connecting, null);
+        }
+        pending(connect ? connecting : done with { Tone = "pending" });
+        if (connect)
+        {
+            if (await ConnectCoreAsync(address) is { } failure)
+            {
+                return Fail(title, Text("toast." + failure));
+            }
+            // Cancelled from the home page or by a Disconnect hotkey.
+            return _connections.Session?.Address == address ? new Outcome(done, Sounds.Cue.On) : new Outcome(done with { Detail = Text("status.notConnected"), Tone = "off" }, null);
+        }
+        return await DisconnectCoreAsync(address) ? new Outcome(done, Sounds.Cue.Off) : Fail(title, Text("toast.disconnectFailed"));
     }
 
     private void ToggleMainFromHotkey()

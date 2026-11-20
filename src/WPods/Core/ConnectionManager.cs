@@ -307,7 +307,7 @@ public sealed class ConnectionManager : IAsyncDisposable
         bool hdVoice = HdVoiceOn(address, settings);
         bool handsFreeOff = settings.DisableHandsFree || hdVoice;
         bool handsFreeChanged = (previous.DisableHandsFree || HdVoiceOn(address, previous)) != handsFreeOff;
-        Log.Info("conn", $"host settings {Mac.Format(address)}: disableHandsFree={settings.DisableHandsFree} hdVoice={settings.HdVoice} (runs {hdVoice}) lowLatency={settings.LowLatency} micMode={settings.MicMode} duckPercent={settings.DuckPercent}");
+        Log.Info("conn", $"host settings {Mac.Format(address)}: disableHandsFree={settings.DisableHandsFree} hdVoice={settings.HdVoice} (runs {hdVoice}) lowLatency={settings.LowLatency} lowLatencyMic={settings.LowLatencyMic} micMode={settings.MicMode} duckPercent={settings.DuckPercent}");
         // The service learns the HD voice choice before the mic pipeline starts or stops the voice link (HostSettingsChanged).
         if (previous.HdVoice != settings.HdVoice)
         {

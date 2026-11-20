@@ -19,7 +19,10 @@ public sealed record HostSettings
     public static readonly HostSettings Default = new();
 
     public bool DisableHandsFree { get; init; } = true;
+    /// <summary>Low audio latency: Windows' sound stream to the pair is kept running.</summary>
     public bool LowLatency { get; init; }
+    /// <summary>Low mic latency: the AirPods mic (or HD voice link) streams all the time.</summary>
+    public bool LowLatencyMic { get; init; }
     /// <summary>Saved mic mode; <see cref="MicConfig.EffectiveMode"/> gives the one that runs.</summary>
     [JsonConverter(typeof(MicModeJsonConverter))]
     public MicMode MicMode { get; init; }
@@ -770,6 +773,7 @@ public sealed class SettingsStore
                 {
                     DisableHandsFree = record.DisableHandsFreeMode ?? true,
                     LowLatency = record.LowLatencyMode ?? false,
+                    LowLatencyMic = record.LowLatencyMode ?? false,
                     MicMode = record.MicMode == "noiseCancelling" ? MicMode.VoiceIsolation : MicMode.Standard,
                 };
             }

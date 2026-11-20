@@ -51,9 +51,9 @@
 - **Voice enhancement.** Make your voice clearer and more even for calls.
 - **Full AirPods controls.** Noise control with Adaptive, conversation awareness with an adjustable "Lower media to" level, Personalized Volume, Hearing Aid and Media Assist, heart rate on AirPods Pro 3, press speed, press-and-hold settings, tone volume and more.
 - **Nearby popup, like on iPhone.** When your AirPods are near and connected to another device, WPods shows them with their battery. One click to connect. Works with several pairs.
-- **Hotkeys that work anywhere.** Switch noise control and mic modes, or turn the mixer, low latency, Hearing Aid and more on and off, without leaving your game or call.
+- **Hotkeys that work anywhere.** Switch noise control and mic modes, connect or disconnect, or turn the mixer, low latency, Hearing Aid and more on and off, without leaving your game or call.
 - **Mixer.** Hear your own mic or any other audio device in your AirPods, each at its own volume, on top of everything else.
-- **Low audio latency mode** for games and calls. It keeps your AirPods' sound and mic awake, so game sounds don't arrive late and your voice comes through the moment you start talking.
+- **Low latency for sound and mic** for games and calls. Each keeps its side awake: game sounds don't arrive late, and your voice comes through the moment you start talking.
 - **One installer does it all.** It installs .NET and WebView2 if missing, plus WPods' background service and usbip-win2. Works with Secure Boot on.
 - **Looks at home on Windows.** Light, Dark or Auto theme and your Windows accent color. 45 languages.
 
@@ -123,7 +123,8 @@ Features show only when your AirPods model supports them. See [Supported AirPods
 For each pair (while connected):
 
 - **Disable Hands-Free mode** keeps audio stereo. The mic comes through WPods instead. If you leave Hands-Free mode on, an app that uses the Hands-Free mic takes over the AirPods mic, and `Headset (A2DP, <AirPods name>)` goes quiet until that app stops using it. On AirPods without the stereo mic, Hands-Free mode stays on by default, as it is their only mic.
-- **Low audio latency** gives less delay for games and calls. Your AirPods' sound and mic stay awake, so nothing has to wake up first: sounds play right away and your mic is live the moment an app opens it. It may use more battery.
+- **Low audio latency** keeps your AirPods' sound awake, so sounds play right away. It may use more battery.
+- **Low mic latency** keeps the AirPods mic awake, so your mic is live the moment an app opens it. It shows when the mic comes through WPods. With HD voice, it keeps the voice link up, so sound stays mono the whole time. It may use more battery.
 - **HD voice (experimental)**, for AirPods without the stereo mic: WPods takes over Hands-Free for the pair and brings its mic to `Headset (HD, <AirPods name>)` in the best voice codec the AirPods and your Bluetooth adapter manage (at least Windows' own Hands-Free quality), with mic modes and voice enhancement. Sound turns mono while an app uses the mic. Off by default.
 
 For the app:
@@ -153,9 +154,10 @@ For the app:
 - Set your own keys in WPods' Windows settings page > Hotkeys. They work in any app, even when WPods is in the tray.
 - **Noise control:** next mode (the same modes as press and hold) or a key per mode. Press a mode's key again to go back to the mode you had before.
 - **Mic mode:** next mode (the modes you turned on) or a key per mode.
-- **Turn on / Turn off:** Mixer, Low audio latency, Hands-Free mode, Conversation awareness, Hearing Aid and Media Assist. Give both the same key to switch with one press.
+- **Turn on / Turn off:** Mixer, Low audio latency, Low mic latency, Hands-Free mode, Conversation awareness, Hearing Aid and Media Assist. Give both the same key to switch with one press.
+- **Connect / Disconnect:** connects your last used AirPods or disconnects the connected ones. Give both the same key to switch with one press.
 - **Show or hide WPods.**
-- Ready to use: **Win+Alt+N** switches noise control, **Win+Alt+V** switches mic modes and **Win+Alt+L** turns low audio latency on and off. Change or remove them any time.
+- Ready to use: **Win+Alt+N** switches noise control, **Win+Alt+V** switches mic modes and **Win+Alt+L** turns low mic latency on and off. Change or remove them any time.
 - Click a key to change it, press Esc to cancel, and Backspace or the trash button to remove it. WPods warns you when two actions clash on one key, or when another app already uses it.
 - A small notification shows each change. Mic modes and on/off switches also play a short sound. If you don't like it - turn the sounds off on the Hotkeys page.
 

@@ -127,6 +127,7 @@ const GROUPS: GroupDef[] = [
   },
   toggle('mixer.title', 'mixer.on', 'mixer.off'),
   toggle('windows.latency', 'lowLatency.on', 'lowLatency.off'),
+  toggle('windows.latencyMic', 'lowLatencyMic.on', 'lowLatencyMic.off'),
   toggle('hotkeys.handsFree', 'handsFree.on', 'handsFree.off'),
   toggle('features.conversation', 'conversation.on', 'conversation.off', {
     cap: 'conversationAwareness',
@@ -138,6 +139,13 @@ const GROUPS: GroupDef[] = [
     cap: 'mediaAssist',
     foot: 'hotkeys.mediaAssistFoot',
   }),
+  {
+    title: 'hotkeys.connection',
+    rows: [
+      { action: 'connection.on', title: 'home.connect' },
+      { action: 'connection.off', title: 'home.disconnect' },
+    ],
+  },
   {
     title: 'app.name',
     rows: [

@@ -28,21 +28,22 @@ internal sealed class Hotkeys
     [
         "noise.cycle", "noise.off", "noise.transparency", "noise.adaptive", "noise.noiseCancellation",
         "mic.cycle", "mic.standard", "mic.voiceIsolation", "mic.wideSpectrum",
-        "mixer.on", "mixer.off", "lowLatency.on", "lowLatency.off", "handsFree.on", "handsFree.off",
-        "conversation.on", "conversation.off", "hearingAid.on", "hearingAid.off", "mediaAssist.on", "mediaAssist.off",
+        "mixer.on", "mixer.off", "lowLatency.on", "lowLatency.off", "lowLatencyMic.on", "lowLatencyMic.off",
+        "handsFree.on", "handsFree.off", "conversation.on", "conversation.off", "hearingAid.on", "hearingAid.off",
+        "mediaAssist.on", "mediaAssist.off", "connection.on", "connection.off",
         "window.toggle",
     ];
 
     private const int FirstId = 100;
 
-    // Win+Alt combinations are rarely used by apps, so they seldom take over an app's own keys. Low latency gets one
-    // key for both Turn on and Turn off, so it toggles.
+    // Win+Alt combinations are rarely used by apps, so they seldom take over an app's own keys. Low mic latency gets
+    // one key for both Turn on and Turn off, so it toggles.
     private static readonly Dictionary<string, Shortcut> Defaults = new()
     {
         ["noise.cycle"] = new(0x4E, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
         ["mic.cycle"] = new(0x56, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
-        ["lowLatency.on"] = new(0x4C, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
-        ["lowLatency.off"] = new(0x4C, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
+        ["lowLatencyMic.on"] = new(0x4C, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
+        ["lowLatencyMic.off"] = new(0x4C, (int)(NativeUi.ModWin | NativeUi.ModAlt)),
     };
 
     private static readonly Shortcut PopupShortcut = new(0x41, (int)(NativeUi.ModWin | NativeUi.ModShift));

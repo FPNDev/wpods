@@ -909,7 +909,7 @@ internal sealed partial class TrayApp : ApplicationContext
         DestroyOsd();
         DestroyMain();
         await _mic.StopStreamAsync();
-        // After the detach: the Mixer letting go of the mic earlier would START it again in low latency mode.
+        // After the detach: the Mixer letting go of the mic earlier would START it again with low mic latency.
         await _connections.DisposeAsync();
         _mixer.Dispose();
         _ducker.Dispose();

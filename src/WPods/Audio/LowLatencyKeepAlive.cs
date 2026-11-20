@@ -6,8 +6,8 @@ namespace WPods.Audio;
 
 /// <summary>
 /// Loops an inaudible 18.5 kHz, 1-LSB tone on the default output so Windows keeps the Bluetooth audio stream
-/// open (no wake-up delay). Active only while a session is attached and that device's LowLatency host setting
-/// is on. Create before <see cref="ConnectionManager.Start"/>.
+/// open (no wake-up delay). Active only while a session is attached and that device's LowLatency (low audio latency)
+/// host setting is on. Create before <see cref="ConnectionManager.Start"/>.
 /// </summary>
 public sealed unsafe partial class LowLatencyKeepAlive
 {

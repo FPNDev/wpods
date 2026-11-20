@@ -57,7 +57,8 @@ Source: "..\.build\publish\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignor
 Source: "drivers.ps1"; DestDir: "{app}\drivers"; Flags: ignoreversion
 ; Extracted to {tmp} and run by PrepareToInstall, before any file is copied.
 Source: "..\.build\deps\{#UsbipSetup}"; Flags: dontcopy
-; One-time update step, extracted to {tmp} (see UpdateStereoMicPairs).
+; One-time update steps, extracted to {tmp} (see RunUpdateSteps).
+Source: "low-latency.ps1"; Flags: dontcopy
 Source: "stereo-mic.ps1"; Flags: dontcopy
 
 [UninstallDelete]
@@ -911,21 +912,29 @@ begin
       ExpandConstant('{log}')]), mbError, MB_OK, IDOK);
 end;
 
-// Updates from before 0.4.3: AirPods without the stereo mic get Hands-Free mode back and lose the WPods mic made for
-// them (stereo-mic.ps1). Runs while the service is stopped and the app closed; a failure only leaves them as they were.
-procedure UpdateStereoMicPairs;
+// One update step script, given the version this run updates; a failure is only logged.
+procedure RunUpdateStep(Script: String);
 var
   Code: Integer;
 begin
+  ExtractTemporaryFile(Script);
+  if not ExecAndLogOutput(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{tmp}\' + Script) + '" -PreviousVersion ' + AddQuotes(PreviousVersion), '', SW_HIDE,
+    ewWaitUntilTerminated, Code, nil) then
+    Log('Could not run ' + Script + ': ' + SysErrorMessage(Code))
+  else if Code <> 0 then
+    Log(Format('%s exit code: %d', [Script, Code]));
+end;
+
+// Updates from before 0.4.3: low latency splits into sound and mic (low-latency.ps1); AirPods without the stereo mic
+// get Hands-Free mode back and lose the WPods mic made for them (stereo-mic.ps1). Runs while the service is stopped and
+// the app closed; a failure only leaves settings as they were.
+procedure RunUpdateSteps;
+begin
   if PreviousVersion = '' then
     Exit;
-  ExtractTemporaryFile('stereo-mic.ps1');
-  if not ExecAndLogOutput(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
-    ExpandConstant('{tmp}\stereo-mic.ps1') + '" -PreviousVersion ' + AddQuotes(PreviousVersion), '', SW_HIDE,
-    ewWaitUntilTerminated, Code, nil) then
-    Log('Could not run stereo-mic.ps1: ' + SysErrorMessage(Code))
-  else if Code <> 0 then
-    Log(Format('stereo-mic.ps1 exit code: %d', [Code]));
+  RunUpdateStep('low-latency.ps1');
+  RunUpdateStep('stereo-mic.ps1');
 end;
 
 // A failure keeps the app installed. Until the restart usbip-win2 needs, the service only starts with Windows, as a
@@ -979,7 +988,7 @@ begin
       RemoveLegacyDrivers;
     // The old service still runs from the renamed files: restart it as the new one.
     StopService;
-    UpdateStereoMicPairs;
+    RunUpdateSteps;
     InstallService;
     if LeavePage <> nil then
       if LeaveTestModeBox.Checked and not TestModeTurnedOff then begin

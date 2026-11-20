@@ -216,6 +216,7 @@ internal sealed class MessageWriter
         w.WriteStartObject("host");
         w.WriteBoolean("disableHandsFree", host.DisableHandsFree);
         w.WriteBoolean("lowLatency", host.LowLatency);
+        w.WriteBoolean("lowLatencyMic", host.LowLatencyMic);
         w.WriteString("micMode", Camel(host.MicMode));
         w.WriteNumber("duckPercent", host.DuckPercent);
         w.WriteBoolean("hdVoice", host.HdVoice);

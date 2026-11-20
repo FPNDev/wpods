@@ -72,7 +72,7 @@ internal static class Aap
 
     public static byte[] Setting(byte id, byte value, byte extra = 0x00) => [0x04, 0x00, 0x04, 0x00, 0x09, 0x00, id, value, extra, 0x00, 0x00];
 
-    /// <summary>0x1F: byte 8 = 0x50, as AirPods Pro 2 report it (live: 09 00 1F 50 50 00 00).</summary>
+    /// <summary>0x1F: byte 8 = 0x50 (live: 09 00 1F 50 50 00 00).</summary>
     public static byte[] ToneVolume(byte volume) => Setting(ToneVolumeId, volume, 0x50);
 
     /// <summary>0x2C: byte 7 = enrolled (always 01 when sent), byte 8 = enabled.</summary>

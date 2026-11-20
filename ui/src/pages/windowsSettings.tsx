@@ -12,7 +12,7 @@ import type { Ctx, Page } from './page';
 
 export const createWindowsSettings = (ctx: Ctx): Page => {
   const hostToggle =
-    (name: 'disableHandsFree' | 'lowLatency' | 'hdVoice') =>
+    (name: 'disableHandsFree' | 'lowLatency' | 'lowLatencyMic' | 'hdVoice') =>
     (value: boolean): void => {
       const d = current();
       if (d) {
@@ -67,6 +67,21 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
   const latencyNote = Note({ label: 'windows.latencyNote', warning: true });
   latencyNote.hidden = true;
   latency.row.append(latencyNote);
+  const latencyMic = createSwitchRow({
+    id: 'latencyMicTitle',
+    title: 'windows.latencyMic',
+    desc: 'windows.latencyMicDesc',
+    stack: true,
+    onChange: hostToggle('lowLatencyMic'),
+  });
+  const latencyMicNote = Note({ label: 'windows.latencyNote', warning: true });
+  latencyMicNote.hidden = true;
+  const latencyMicHdNote = Note({
+    label: 'windows.latencyMicHdNote',
+    warning: true,
+  });
+  latencyMicHdNote.hidden = true;
+  latencyMic.row.append(latencyMicNote, latencyMicHdNote);
   const startup = createSwitchRow({
     id: 'startupTitle',
     title: 'windows.startup',
@@ -119,6 +134,7 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
           {handsFree.row}
           {handsFreeNoteRow}
           {latency.row}
+          {latencyMic.row}
           {hdVoice.row}
         </div>
       </section>
@@ -261,6 +277,11 @@ export const createWindowsSettings = (ctx: Ctx): Page => {
     );
     renderHost(latency, d.host.lowLatency, locked);
     setHidden(latencyNote, !d.host.lowLatency);
+    // Only for a pair whose mic comes through WPods.
+    setHidden(latencyMic.row, caps.has('noStereoMic') && !hdVoiceOn);
+    renderHost(latencyMic, d.host.lowLatencyMic, locked);
+    setHidden(latencyMicNote, !d.host.lowLatencyMic);
+    setHidden(latencyMicHdNote, !d.host.lowLatencyMic || !hdVoiceOn);
     setChecked(startup.input, store.startup);
     theme.set(getTheme());
     setChecked(accent.input, getUseAccent());

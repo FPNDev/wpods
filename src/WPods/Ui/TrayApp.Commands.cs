@@ -307,10 +307,19 @@ internal sealed partial class TrayApp
 
     private async void Connect(ulong address)
     {
+        if (await ConnectCoreAsync(address) is { } failure)
+        {
+            SendToast(failure, address);
+        }
+    }
+
+    // The toast id of the failure, or null (connected, cancelled or already connecting).
+    private async Task<string?> ConnectCoreAsync(ulong address)
+    {
         if (!_connecting.Add(address))
         {
             Log.Info("ui", $"connect {Mac.Format(address)}: already connecting");
-            return;
+            return null;
         }
         _cancelled.Remove(address);
         SendDevices();
@@ -356,11 +365,7 @@ internal sealed partial class TrayApp
         bool cancelled = _cancelled.Remove(address);
         Log.Info("ui", $"connect {Mac.Format(address)}: done, failure={failure ?? "none"}, cancelled={cancelled}, session={(_connections.Session is { } s ? Mac.Format(s.Address) : "none")}");
         LogConn();
-        if (cancelled || failure is null)
-        {
-            return;
-        }
-        SendToast(failure, address);
+        return cancelled ? null : failure;
     }
 
     /// <summary>
@@ -443,21 +448,31 @@ internal sealed partial class TrayApp
     // again: toast and resend the real devices and state.
     private async void Disconnect(ulong address, bool reconnect)
     {
-        if (_connections.Session?.Address == address)
+        if (!await DisconnectCoreAsync(address))
         {
-            await _mic.StopStreamAsync();
-            bool ok = await _connections.DisconnectAsync();
-            Log.Info("ui", $"disconnect {Mac.Format(address)}: {ok}, reconnect={reconnect}");
-            if (!ok)
-            {
-                SendToast("disconnectFailed", address);
-                SendRealState();
-            }
+            SendToast("disconnectFailed", address);
         }
         if (reconnect)
         {
             Connect(address);
         }
+    }
+
+    // False when the pair stayed attached (the real devices and state are sent again).
+    private async Task<bool> DisconnectCoreAsync(ulong address)
+    {
+        if (_connections.Session?.Address != address)
+        {
+            return true;
+        }
+        await _mic.StopStreamAsync();
+        bool ok = await _connections.DisconnectAsync();
+        Log.Info("ui", $"disconnect {Mac.Format(address)}: {ok}");
+        if (!ok)
+        {
+            SendRealState();
+        }
+        return ok;
     }
 
     private KnownDevice? Find(ulong address) => _connections.GetDevices().Find(d => d.Address == address);
@@ -556,6 +571,7 @@ internal sealed partial class TrayApp
         {
             "disableHandsFree" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var off => s => s with { DisableHandsFree = off },
             "lowLatency" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var on => s => s with { LowLatency = on },
+            "lowLatencyMic" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var micOn => s => s with { LowLatencyMic = micOn },
             "hdVoice" when value.ValueKind is JsonValueKind.True or JsonValueKind.False && value.GetBoolean() is var hd => s => s with { HdVoice = hd },
             // The pipeline loads the new effective mode's model (HostSettingsChanged).
             "micMode" when value.ValueKind == JsonValueKind.String && MessageWriter.TryParse(value.GetString(), out MicMode mode) => s => s with { MicMode = mode },

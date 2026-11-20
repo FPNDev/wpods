@@ -41,7 +41,7 @@ public enum StageLoad
 }
 
 /// <summary>
-/// AirPods mic to virtual mic: streams 0x58 audio while an app captures or the Mixer plays it (in low latency mode all
+/// AirPods mic to virtual mic: streams 0x58 audio while an app captures or the Mixer plays it (with low mic latency all
 /// the time, decoded only then). The session read loop only queues the audio packets; one real-time mic thread (MMCSS
 /// Pro Audio, performance cores) decodes AAC-ELD and runs mode model, gain, enhancement and limiter in float before one
 /// 16-bit conversion. Create before <see cref="ConnectionManager.Start"/>.
@@ -163,7 +163,7 @@ public sealed class MicPipeline
     private volatile bool _capturing;
     private CaptureState _appCapture = CaptureState.Idle;
     private bool _directListener;
-    // Low latency mode of the attached pair: the mic streams with nobody listening, so a recording starts at once.
+    // Low mic latency of the attached pair: the mic streams with nobody listening, so a recording starts at once.
     private bool _keepOn;
     // The AirPods' latest audio state report has their mic streaming.
     private bool _micOn;
@@ -297,7 +297,7 @@ public sealed class MicPipeline
             hasMic = _stereoMic || _hdVoice;
             _mode = settings.MicMode;
             _disableHandsFree = settings.DisableHandsFree || _hdVoice;
-            _keepOn = settings.LowLatency;
+            _keepOn = settings.LowLatencyMic;
             MicConfig config = _settings.Mic;
             Log.Info("mic", $"session {Mac.Format(session.Address)} attached, mode={_mode} (runs {config.EffectiveMode(_mode)}), capturing={_capturing}, keep on={_keepOn}, stereo mic={_stereoMic}, HD voice={_hdVoice}");
             RequestStagesLocked(config);
@@ -463,10 +463,10 @@ public sealed class MicPipeline
                 HoldLocked("HD voice on");
             }
             _disableHandsFree = disableHandsFree;
-            if (_keepOn != settings.LowLatency)
+            if (_keepOn != settings.LowLatencyMic)
             {
-                _keepOn = settings.LowLatency;
-                ApplyStreamingLocked(_keepOn ? "low latency on" : "low latency off");
+                _keepOn = settings.LowLatencyMic;
+                ApplyStreamingLocked(_keepOn ? "low mic latency on" : "low mic latency off");
             }
             else if (sourceChanged)
             {
@@ -572,7 +572,7 @@ public sealed class MicPipeline
         _flush = true;
         if (_startSent)
         {
-            // Streaming already (low latency mode): the timer checks at once that audio still comes.
+            // Streaming already (low mic latency): the timer checks at once that audio still comes.
             _startTries = 0;
             _noAudio = false;
             ArmLocked(0);
@@ -587,7 +587,7 @@ public sealed class MicPipeline
 
     private bool StreamingLocked => (_stereoMic || _hdVoice) && (_capturing || _keepOn);
 
-    // The AirPods mic streams while someone listens or, in low latency mode, all the time (only with the stereo mic or
+    // The AirPods mic streams while someone listens or, with low mic latency, all the time (only with the stereo mic or
     // HD voice).
     private void ApplyStreamingLocked(string reason)
     {
@@ -743,7 +743,7 @@ public sealed class MicPipeline
         }
         if (!_capturing)
         {
-            // Low latency mode with nobody listening: not decoded, only seen arriving (for the stall check).
+            // Low mic latency with nobody listening: not decoded, only seen arriving (for the stall check).
             Volatile.Write(ref _lastAudio, Environment.TickCount64);
             return;
         }
@@ -768,7 +768,7 @@ public sealed class MicPipeline
         Enqueue(new Work(WorkKind.VoiceLink, null, 0, Environment.TickCount64, link, null));
     }
 
-    // Read loop: decoded even with nobody listening (low latency mode), for the link's sequence and downlink silence.
+    // Read loop: decoded even with nobody listening (low mic latency), for the link's sequence and downlink silence.
     private void OnVoiceData(ReadOnlySpan<byte> data)
     {
         if (data.IsEmpty)
