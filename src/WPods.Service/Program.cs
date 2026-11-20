@@ -131,6 +131,8 @@ internal static class ServiceSetup
         Engine.GuardTripped = false;
         Engine.Uninstalling = false;
         Engine.WaitsForRestart = !start;
+        // Already here, not only when the service starts: after the restart usbip-win2 needs, the task runs as well.
+        UsbIpServer.SetShutdownTask(false);
         if (!start)
         {
             return 0;
@@ -195,6 +197,8 @@ internal static class ServiceSetup
             return 1;
         }
         Registry.LocalMachine.DeleteSubKeyTree(RadioDriver.StateKey, throwOnMissingSubKey: false);
+        // usbip-win2 may stay installed for other devices.
+        UsbIpServer.SetShutdownTask(true);
         return 0;
     }
 

@@ -170,6 +170,7 @@ internal static class UsbIp
 internal sealed class UsbIpServer : IDisposable
 {
     private static readonly string UsbipExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "USBip", "usbip.exe");
+    private const string ShutdownTask = @"\USBip Detach All On Reboot Or Shutdown";
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
     private readonly Lock _lock = new();
     private readonly Dictionary<string, Armed> _armed = [];
@@ -235,6 +236,31 @@ internal sealed class UsbIpServer : IDisposable
     public static bool ClientInstalled => File.Exists(UsbipExe);
 
     /// <summary>
+    /// Turns the scheduled task of usbip-win2's installer ("usbip detach --all=closeonly" on reboot or shutdown) off, or
+    /// back on. The task closes every connection but leaves the devices plugged in. It also runs while Windows starts,
+    /// as the shutdown's event reaches the event log only then: a device attached by then loses its connection, and the
+    /// one attached in its place never starts until the next restart. The service unplugs its own devices when it
+    /// stops. Returns false when the task was not changed.
+    /// </summary>
+    public static bool SetShutdownTask(bool enabled)
+    {
+        if (!ClientInstalled)
+        {
+            return false;
+        }
+        try
+        {
+            return RunExe(Path.Combine(Environment.SystemDirectory, "schtasks.exe"), $"{(enabled ? "enable" : "disable")} usbip-win2's shutdown task",
+                "/Change", "/TN", ShutdownTask, enabled ? "/ENABLE" : "/DISABLE") == 0;
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            Log.Warn("usbip", $"schtasks.exe did not run: {e.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Unplugs the virtual device on usbip-win2's <paramref name="port"/>; closing the connection alone makes usbip-win2
     /// keep reconnecting it.
     /// </summary>
@@ -247,9 +273,11 @@ internal sealed class UsbIpServer : IDisposable
     public void StopReconnect(string busId) =>
         Run($"stop reconnecting {busId}", "-t", Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "attach", "-r", "127.0.0.1", "-b", busId, "--stop");
 
-    private static void Run(string what, params string[] args)
+    private static void Run(string what, params string[] args) => RunExe(UsbipExe, what, args);
+
+    private static int RunExe(string exe, string what, params string[] args)
     {
-        var psi = new ProcessStartInfo(UsbipExe)
+        var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -263,7 +291,7 @@ internal sealed class UsbIpServer : IDisposable
         using Process? p = Process.Start(psi);
         if (p is null)
         {
-            return;
+            return -1;
         }
         Task<string> output = p.StandardOutput.ReadToEndAsync();
         Task<string> errors = p.StandardError.ReadToEndAsync();
@@ -271,7 +299,9 @@ internal sealed class UsbIpServer : IDisposable
         {
             p.Kill();
         }
-        Log.Info("usbip", $"{what}: exit {(p.HasExited ? p.ExitCode : -1)} {(output.Result + errors.Result).Trim()}");
+        int code = p.HasExited ? p.ExitCode : -1;
+        Log.Info("usbip", $"{what}: exit {code} {(output.Result + errors.Result).Trim()}");
+        return code;
     }
 
     /// <summary>

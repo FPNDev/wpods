@@ -517,6 +517,7 @@ internal sealed class Engine
 
     private void Supervise()
     {
+        bool shutdownTaskOff = false;
         var failures = new Queue<DateTime>();
         while (!_stop.IsCancellationRequested)
         {
@@ -555,6 +556,8 @@ internal sealed class Engine
                 continue;
             }
             SetState(ServiceState.Starting, "");
+            // Before the first attach: usbip-win2 sets the task up again when it is installed anew.
+            shutdownTaskOff = shutdownTaskOff || UsbIpServer.SetShutdownTask(false);
             DateTime started = DateTime.UtcNow;
             bool failed;
             try
