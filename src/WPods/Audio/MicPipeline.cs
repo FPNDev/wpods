@@ -177,7 +177,7 @@ public sealed class MicPipeline
     private TaskCompletionSource? _handsFreeEnded;
     // No START before this tick (HandsFreeHoldMs); kept across a reattach.
     private long _holdUntil;
-    // Windows' Hands-Free is off for the attached pair (DisableHandsFree or HD voice), to see it being enabled.
+    // Windows' Hands-Free is off for the attached pair (DisableHandsFree or HD voice).
     private bool _disableHandsFree;
     private volatile bool _flush;
     // Saved mic mode of the attached pair.
