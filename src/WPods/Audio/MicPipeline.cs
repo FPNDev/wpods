@@ -463,6 +463,11 @@ public sealed class MicPipeline
                 HoldLocked("HD voice on");
             }
             _disableHandsFree = disableHandsFree;
+            if (disableHandsFree && _reportedCallAudio)
+            {
+                _reportedCallAudio = false;
+                SetHandsFreeLocked(_linkCallAudio, _handsFreeMic, "Hands-Free disabled");
+            }
             if (_keepOn != settings.LowLatencyMic)
             {
                 _keepOn = settings.LowLatencyMic;
@@ -718,9 +723,11 @@ public sealed class MicPipeline
         // Audio state: 04 00 04 00 0E 00, source address (6 bytes, zero when none), state bits.
         if (packet.Length == 13 && packet[0] == 0x04 && packet[2] == 0x04 && packet[4] == 0x0E)
         {
-            bool callAudio = (packet[12] & 0x01) != 0;
             lock (_lock)
             {
+                // Bit 0x01 can be set without a call (seen on AirPods Pro 3 with a bud taken out), so it counts only
+                // while Hands-Free is on.
+                bool callAudio = (packet[12] & 0x01) != 0 && !_disableHandsFree;
                 _micOn = (packet[12] & 0x20) != 0;
                 if (_micOn && _startSent && !_started && !_hdVoice)
                 {
