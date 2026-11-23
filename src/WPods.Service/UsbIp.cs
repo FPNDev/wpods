@@ -236,46 +236,27 @@ internal sealed class UsbIpServer : IDisposable
     public static bool ClientInstalled => File.Exists(UsbipExe);
 
     /// <summary>
-    /// Turns the scheduled task of usbip-win2's installer ("usbip detach --all=closeonly" on reboot or shutdown) off, or
-    /// back on. The task closes every connection but leaves the devices plugged in. It also runs while Windows starts,
-    /// as the shutdown's event reaches the event log only then: a device attached by then loses its connection, and the
-    /// one attached in its place never starts until the next restart. The service unplugs its own devices when it
-    /// stops. Returns false when the task was not changed.
+    /// Turns usbip-win2's shutdown task off or back on. Even if the restart is cancelled, it closes the connections but
+    /// leaves the devices plugged in, and devices attached later stay dead. The service unplugs its own devices.
     /// </summary>
-    public static bool SetShutdownTask(bool enabled)
-    {
-        if (!ClientInstalled)
-        {
-            return false;
-        }
-        try
-        {
-            return RunExe(Path.Combine(Environment.SystemDirectory, "schtasks.exe"), $"{(enabled ? "enable" : "disable")} usbip-win2's shutdown task",
-                "/Change", "/TN", ShutdownTask, enabled ? "/ENABLE" : "/DISABLE") == 0;
-        }
-        catch (Exception e) when (e is not OutOfMemoryException)
-        {
-            Log.Warn("usbip", $"schtasks.exe did not run: {e.Message}");
-            return false;
-        }
-    }
+    public static void SetShutdownTask(bool enabled) =>
+        Run(Path.Combine(Environment.SystemDirectory, "schtasks.exe"), $"{(enabled ? "enable" : "disable")} usbip-win2's shutdown task",
+            "/Change", "/TN", ShutdownTask, enabled ? "/ENABLE" : "/DISABLE");
 
     /// <summary>
     /// Unplugs the virtual device on usbip-win2's <paramref name="port"/>; closing the connection alone makes usbip-win2
     /// keep reconnecting it.
     /// </summary>
-    public static void Detach(int port) => Run($"detach port {port}", "detach", "-p", port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    public static void Detach(int port) => Run(UsbipExe, $"detach port {port}", "detach", "-p", port.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     /// <summary>
     /// Cancels usbip-win2's reconnect attempts for <paramref name="busId"/>: after an attach it retries lost connections
     /// on its own (from 30 s, up to 20 times; `--once` covers only the first attach), even for a device already gone.
     /// </summary>
     public void StopReconnect(string busId) =>
-        Run($"stop reconnecting {busId}", "-t", Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "attach", "-r", "127.0.0.1", "-b", busId, "--stop");
+        Run(UsbipExe, $"stop reconnecting {busId}", "-t", Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "attach", "-r", "127.0.0.1", "-b", busId, "--stop");
 
-    private static void Run(string what, params string[] args) => RunExe(UsbipExe, what, args);
-
-    private static int RunExe(string exe, string what, params string[] args)
+    private static void Run(string exe, string what, params string[] args)
     {
         var psi = new ProcessStartInfo(exe)
         {
@@ -291,7 +272,7 @@ internal sealed class UsbIpServer : IDisposable
         using Process? p = Process.Start(psi);
         if (p is null)
         {
-            return -1;
+            return;
         }
         Task<string> output = p.StandardOutput.ReadToEndAsync();
         Task<string> errors = p.StandardError.ReadToEndAsync();
@@ -299,9 +280,7 @@ internal sealed class UsbIpServer : IDisposable
         {
             p.Kill();
         }
-        int code = p.HasExited ? p.ExitCode : -1;
-        Log.Info("usbip", $"{what}: exit {code} {(output.Result + errors.Result).Trim()}");
-        return code;
+        Log.Info("usbip", $"{what}: exit {(p.HasExited ? p.ExitCode : -1)} {(output.Result + errors.Result).Trim()}");
     }
 
     /// <summary>

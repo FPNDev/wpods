@@ -517,7 +517,6 @@ internal sealed class Engine
 
     private void Supervise()
     {
-        bool shutdownTaskOff = false;
         var failures = new Queue<DateTime>();
         while (!_stop.IsCancellationRequested)
         {
@@ -556,12 +555,12 @@ internal sealed class Engine
                 continue;
             }
             SetState(ServiceState.Starting, "");
-            // Before the first attach: usbip-win2 sets the task up again when it is installed anew.
-            shutdownTaskOff = shutdownTaskOff || UsbIpServer.SetShutdownTask(false);
             DateTime started = DateTime.UtcNow;
             bool failed;
             try
             {
+                // Before every attach: installing usbip-win2 again, also while the service runs, turns the task back on.
+                UsbIpServer.SetShutdownTask(false);
                 string ended = RunSession(id);
                 Log.Info("engine", $"session ended: {ended}");
                 // A replug after resume is no failure, however short the session was.
