@@ -247,10 +247,11 @@ Based on each project's README, website and source code as of 2026-10-26. If som
 
 - **Intel Wi-Fi 6E AX211** (USB ID 8087:0033) - AirPods Pro 2 & 3 - tested by the maintainer
 - **Intel Wireless-AC 9460/9560** (USB ID 8087:0AAA) - AirPods Pro 2 - tested by [@KarlTaok](https://github.com/KarlTaok) ([report](https://github.com/FPNDev/wpods/issues/2))
+- **MediaTek RZ616 (MT7922)** (USB ID 0E8D:0616) - AirPods Pro 3 - tested by [@marcoturi](https://github.com/marcoturi) ([report](https://github.com/FPNDev/wpods/issues/9))
 
 Thanks to everyone who provided adapter reports!
 
-Other AirPods models and other Bluetooth adapters (Realtek, MediaTek, Qualcomm, Broadcom and others) are supported but haven't been tested yet. On some PCs the Bluetooth adapter is one part of a combined USB device. WPods supports these too, but they haven't been tested yet either.
+Other AirPods models and other Bluetooth adapters (Realtek, Qualcomm, Broadcom and others) are supported but haven't been tested yet. On some PCs the Bluetooth adapter is one part of a combined USB device, like the MediaTek RZ616 above. WPods supports these too.
 
 **Your adapter helps everyone.** Every Bluetooth adapter is a little different, so please tell us how WPods works with yours, even if everything just works: [send an adapter report](https://github.com/FPNDev/wpods/issues/new?template=adapter_report.yml). It takes two minutes and shows the next person that their adapter is safe to use.
 
