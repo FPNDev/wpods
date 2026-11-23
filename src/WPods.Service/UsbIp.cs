@@ -170,6 +170,7 @@ internal static class UsbIp
 internal sealed class UsbIpServer : IDisposable
 {
     private static readonly string UsbipExe = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "USBip", "usbip.exe");
+    private const string ShutdownTask = @"\USBip Detach All On Reboot Or Shutdown";
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
     private readonly Lock _lock = new();
     private readonly Dictionary<string, Armed> _armed = [];
@@ -235,21 +236,29 @@ internal sealed class UsbIpServer : IDisposable
     public static bool ClientInstalled => File.Exists(UsbipExe);
 
     /// <summary>
+    /// Turns usbip-win2's shutdown task off or back on. Even if the restart is cancelled, it closes the connections but
+    /// leaves the devices plugged in, and devices attached later stay dead. The service unplugs its own devices.
+    /// </summary>
+    public static void SetShutdownTask(bool enabled) =>
+        Run(Path.Combine(Environment.SystemDirectory, "schtasks.exe"), $"{(enabled ? "enable" : "disable")} usbip-win2's shutdown task",
+            "/Change", "/TN", ShutdownTask, enabled ? "/ENABLE" : "/DISABLE");
+
+    /// <summary>
     /// Unplugs the virtual device on usbip-win2's <paramref name="port"/>; closing the connection alone makes usbip-win2
     /// keep reconnecting it.
     /// </summary>
-    public static void Detach(int port) => Run($"detach port {port}", "detach", "-p", port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    public static void Detach(int port) => Run(UsbipExe, $"detach port {port}", "detach", "-p", port.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     /// <summary>
     /// Cancels usbip-win2's reconnect attempts for <paramref name="busId"/>: after an attach it retries lost connections
     /// on its own (from 30 s, up to 20 times; `--once` covers only the first attach), even for a device already gone.
     /// </summary>
     public void StopReconnect(string busId) =>
-        Run($"stop reconnecting {busId}", "-t", Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "attach", "-r", "127.0.0.1", "-b", busId, "--stop");
+        Run(UsbipExe, $"stop reconnecting {busId}", "-t", Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "attach", "-r", "127.0.0.1", "-b", busId, "--stop");
 
-    private static void Run(string what, params string[] args)
+    private static void Run(string exe, string what, params string[] args)
     {
-        var psi = new ProcessStartInfo(UsbipExe)
+        var psi = new ProcessStartInfo(exe)
         {
             UseShellExecute = false,
             CreateNoWindow = true,

@@ -628,6 +628,8 @@ internal sealed class Engine
             bool failed;
             try
             {
+                // Before every attach: installing usbip-win2 again, also while the service runs, turns the task back on.
+                UsbIpServer.SetShutdownTask(false);
                 string ended = RunSession(id);
                 Log.Info("engine", $"session ended: {ended}");
                 // A replug after resume is no failure, however short the session was.

@@ -131,6 +131,8 @@ internal static class ServiceSetup
         Engine.GuardTripped = false;
         Engine.Uninstalling = false;
         Engine.WaitsForRestart = !start;
+        // Off before the restart after Setup: the task may also run while Windows starts, next to the first attach.
+        UsbIpServer.SetShutdownTask(false);
         if (!start)
         {
             return 0;
@@ -189,6 +191,8 @@ internal static class ServiceSetup
         {
             return 1;
         }
+        // usbip-win2 may stay installed for other devices.
+        UsbIpServer.SetShutdownTask(true);
         // The state stays while an adapter could not be given back: --restore-native needs it.
         if (!Engine.RestoreNative())
         {
