@@ -227,8 +227,9 @@ DeepFilterNet Rust crates
 
 Rust crates statically linked into deepfilter.dll: the crates in the DeepFilterNet v0.5.6 Cargo.lock that
 cargo tree -p deep_filter --no-default-features --features capi -e normal,no-proc-macro
---target x86_64-pc-windows-msvc --locked lists. Proc-macro crates and their dependencies run only at build
-time and are not linked into deepfilter.dll, so they are not listed.
+--target x86_64-pc-windows-msvc --locked lists (--target aarch64-pc-windows-msvc for the Arm64 build: the same
+crates, with windows_aarch64_msvc in place of windows_x86_64_msvc). Proc-macro crates and their dependencies
+run only at build time and are not linked into deepfilter.dll, so they are not listed.
 
 Each crate belongs to its authors and is used under the license shown. The license texts below are each
 crate's own license file (with its copyright lines) as found by cargo-about 0.9.2. Crates whose license files
@@ -316,7 +317,8 @@ winapi v0.3.9 | MIT/Apache-2.0 | MIT, text [37]
 winapi-util v0.1.5 | Unlicense/MIT | MIT, text [32]
 windows-sys v0.48.0 | MIT OR Apache-2.0 | MIT, text [38]
 windows-targets v0.48.5 | MIT OR Apache-2.0 | MIT, text [38]
-windows_x86_64_msvc v0.48.5 | MIT OR Apache-2.0 | MIT, text [38]
+windows_aarch64_msvc v0.48.5 | MIT OR Apache-2.0 | MIT, text [38] (Arm64 build only)
+windows_x86_64_msvc v0.48.5 | MIT OR Apache-2.0 | MIT, text [38] (x64 build only)
 
 
 -------------------------------------------------------------------------------
@@ -1319,7 +1321,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 -------------------------------------------------------------------------------
-[38] MIT: windows-sys v0.48.0, windows-targets v0.48.5, windows_x86_64_msvc v0.48.5
+[38] MIT: windows-sys v0.48.0, windows-targets v0.48.5, windows_aarch64_msvc v0.48.5, windows_x86_64_msvc v0.48.5
 -------------------------------------------------------------------------------
 
     MIT License

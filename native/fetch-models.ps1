@@ -1,15 +1,23 @@
-# Fetches ONNX Runtime (CPU, win-x64 release build) and the pinned ONNX models with a direct download used by the
-# Audio\Onnx mic stages. Every download is SHA-256 checked; nothing is built.
+# Fetches ONNX Runtime (CPU, win-x64 or win-arm64 release build) and the pinned ONNX models with a direct download used
+# by the Audio\Onnx mic stages. Every download is SHA-256 checked; nothing is built.
 # Models without a download are exported by native\export-models.ps1.
-# Output: .build\native\bin\onnxruntime.dll and .build\native\bin\models\*.onnx
+# Output: .build\native\bin\onnxruntime.dll and .build\native\bin\models\*.onnx (arm64: .build\native-arm64\bin)
+param(
+    [ValidateSet('x64', 'arm64')]
+    [string]$Arch = 'x64' # target architecture (build.ps1 -Arch)
+)
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
 $ProgressPreference = 'SilentlyContinue'
 . "$PSScriptRoot\common.ps1"
 
 $OrtVersion = '1.31.0'
-$OrtUrl = "https://registry.npmmirror.com/-/binary/onnxruntime/v$OrtVersion/onnxruntime-win-x64-$OrtVersion.zip"
-$OrtSha256 = '3958D8A44984160692C1B4FFD0DE3CB48F8C39F9D34BB31E433DB06E30B82195'
+$OrtName = "onnxruntime-win-$Arch-$OrtVersion"
+$OrtUrl = "https://registry.npmmirror.com/-/binary/onnxruntime/v$OrtVersion/$OrtName.zip"
+$OrtSha256 = @{
+    x64   = '3958D8A44984160692C1B4FFD0DE3CB48F8C39F9D34BB31E433DB06E30B82195'
+    arm64 = 'EF6206FA8D6975878D93A97035D280240CE5764C126A7430E5427E18923316D5'
+}[$Arch]
 
 $DpdfNet = 'https://huggingface.co/Ceva-IP/DPDFNet/resolve/dd6818d00f50c836fed43a6243ebe49116de5964/onnx'
 $FastEnhancer = 'https://github.com/aask1357/fastenhancer/releases/download'
@@ -28,15 +36,15 @@ $Models = [ordered]@{
     'fevd_gtcrn_spec.onnx'   = "$FastEnhancer/onnx-vd-v1.0.0/gtcrn.spec.onnx", '35E0AA36DABE7FAA2A21DADAD3C4E2702C52520BA43B277C16A8C63E0815D8CC'
 }
 
-$root = [IO.Path]::GetFullPath("$PSScriptRoot\..\.build\native")
+$root = Get-NativeRoot $Arch
 $dl = "$root\src\dl"
 $bin = "$root\bin"
 $modelDir = "$bin\models"
 New-Item -ItemType Directory -Force $dl, $bin, $modelDir | Out-Null
 
-$archive = "$dl\onnxruntime-win-x64-$OrtVersion.zip"
+$archive = "$dl\$OrtName.zip"
 Get-Pinned $OrtUrl $archive $OrtSha256
-& "$env:SystemRoot\System32\tar.exe" -xf $archive -C $bin --strip-components 2 "onnxruntime-win-x64-$OrtVersion/lib/onnxruntime.dll"
+& "$env:SystemRoot\System32\tar.exe" -xf $archive -C $bin --strip-components 2 "$OrtName/lib/onnxruntime.dll"
 if ($LASTEXITCODE) {
     throw 'tar failed'
 }

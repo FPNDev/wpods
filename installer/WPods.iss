@@ -1,9 +1,23 @@
-; WPods installer (Inno Setup 6). Built by ..\build.ps1, which passes /DAppVersion.
+; WPods installer (Inno Setup 6). Built by ..\build.ps1, which passes /DAppVersion and /DArch.
 #ifndef AppVersion
   #error AppVersion is not defined: build with build.ps1
 #endif
+; Target architecture: x64 (WPods-Setup.exe) or arm64 (WPods-Setup-arm64.exe, Arm64 Windows only).
+#ifndef Arch
+  #define Arch "x64"
+#endif
+#if Arch == "x64"
+  #define ArchSuffix ""
+  ; x64 Windows only: on Arm64 Windows the x64 drivers of usbip-win2 would not load.
+  #define ArchAllowed "x64os"
+#elif Arch == "arm64"
+  #define ArchSuffix "-arm64"
+  #define ArchAllowed "arm64"
+#else
+  #error Arch must be x64 or arm64
+#endif
 ; Fetched by ..\native\fetch-usbip.ps1 into ..\.build\deps.
-#define UsbipSetup "USBip-0.9.8.1-x64.exe"
+#define UsbipSetup "USBip-0.9.8.1-" + Arch + ".exe"
 
 [Setup]
 AppId={{08E1B0A8-4D58-46F6-B9EC-006F5CC3A69F}
@@ -18,8 +32,8 @@ UninstallDisplayIcon={app}\WPods.exe
 DefaultDirName={autopf}\WPods
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
-ArchitecturesAllowed=x64os
-ArchitecturesInstallIn64BitMode=x64os
+ArchitecturesAllowed={#ArchAllowed}
+ArchitecturesInstallIn64BitMode={#ArchAllowed}
 MinVersion=10.0.19041
 SetupIconFile=..\src\WPods\Assets\WPods.ico
 WizardStyle=modern
@@ -34,7 +48,7 @@ RestartApplications=no
 RestartIfNeededByRun=no
 SetupLogging=yes
 OutputDir=..\dist
-OutputBaseFilename=WPods-Setup
+OutputBaseFilename=WPods-Setup{#ArchSuffix}
 
 [Tasks]
 Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -52,7 +66,7 @@ Type: filesandordirs; Name: "{app}\locales"
 Type: filesandordirs; Name: "{app}\licenses"
 
 [Files]
-Source: "..\.build\publish\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\.build\publish{#ArchSuffix}\*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Removes the drivers of WPods 0.2.x and older (updates and uninstall).
 Source: "drivers.ps1"; DestDir: "{app}\drivers"; Flags: ignoreversion
 ; Extracted to {tmp} and run by PrepareToInstall, before any file is copied.
@@ -82,8 +96,8 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 
 [Code]
 const
-  DotNetUrl = 'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe';
-  DotNetFile = 'windowsdesktop-runtime-win-x64.exe';
+  DotNetUrl = 'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-{#Arch}.exe';
+  DotNetFile = 'windowsdesktop-runtime-win-{#Arch}.exe';
   WebView2Url = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703';
   WebView2File = 'MicrosoftEdgeWebview2Setup.exe';
   WebView2Key = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
@@ -384,15 +398,15 @@ begin
   end;
 end;
 
-{ Mirrors the .NET host lookup: registered x64 install location (32-bit registry view), else Program Files\dotnet.
-  Preview runtimes (folder names with '-') cannot run a release build, so they don't count. }
+{ Mirrors the .NET host lookup: registered install location of the target architecture (32-bit registry view), else
+  Program Files\dotnet. Preview runtimes (folder names with '-') cannot run a release build, so they don't count. }
 function DotNetInstalled: Boolean;
 var
   Root: String;
   FindRec: TFindRec;
 begin
   Result := False;
-  if not RegQueryStringValue(HKLM32, 'SOFTWARE\dotnet\Setup\InstalledVersions\x64', 'InstallLocation', Root) or (Root = '') then begin
+  if not RegQueryStringValue(HKLM32, 'SOFTWARE\dotnet\Setup\InstalledVersions\{#Arch}', 'InstallLocation', Root) or (Root = '') then begin
     Root := ExpandConstant('{commonpf64}\dotnet');
   end;
   if FindFirst(AddBackslash(Root) + 'shared\Microsoft.WindowsDesktop.App\10.*', FindRec) then begin

@@ -4,6 +4,7 @@ obj/
 .vs/
 *.user
 x64/
+ARM64/
 *.pdb
 dist/
 ui/node_modules/

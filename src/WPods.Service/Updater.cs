@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -29,11 +30,13 @@ internal enum UpdateStatus : byte
 internal sealed class Updater : IDisposable
 {
     private const string LatestRelease = "https://api.github.com/repos/FPNDev/wpods/releases/latest";
-    private const string AssetName = "WPods-Setup.exe";
     private const string StagedValue = "UpdateStaged";      // "version|file|sha256"
     private const string AttemptsValue = "UpdateAttempts";  // "version|count"
     private const string RelaunchValue = "RelaunchSessions"; // session ids where the app ran, "1,2"
     private const int MaxAttempts = 3;
+    // The Setup of this build's architecture (build.ps1 -Arch); a release without it is no update for this PC.
+    private static readonly string AssetName =
+        RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "WPods-Setup-arm64.exe" : "WPods-Setup.exe";
     // A failed check (e.g. no network yet at Windows start) is retried after RetryDelay.
     private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(5);
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMinutes(5);

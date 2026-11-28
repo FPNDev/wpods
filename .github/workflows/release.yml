@@ -22,16 +22,22 @@ jobs:
             throw "Tag $env:GITHUB_REF_NAME does not match build.ps1 version $version (expected v$version)"
           }
 
-      - name: Build
+      - name: Build (x64)
         shell: pwsh
         run: ./build.ps1
+
+      # Cross-compiled on an x64 runner too (needs the MSVC ARM64 build tools, Visual Studio component
+      # Microsoft.VisualStudio.Component.VC.Tools.ARM64).
+      - name: Build (arm64)
+        shell: pwsh
+        run: ./build.ps1 -Arch arm64
 
       - name: Create draft release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME dist/WPods-Setup.exe --draft --title $env:GITHUB_REF_NAME --notes ''
+          gh release create $env:GITHUB_REF_NAME dist/WPods-Setup.exe dist/WPods-Setup-arm64.exe --draft --title $env:GITHUB_REF_NAME --notes ''
           if ($LASTEXITCODE -ne 0) {
             throw "gh release create failed ($LASTEXITCODE)"
           }

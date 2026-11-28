@@ -1,6 +1,10 @@
 Native libraries and models shipped with WPods (built or fetched by native\build-ffmpeg.ps1, native\build-rnnoise.ps1,
 native\build-helper.ps1, native\build-deepfilter.ps1, native\build-webrtc-apm.ps1, native\fetch-models.ps1 and
 native\export-models.ps1 with the script in native\export\). Licenses and copyright notices: see THIRD-PARTY-NOTICES.txt.
+Each is built for x64 (.build\native) and, with -Arch arm64, for Arm64 (.build\native-arm64) from the same source;
+"arm64:" lines below list what differs. The Arm64 build runs on x64 or Arm64 Windows (cross-compiling as needed) and
+also needs the MSVC ARM64 tools and clang-cl (Visual Studio components Microsoft.VisualStudio.Component.VC.Tools.ARM64
+and Microsoft.VisualStudio.Component.VC.Llvm.Clang).
 
 FFmpeg 7.1.5 (LGPL v2.1 or later, see THIRD-PARTY-NOTICES.txt)
   Source:  https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz
@@ -22,6 +26,9 @@ FFmpeg 7.1.5 (LGPL v2.1 or later, see THIRD-PARTY-NOTICES.txt)
     --disable-everything --enable-decoder=aac --enable-decoder=sbc --enable-encoder=sbc (sbc also does mSBC)
     --enable-small --optflags=-O2
     --extra-cflags="-MT -guard:cf" --extra-ldflags="-NODEFAULTLIB:libucrt.lib -guard:cf" --extra-libs=ucrt.lib
+  arm64: --arch=aarch64 --enable-cross-compile --disable-asm in place of --arch=x86_64 (MSVC assembles FFmpeg's
+         GNU-syntax Arm64 assembly only through gas-preprocessor + armasm64; the C code paths are used instead),
+         MSVC 14.51 ARM64
   No --enable-gpl, no --enable-nonfree. License reported by configure: LGPL version 2.1 or later.
   Corresponding source: the tarball above plus build-ffmpeg.ps1 / build-ffmpeg.sh.
 
@@ -32,6 +39,10 @@ RNNoise 0.2 (BSD-3-Clause, see THIRD-PARTY-NOTICES.txt)
   Output:  rnnoise.dll (unmodified source)
   Toolchain: MSVC 14.51 x64, /O2 /MT /guard:cf (hybrid CRT: /NODEFAULTLIB:libucrt.lib ucrt.lib)
   SIMD: SSE2 baseline + SSE4.1 / AVX2 kernels chosen at runtime by RNNoise's x86 RTCD (RNN_ENABLE_X86_RTCD)
+  arm64: NEON through upstream's vec_neon.h, compiled with clang-cl (Visual Studio's) and linked by MSVC, same
+         options and CRT: vec_neon.h casts between NEON vector types gcc-style, which MSVC rejects. The tarball lacks
+         Opus's os_support.h, which vec_neon.h includes; build-rnnoise.ps1 writes the one macro of it that is used
+         (OPUS_CLEAR, a memset, the same as RNNoise's own RNN_CLEAR). The source is unmodified.
 
 liblc3 1.1.3 (Apache-2.0, see THIRD-PARTY-NOTICES.txt)
   Source:  https://github.com/google/liblc3/archive/refs/tags/v1.1.3.tar.gz
@@ -42,6 +53,10 @@ liblc3 1.1.3 (Apache-2.0, see THIRD-PARTY-NOTICES.txt)
   Toolchain: MSVC 14.51 x64, /std:c11 /O2 /MT /guard:cf, upstream's MSVC options from meson.build (/fp:fast
              /wd4244 /wd4305); a force-included header drops liblc3's __declspec(dllexport), so the DLL exports
              only wpods_native.def
+  arm64: MSVC 14.51 ARM64. MSVC defines __ARM_ARCH but has no <arm_acle.h>, which liblc3 includes under it; an
+         <arm_acle.h> that includes <intrin.h> stands in. liblc3's NEON code needs __ARM_NEON, which MSVC does not
+         define, so liblc3 is portable C, as on x64. wpods_native.cpp sets FPCR.FZ (_controlfp_s _DN_FLUSH) where
+         x64 sets MXCSR FTZ + DAZ
 
 DeepFilterNet 3 C API, libDF v0.5.6 (MIT OR Apache-2.0, see THIRD-PARTY-NOTICES.txt)
   Source:  https://github.com/Rikorose/DeepFilterNet/archive/978576aa8400552a4ce9730838c635aa30db5e61.tar.gz
@@ -50,10 +65,17 @@ DeepFilterNet 3 C API, libDF v0.5.6 (MIT OR Apache-2.0, see THIRD-PARTY-NOTICES.
   Model:   models/DeepFilterNet3_onnx.tar.gz from the same tarball (pretrained weights, same license), shipped as a
            separate file next to the exe and loaded by df_create(path, atten_lim)
   Output:  deepfilter.dll (= crate deep_filter's df.dll, unmodified source) + DeepFilterNet3_onnx.tar.gz
-  Toolchain: Rust 1.79.0 x86_64-pc-windows-msvc (newer rustc rejects time 0.3.28 from the tag's Cargo.lock), MSVC linker
+  Toolchain: Rust 1.79.0 x86_64-pc-windows-msvc (on an x64 build machine; newer rustc rejects time 0.3.28 from the
+             tag's Cargo.lock), MSVC linker
   Command: cargo rustc --profile release-lto --locked -p deep_filter --lib --no-default-features --features capi
            --crate-type cdylib (upstream profile: fat LTO, strip, panic=abort)
   CRT: RUSTFLAGS -C target-feature=+crt-static + /NODEFAULTLIB:libucrt.lib ucrt.lib (static vcruntime + system UCRT)
+  arm64: target aarch64-pc-windows-msvc (the Rust toolchain is the build machine's own, 1.79.0-x86_64-pc-windows-msvc
+         or 1.79.0-aarch64-pc-windows-msvc; --target only when cross-compiling). tract-linalg 0.19.16 assembles its
+         NEON kernels (GNU-syntax .S) with the C compiler: clang-cl through native\deepfilter\tract-clang-cl.rs,
+         which turns the ';' comments tract-linalg writes for MSVC targets back into '//' (clang reads ';' as a
+         statement separator) and adds the -c that cc 1.0.83 leaves out for assembly. The kernels are otherwise
+         exactly upstream's
   Statically linked Rust crates and their licenses: see THIRD-PARTY-NOTICES.txt (all permissive: MIT / Apache-2.0 /
   BSD-0 / Zlib / Unlicense / CC0 / Unicode-DFS-2016; no copyleft)
 
@@ -72,6 +94,10 @@ with abseil-cpp 20240722.0 (Apache-2.0, see THIRD-PARTY-NOTICES.txt)
              MSVC 14.51 x64, buildtype release, static libraries, /MT /guard:cf (hybrid CRT:
              /NODEFAULTLIB:libucrt.lib ucrt.lib), main project /std:c++20 (MSVC rejects upstream's designated
              initializers under c++17), abseil c++17
+  arm64: clang-cl (Visual Studio's, MSVC-compatible: same CRT and ABI) through a meson machine file, for the
+         libraries and the wrapper: WebRTC's Arm code reads and writes FPCR with gcc-style inline assembly
+         (system_wrappers\source\denormal_disabler.cc), which MSVC cannot compile. NEON code paths (upstream
+         default for aarch64). requirements-webrtc-apm.txt also pins ninja's win_arm64 wheel, for an Arm64 Python
 
 ONNX Runtime 1.31.0, CPU execution provider, win-x64 release build (MIT, see THIRD-PARTY-NOTICES.txt)
   Source:  https://registry.npmmirror.com/-/binary/onnxruntime/v1.31.0/onnxruntime-win-x64-1.31.0.zip
@@ -81,6 +107,10 @@ ONNX Runtime 1.31.0, CPU execution provider, win-x64 release build (MIT, see THI
   Output:  onnxruntime.dll copied unmodified from lib\ of the archive by native\fetch-models.ps1 (no build);
            called through its C API (OrtGetApiBase), no managed package
   The LICENSE and ThirdPartyNotices.txt of the release archive are reproduced verbatim in THIRD-PARTY-NOTICES.txt.
+  arm64: win-arm64 release build of the same commit, onnxruntime-win-arm64-1.31.0.zip from the same mirror
+         SHA-256: EF6206FA8D6975878D93A97035D280240CE5764C126A7430E5427E18923316D5 (no GitHub digest to compare
+         with; lib\onnxruntime.dll carries a valid Microsoft Corporation Authenticode signature). Its LICENSE and
+         ThirdPartyNotices.txt are the ones reproduced in THIRD-PARTY-NOTICES.txt
 
 ONNX speech-enhancement models (pretrained weights, unmodified), fetched by native\fetch-models.ps1 into models\ with
 the SHA-256 hashes listed in that script:
@@ -96,7 +126,8 @@ the SHA-256 hashes listed in that script:
 
 Exported ONNX model (no ONNX download exists): built by native\export-models.ps1, which downloads the pinned sources
 and weights (SHA-256 in that script) and runs native\export\export_nsnet2.py in a pinned Python 3.11 venv under
-.build\native\ (the script's header documents the wrapper, the contract and its numerical check):
+.build\native\ (the script's header documents the wrapper, the contract and its numerical check). The model is the
+same for x64 and Arm64; the export runs on x64 Python 3.11 (under emulation on Arm64 Windows):
   NSNet2 (weights CC BY 4.0, code MIT, see THIRD-PARTY-NOTICES.txt): nsnet2_48k.onnx =
     NSNet2-baseline/nsnet2-20ms-48k-baseline.onnx of https://github.com/microsoft/DNS-Challenge
     (commit 5582dcf5ba43155621de72a035eb54a7d233af14) with the GRU states made graph inputs / outputs by

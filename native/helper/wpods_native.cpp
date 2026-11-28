@@ -15,7 +15,11 @@
 #include <initguid.h>
 #include <devpkey.h>
 #include <functiondiscoverykeys_devpkey.h>
+#if defined(_M_ARM64)
+#include <float.h>
+#else
 #include <xmmintrin.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -672,5 +676,11 @@ int32_t __stdcall wpn_bt_handsfree_mic_in_use(uint64_t btAddress)
 
 void __stdcall wpn_fp_set_ftz_daz(void)
 {
+#if defined(_M_ARM64)
+    // FPCR.FZ: Arm64 flushes denormal inputs and results with the one bit (no separate DAZ).
+    unsigned int control;
+    _controlfp_s(&control, _DN_FLUSH, _MCW_DN);
+#else
     _mm_setcsr(_mm_getcsr() | 0x8040);
+#endif
 }

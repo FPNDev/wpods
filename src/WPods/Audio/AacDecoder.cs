@@ -21,7 +21,8 @@ internal sealed unsafe partial class FfmpegDecoder : IDisposable
     internal const int SampleFormatFloat = 3; // AV_SAMPLE_FMT_FLT (packed; mono, so one plane)
     internal const int OutputRate = 48_000;
 
-    // FFmpeg 7.1 x64 field offsets (avcodec-61 / avutil-59 ABI, checked with offsetof against the build headers).
+    // FFmpeg 7.1 field offsets, the same on x64 and arm64 (avcodec-61 / avutil-59 ABI, checked with offsetof against
+    // the build headers for both).
     private const int ContextExtradata = 72;
     private const int ContextExtradataSize = 80;
     internal const int ContextTimeBase = 84;

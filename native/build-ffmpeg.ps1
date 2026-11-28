@@ -1,7 +1,13 @@
-# Builds minimal LGPL FFmpeg DLLs (avcodec with only the aac and sbc decoders and the sbc encoder, avutil, swresample), x64, MSVC.
+# Builds minimal LGPL FFmpeg DLLs (avcodec with only the aac and sbc decoders and the sbc encoder, avutil, swresample), x64
+# or arm64, MSVC.
 # Hybrid CRT (static vcruntime + system UCRT): DLLs import only Windows/UCRT DLLs and each other.
 # Needs MSYS2 at C:\msys64 (pinned make, diffutils, nasm packages are installed by this script).
-# Output: .build\native\bin\{avcodec,avutil,swresample}-*.dll (headers + import libs: .build\native\ffmpeg)
+# Output: .build\native\bin\{avcodec,avutil,swresample}-*.dll (headers + import libs: .build\native\ffmpeg);
+# arm64: .build\native-arm64\...
+param(
+    [ValidateSet('x64', 'arm64')]
+    [string]$Arch = 'x64' # target architecture (build.ps1 -Arch)
+)
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
 $ProgressPreference = 'SilentlyContinue'
@@ -20,7 +26,7 @@ $MsysPackages = [ordered]@{
     'nasm-3.02-1-x86_64.pkg.tar.zst'      = '1AB3D9D7F86F57A66CC506799648527B9215C3EB1B7BD404D886D59B503A05B7'
 }
 
-$root = [IO.Path]::GetFullPath("$PSScriptRoot\..\.build\native")
+$root = Get-NativeRoot $Arch
 $dl = "$root\src\dl"
 $src = "$root\src\ffmpeg"
 $obj = "$root\obj\ffmpeg"
@@ -51,12 +57,12 @@ if ($LASTEXITCODE) {
     throw 'pacman failed'
 }
 
-# MSVC x64 environment, inherited by the MSYS2 shell.
-Import-Msvc
+# MSVC environment for $Arch, inherited by the MSYS2 shell.
+Import-Msvc $Arch
 $env:MSYS2_PATH_TYPE = 'inherit'
 
 $u = @(foreach ($p in "$PSScriptRoot\build-ffmpeg.sh", "$src\ffmpeg-$Version", $obj, $prefix) { & 'C:\msys64\usr\bin\cygpath.exe' -u $p })
-& $bash -l @u
+& $bash -l @u $Arch
 if ($LASTEXITCODE) {
     throw 'FFmpeg build failed'
 }

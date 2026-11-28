@@ -1,6 +1,7 @@
 <Solution>
   <Configurations>
     <Platform Name="x64" />
+    <Platform Name="ARM64" />
   </Configurations>
   <Project Path="src/WPods/WPods.csproj" />
   <Project Path="src/WPods.Service/WPods.Service.csproj" />

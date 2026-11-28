@@ -2,12 +2,18 @@
 # export runs only when its output is missing. Downloads are pinned and SHA-256 checked into
 # .build\native\src\export\<name>\dl, and the script runs with Python 3.11 in a pinned venv under .build\native\:
 #   venv-export: onnx + onnxruntime set (NSNet2)
+# -Arch arm64 writes to .build\native-arm64 instead. The model is the same for both: the export runs on the build
+# machine with x64 Python 3.11 (the pinned wheels are win_amd64), on Arm64 Windows too, under its x64 emulation.
+param(
+    [ValidateSet('x64', 'arm64')]
+    [string]$Arch = 'x64' # target architecture (build.ps1 -Arch)
+)
 $ErrorActionPreference = 'Stop'
 # Windows PowerShell 5.1 downloads many times slower while drawing the progress bar.
 $ProgressPreference = 'SilentlyContinue'
 . "$PSScriptRoot\common.ps1"
 
-$native = [IO.Path]::GetFullPath("$PSScriptRoot\..\.build\native")
+$native = Get-NativeRoot $Arch
 $models = "$native\bin\models"
 $scripts = "$PSScriptRoot\export"
 New-Item -ItemType Directory -Force $models | Out-Null
@@ -31,7 +37,7 @@ if (-not (Test-Path "$models\nsnet2_48k.onnx")) {
         }
         & py -3.11 -m venv $venv
         if ($LASTEXITCODE) {
-            throw "py -3.11 -m venv failed (Python 3.11 is required)"
+            throw "py -3.11 -m venv failed (x64 Python 3.11 is required, also on Arm64 Windows)"
         }
         & $python -m pip install --no-input --disable-pip-version-check --require-hashes --no-deps -r $requirements
         if ($LASTEXITCODE) {

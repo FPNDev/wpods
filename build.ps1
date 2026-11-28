@@ -1,6 +1,9 @@
-# Builds the native DLLs, the web UI, the app and the service, and packs them into dist\WPods-Setup.exe.
+# Builds the native DLLs, the web UI, the app and the service, and packs them into dist\WPods-Setup.exe
+# (-Arch arm64: dist\WPods-Setup-arm64.exe, for Arm64 Windows; builds on x64 and Arm64 Windows alike).
 param(
-    [switch]$SkipNative # never build the native DLLs (use .build\native\bin as is)
+    [ValidateSet('x64', 'arm64')]
+    [string]$Arch = 'x64', # target architecture
+    [switch]$SkipNative # never build the native DLLs (use .build\native\bin, arm64: .build\native-arm64\bin, as is)
 )
 $ErrorActionPreference = 'Stop'
 
@@ -9,17 +12,19 @@ $Version = '0.4.4' # the only place the product version is defined (app and inst
 $root = $PSScriptRoot
 $build = Join-Path $root '.build'
 $shell = (Get-Process -Id $PID).Path
+# Per-architecture build output; x64 keeps the names it always had.
+$suffix = if ($Arch -eq 'x64') { '' } else { "-$Arch" }
 
 # Child process: the scripts change their environment (MSVC vars) and must not leak it into this session.
 function Invoke-Script([string]$Script) {
-    & $shell -NoProfile -File (Join-Path $root $Script)
+    & $shell -NoProfile -File (Join-Path $root $Script) -Arch $Arch
     if ($LASTEXITCODE -ne 0) {
         throw "$Script failed ($LASTEXITCODE)"
     }
 }
 
 if (-not $SkipNative) {
-    $nativeBin = Join-Path $build 'native\bin'
+    $nativeBin = Join-Path $build "native$suffix\bin"
     # Downloaded mic models that WPods.csproj ships from models\.
     $fetched = 'dpdfnet2_48khz_hr', 'dpdfnet8_48khz_hr', 'fastenhancer48k_t', 'fastenhancer48k_b', 'fastenhancer48k_s',
         'fastenhancer48k_m', 'fastenhancer48k_l', 'gtcrn_simple', 'fevd_gtcrn_spec'
@@ -66,15 +71,15 @@ try {
     Pop-Location
 }
 
-$publish = Join-Path $build 'publish'
+$publish = Join-Path $build "publish$suffix"
 if (Test-Path $publish) {
     Remove-Item $publish -Recurse -Force
 }
-dotnet publish (Join-Path $root 'src\WPods\WPods.csproj') -c Release -o $publish -p:Version=$Version
+dotnet publish (Join-Path $root 'src\WPods\WPods.csproj') -c Release -o $publish -p:Version=$Version -p:WPodsArch=$Arch
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed ($LASTEXITCODE)"
 }
-dotnet publish (Join-Path $root 'src\WPods.Service\WPods.Service.csproj') -c Release -o $publish -p:Version=$Version
+dotnet publish (Join-Path $root 'src\WPods.Service\WPods.Service.csproj') -c Release -o $publish -p:Version=$Version -p:WPodsArch=$Arch
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish (service) failed ($LASTEXITCODE)"
 }
@@ -91,9 +96,9 @@ $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) {
     throw 'Inno Setup 6 not found (winget install JRSoftware.InnoSetup)'
 }
-& $iscc /Qp "/DAppVersion=$Version" (Join-Path $root 'installer\WPods.iss')
+& $iscc /Qp "/DAppVersion=$Version" "/DArch=$Arch" (Join-Path $root 'installer\WPods.iss')
 if ($LASTEXITCODE -ne 0) {
     throw "ISCC failed ($LASTEXITCODE)"
 }
-$setup = Get-Item (Join-Path $root 'dist\WPods-Setup.exe')
+$setup = Get-Item (Join-Path $root "dist\WPods-Setup$suffix.exe")
 Write-Host "Built $($setup.FullName) ($($setup.Length) bytes)"

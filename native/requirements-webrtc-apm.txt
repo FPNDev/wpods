@@ -1,3 +1,4 @@
-# meson + ninja for build-webrtc-apm.ps1 (pip --require-hashes --no-deps: every package listed, wheels for win_amd64).
+# meson + ninja for build-webrtc-apm.ps1 (pip --require-hashes --no-deps: every package listed, ninja wheels for
+# win_amd64 and win_arm64, whichever Python the build machine has).
 meson==1.6.1 --hash=sha256:3f41f6b03df56bb76836cc33c94e1a404c3584d48b3259540794a60a21fad1f9
-ninja==1.11.1.3 --hash=sha256:04d48d14ea7ba11951c156599ab526bdda575450797ff57c6fdf99b2554d09c7
+ninja==1.11.1.3 --hash=sha256:04d48d14ea7ba11951c156599ab526bdda575450797ff57c6fdf99b2554d09c7 --hash=sha256:17978ad611d8ead578d83637f5ae80c2261b033db0b493a7ce94f88623f29e1b
