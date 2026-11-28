@@ -9,7 +9,7 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/FPNDev/wpods)](https://github.com/FPNDev/wpods/releases/latest)
-![Windows 10/11 x64](https://img.shields.io/badge/Windows%2010%2F11-x64-0078D4)
+![Windows 10/11 x64 | Arm64](https://img.shields.io/badge/Windows%2010%2F11-x64%20%7C%20Arm64-0078D4)
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20WPods-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/fpndev)
 
 </div>
@@ -239,7 +239,8 @@ Based on each project's README, website and source code as of 2026-10-26. If som
 
 ### Requirements
 
-- Windows 10 (version 2004 or later) or Windows 11, x64.
+- Windows 10 (version 2004 or later) or Windows 11, x64. Or Windows 11 on Arm64 (Snapdragon and other Arm PCs) with `WPods-Setup-arm64.exe`.
+- A Bluetooth adapter connected over USB. Most Arm64 laptops connect their built-in Bluetooth over UART instead, which WPods can't take over: on those, plug in a USB Bluetooth adapter.
 - Administrator rights to install.
 - Internet during setup, if .NET 10 Desktop Runtime or Microsoft Edge WebView2 Runtime are missing. Setup downloads them and runs them only if they are signed by Microsoft.
 
@@ -268,7 +269,7 @@ Older versions of WPods needed Windows Test Mode and Secure Boot off. This versi
 
 ## Install
 
-1. **Download** `WPods-Setup.exe` from the [latest release](https://github.com/FPNDev/wpods/releases/latest).
+1. **Download** `WPods-Setup.exe` from the [latest release](https://github.com/FPNDev/wpods/releases/latest) (Arm64 PCs: `WPods-Setup-arm64.exe`).
 2. **Run it.** Read and accept the terms. They explain the Bluetooth adapter takeover.
 3. **Choose your options:**
    - Create a desktop shortcut (off by default).
