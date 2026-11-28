@@ -7,8 +7,18 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <PlatformTarget>x64</PlatformTarget>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Target architecture: x64 (default) or arm64. build.ps1 -Arch passes it; the ARM64 solution platform selects arm64. -->
+    <WPodsArch Condition="'$(WPodsArch)' == '' and '$(Platform)' == 'ARM64'">arm64</WPodsArch>
+    <WPodsArch Condition="'$(WPodsArch)' == ''">x64</WPodsArch>
+    <PlatformTarget>$(WPodsArch)</PlatformTarget>
+    <RuntimeIdentifier>win-$(WPodsArch)</RuntimeIdentifier>
+    <!-- Native DLLs and models of that architecture (native\*.ps1): .build\native\bin, arm64: .build\native-arm64\bin. -->
+    <WPodsNativeBin Condition="'$(WPodsArch)' == 'x64'">$(MSBuildThisFileDirectory).build\native\bin\</WPodsNativeBin>
+    <WPodsNativeBin Condition="'$(WPodsArch)' != 'x64'">$(MSBuildThisFileDirectory).build\native-$(WPodsArch)\bin\</WPodsNativeBin>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <Target Name="WPodsCheckArch" BeforeTargets="Restore;Build">
+    <Error Condition="'$(WPodsArch)' != 'x64' and '$(WPodsArch)' != 'arm64'" Text="WPodsArch must be x64 or arm64, not '$(WPodsArch)'." />
+  </Target>
 </Project>

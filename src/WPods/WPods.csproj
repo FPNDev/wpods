@@ -9,7 +9,7 @@
     <PublishReadyToRun>true</PublishReadyToRun>
     <!-- DPI awareness is declared in app.manifest (process-wide, before any code) and also set via SetHighDpiMode. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
-    <!-- Size: no package XML docs; WebView2Loader.dll only once (NuGet win-x64 asset in the app root). -->
+    <!-- Size: no package XML docs; WebView2Loader.dll only once (NuGet asset of the RuntimeIdentifier, in the app root). -->
     <PublishReferencesDocumentationFiles>false</PublishReferencesDocumentationFiles>
     <WebView2NeverCopyLoaderDllToOutputDirectory>true</WebView2NeverCopyLoaderDllToOutputDirectory>
   </PropertyGroup>
@@ -19,20 +19,20 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\..\.build\native\bin\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\DeepFilterNet3_onnx.tar.gz" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)DeepFilterNet3_onnx.tar.gz" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- Mic mode models, downloaded (native\fetch-models.ps1) -->
-    <Content Include="..\..\.build\native\bin\models\dpdfnet2_48khz_hr.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\models\dpdfnet8_48khz_hr.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\models\fastenhancer48k_t.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\models\fastenhancer48k_b.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\models\fastenhancer48k_s.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\models\fastenhancer48k_m.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\models\fastenhancer48k_l.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\models\fevd_gtcrn_spec.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\.build\native\bin\models\gtcrn_simple.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\dpdfnet2_48khz_hr.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\dpdfnet8_48khz_hr.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\fastenhancer48k_t.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\fastenhancer48k_b.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\fastenhancer48k_s.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\fastenhancer48k_m.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\fastenhancer48k_l.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\fevd_gtcrn_spec.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\gtcrn_simple.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- Exported (native\export-models.ps1, run by build.ps1 when missing) -->
-    <Content Include="..\..\.build\native\bin\models\nsnet2_48k.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(WPodsNativeBin)models\nsnet2_48k.onnx" Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\THIRD-PARTY-NOTICES.txt" Link="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="web\**" CopyToOutputDirectory="PreserveNewest" />

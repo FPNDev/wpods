@@ -57,8 +57,8 @@ int32_t __stdcall wpn_audio_is_default_output(uint64_t btAddress);
 // capture endpoint with its container ID: only Hands-Free has one), 0 if not or if there is no such
 // endpoint, negative HRESULT on error. Synchronous, call off the UI thread.
 int32_t __stdcall wpn_bt_handsfree_mic_in_use(uint64_t btAddress);
-// Sets flush-to-zero (0x8000) and denormals-are-zero (0x0040) in the calling thread's MXCSR, for good: only for a
-// thread of the caller's own (never a thread-pool thread).
+// Sets flush-to-zero (0x8000) and denormals-are-zero (0x0040) in the calling thread's MXCSR (Arm64: FPCR.FZ, both
+// in one bit), for good: only for a thread of the caller's own (never a thread-pool thread).
 void __stdcall wpn_fp_set_ftz_daz(void);
 
 // ---- Jitter buffer (jitter.cpp) ----

@@ -200,7 +200,7 @@ internal static unsafe partial class Native
     public const int CmNotifyActionDeviceInstanceStarted = 8;
     public const int CmNotifyActionDeviceInstanceRemoved = 9;
 
-    // CM_NOTIFY_FILTER (x64): cbSize @0, Flags @4, FilterType @8, Reserved @12, union @16 (ClassGuid, hTarget or
+    // CM_NOTIFY_FILTER (x64 and arm64): cbSize @0, Flags @4, FilterType @8, Reserved @12, union @16 (ClassGuid, hTarget or
     // InstanceId[MAX_DEVICE_ID_LEN = 200 WCHAR]), 416 bytes.
     [StructLayout(LayoutKind.Explicit, Size = 416)]
     public struct CmNotifyFilter
@@ -212,7 +212,7 @@ internal static unsafe partial class Native
         [FieldOffset(16)] public nint Handle;
     }
 
-    // CM_NOTIFY_EVENT_DATA (x64): FilterType @0, ClassGuid/EventGuid @8, SymbolicLink @24 (interface),
+    // CM_NOTIFY_EVENT_DATA (x64 and arm64): FilterType @0, ClassGuid/EventGuid @8, SymbolicLink @24 (interface),
     // NameOffset @24, DataSize @28, Data @32 (handle), InstanceId @8 (instance).
     public const int EventGuidOffset = 8;
     public const int SymbolicLinkOffset = 24;
